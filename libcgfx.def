@@ -1,0 +1,5 @@
+LIBRARY
+EXPORTS
+    cgEnumerateDevices      @1
+    cgResultString          @2
+    cgGetContextInfo        @3
