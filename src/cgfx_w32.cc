@@ -128,6 +128,9 @@ local_persist size_t const CG_DISPLAY_TABLE_ID   = 1;
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME      _T("CGFX_GL_Hidden_WndClass")
 
+/// @summary Define the maximum number of displays that can be driven by a single GPU.
+#define CG_OPENGL_MAX_ATTACHED_DISPLAYS     (16)
+
 /// @summary Defines the maximum number of shader stages. OpenGL 3.2+ has
 /// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER and GL_FRAGMENT_SHADER.
 #define CG_OPENGL_MAX_SHADER_STAGES_32      (3U)
@@ -268,6 +271,7 @@ struct CL_DEVICE_CAPS
 /// @summary Define the state associated with an OpenCL 1.2 compatible device.
 struct CG_DEVICE
 {
+    #define AD                   CG_OPENGL_MAX_ATTACHED_DISPLAYS
     cl_platform_id               PlatformId;           /// The OpenCL platform identifier. Same-platform devices can share resources.
     cl_device_id                 DeviceId;             /// The OpenCL device identifier, which may or may not be the same as the MasterDeviceId.
     cl_device_id                 MasterDeviceId;       /// The OpenCL device identifier of the parent device.
@@ -284,13 +288,14 @@ struct CG_DEVICE
     cl_command_queue             TransferQueue;        /// The OpenCL command queue for submitting data transfers to the device.
 
     size_t                       DisplayCount;         /// The number of attached displays.
-    CG_DISPLAY                 **AttachedDisplays;     /// The set of attached display objects.
-    HDC                         *DisplayDC;            /// The set of Windows GDI device context for the attached displays.
+    CG_DISPLAY                  *AttachedDisplays[AD]; /// The set of attached display objects.
+    HDC                          DisplayDC[AD];        /// The set of Windows GDI device context for the attached displays.
     HGLRC                        DisplayRC;            /// The Windows OpenGL rendering context for the attached displays, or NULL.
 
     CL_DEVICE_CAPS               Capabilities;         /// Cached device capabilities reported by OpenCL.
 
     uint32_t                     ObjectId;             /// The internal CGFX object identifier.
+    #undef  AD
 };
 
 /// @summary Define the state associated with an OpenGL 3.2 compatible display.
@@ -685,8 +690,6 @@ cgDeleteDevice
     {
         wglDeleteContext(device->DisplayRC);
     }
-    cgFreeHostMemory(&ctx->HostAllocator, device->DisplayDC       , device->DisplayCount * sizeof(HDC)        , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(&ctx->HostAllocator, device->AttachedDisplays, device->DisplayCount * sizeof(CG_DISPLAY*), 0, CG_ALLOCATION_TYPE_INTERNAL);
     cgClDeviceCapsFree(ctx, &device->Capabilities);
     cgClFreeString(ctx, device->Extensions, CG_ALLOCATION_TYPE_INTERNAL);
     cgClFreeString(ctx, device->Driver    , CG_ALLOCATION_TYPE_INTERNAL);
@@ -847,6 +850,7 @@ cgGetCpuCounts
     }
     // free the temporary buffer:
     cgFreeHostMemory(&ctx->HostAllocator, size_t(buffer_size), 0, CG_ALLOCATION_TYPE_TEMP);
+    return CG_SUCCESS;
 }
 
 /// @summary Check the device table for a context to determine if a given device is already known.
@@ -985,9 +989,9 @@ cgClEnumerateDevices
 
             // the following are setup during display enumeration.
             dev.DisplayCount     = 0;
-            dev.AttachedDisplays = NULL;
-            dev.DisplayDC        = NULL;
             dev.DisplayRC        = NULL;
+            memset(dev.AttachedDisplays, NULL, CG_OPENGL_MAX_ATTACHED_DISPLAYS * sizeof(CG_DISPLAY*));
+            memset(dev.DisplayDC       , NULL, CG_OPENGL_MAX_ATTACHED_DISPLAYS * sizeof(HDC));
 
             // query and cache all of the device capabilities.
             cgClDeviceCapsQuery(ctx, &dev.Capabilities, device);
@@ -1146,22 +1150,28 @@ cleanup:
     return res;
 }
 
+/// @summary Create an OpenGL rendering context for a given display, locate its associated OpenCL device, and setup sharing between OpenGL and OpenCL.
+/// @param ctx The CGFX context that owns the display.
+/// @param display The CGFX display object for which the rendering context is being created.
+/// @return CG_SUCCESS, CG_NO_GLSHARING, CG_NO_OPENGL, CG_NO_PIXELFORMAT, CG_BAD_PIXELFORMAT, CG_NO_GLCONTEXT or CG_BAD_GLCONTEXT.
 internal_function int
 cgGlCreateRenderingContext
 (
     CG_CONTEXT *ctx, 
     CG_DISPLAY *display
 )
-{   // the HWND and DC have already been created. 
-    // initialize WGL GLEW, set the pixel format, and create a rendering context.
-    // get the preferred CL device for the context.
-    // if the preferred device already has a context created, delete the new context.
-    // otherwise, set the new context on the device.
-    // set up the links between the display and device.
+{
     int x = (int) display->DisplayX;
     int y = (int) display->DisplayY;
     int w = (int) display->DisplayWidth;
     int h = (int) display->DisplayHeight;
+
+    // if the device already has a rendering context, there's nothing to do.
+    if (display->DisplayRC != NULL)
+        return CG_SUCCESS;
+
+    // initialize wgl GLEW function pointers to assist with pixel format 
+    // selection and  OpenGL rendering context creation.
     if (!cgGlInitializeWGLEW(ctx, display, x, y, w, h))
     {   // can't initialize GLEW, so only OpenGL 1.1 would be available.
         return CG_NO_OPENGL;
@@ -1293,36 +1303,7 @@ cgGlCreateRenderingContext
         return CG_BAD_GLCONTEXT;
     }
 
-    // find the OpenCL device that's driving this display.
-    // if it already has a rendering context, we can delete the one we just created.
-    clGetGLContextInfoKHR_fn clGetGLContextInfo = (clGetGLContextInfoKHR_fn) clGetExtensionFunctionAddress("clGetGLContextInfoKHR");
-    if (clGetGLContextInfo != NULL)
-    {
-        wglMakeCurrent(NULL, NULL);
-        wglDeleteContext(gl_rc);
-        return CG_NO_GLSHARING;
-    }
-
-    // we have to search for the platform - look at GPU devices only.
-    // do this in a loop
-    cl_context_properties props[]  = 
-    {
-        CL_CONTEXT_PLATFORM, (cl_context_properties) which_platform, 
-        CL_GL_CONTEXT_KHR  , (cl_context_properties) gl_rc, 
-        CL_WGL_HDC_KHR     , (cl_context_properties) win_dc,
-        0
-    };
-    cl_device_id interop_device_id = NULL;
-    size_t       device_size       = 0;
-    size_t       device_count      = 0;
-    clGetGLContextInfo(props, CL_CURRENT_DEVICE_FOR_GL_CONTEXT_KHR, sizeof(cl_device_id), &interop_device_id, &device_size);
-    device_count = device_size / sizeof(cl_device_id);
-    if (device_count == 0)
-    {   // no interoperability available with this RC on this platform.
-    }
-    // end loop
-
-    // optionally, enable synchronization with vertical retrace.
+    // enable synchronization with vertical retrace.
     if (WGLEW_EXT_swap_control)
     {
         if (WGLEW_EXT_swap_control_tear)
@@ -1336,6 +1317,70 @@ cgGlCreateRenderingContext
             wglSwapIntervalEXT(+1);
         }
     }
+
+    // find the OpenCL device that's driving this display.
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE            *device  = &ctx->DeviceTable.Objects[i];
+        cl_context_properties props[] = 
+        {
+            CL_CONTEXT_PLATFORM, (cl_context_properties) device->PlatformId, 
+            CL_GL_CONTEXT_KHR  , (cl_context_properties) gl_rc, 
+            CL_WGL_HDC_KHR     , (cl_context_properties) win_dc,
+            0
+        };
+
+        // skip CPU devices; they do not drive displays.
+        if (device->Type == CL_DEVICE_TYPE_CPU)
+            continue;
+
+        // skip devices that don't export cl_khr_gl_sharing.
+        if (!cgClIsExtensionSupported("cl_khr_gl_sharing", device->Extensions))
+            continue;
+
+        // get the address of the extension function to call:
+        clGetGLContextInfoKHR_fn clGetGLContextInfo = (clGetGLContextInfoKHR_fn)
+            clGetExtensionFunctionAddressForPlatform(device->PlatformId, "clGetGLContextInfoKHR");
+        if (clGetGLContextInfo == NULL)
+            continue;
+
+        // finally, get the device ID of the preferred interop device.
+        cl_device_id device_id    = NULL;
+        size_t       device_size  = 0;
+        size_t       device_count = 0;
+        clGetGLContextInfo(props, CL_CURRENT_DEVICE_FOR_GL_CONTEXT_KHR, sizeof(cl_device_id), &device_id, &device_size);
+        if ((device_count = device_size / sizeof(cl_device_id)) == 0)
+            continue; // no interop between this RC and CL device.
+
+        // does the returned value identify this device?
+        if (device_id != device->DeviceId)
+            continue; // no, so keep looking.
+
+        // we've found a match. 
+        if (device->DisplayRC != NULL)
+        {   // delete the RC we just created and use the active device RC.
+            wglMakeCurrent(NULL, NULL);
+            wglDeleteContext(gl_rc);
+            gl_rc = device->DisplayRC;
+        }
+        else
+        {   // save the rendering context for use with the device.
+            device->DisplayRC  = gl_rc;
+        }
+        // setup display references to the device:
+        display->DisplayDevice = device;
+        display->DisplayRC     = gl_rc;
+        // setup device references to the display:
+        device->AttachedDisplays[device->DisplayCount] = display;
+        device->DisplayDC[device->DisplayCount] = display->DisplayDC;
+        device->DisplayCount++;
+        break;
+    }
+    // if there's no OpenCL device driving the display, that's fine.
+    if (display->DisplayDevice == NULL)
+        return CG_NO_GLSHARING;
+    else
+        return CG_SUCCESS;
 }
 
 /// @summary Enumerate all enabled display devices on the system. OpenGL contexts are not created.
@@ -1447,6 +1492,7 @@ cgGlEnumerateDisplays
             continue;
         }
     }
+    return CG_SUCCESS;
 }
 
 /*////////////////////////
@@ -1463,16 +1509,22 @@ cgResultString
 {
     switch (result)
     {
-    case CG_ERROR:            return "Generic Error";
-    case CG_INVALID_VALUE:    return "One or More Arguments Are Invalid";
-    case CG_OUT_OF_MEMORY:    return "Unable to Allocate Required Memory";
-    case CG_SUCCESS:          return "Success";
-    case CG_UNSUPPORTED:      return "Unsupported Operation";
-    case CG_NOT_READY:        return "Result Not Ready";
-    case CG_TIMEOUT:          return "Wait Completed Due to Timeout";
-    case CG_SIGNALED:         return "Wait Completed Due to Event Signal";
-    case CG_BUFFER_TOO_SMALL: return "Buffer Too Small";
-    case CG_NO_OPENCL:        return "No Compatible OpenCL Platforms or Devices Available";
+    case CG_ERROR:            return "Generic error (CG_ERROR)";
+    case CG_INVALID_VALUE:    return "One or more arguments are invalid (CG_INVALID_VALUE)";
+    case CG_OUT_OF_MEMORY:    return "Unable to allocate required memory (CG_OUT_OF_MEMORY)";
+    case CG_NO_PIXELFORMAT:   return "No accelerated pixel format could be found (CG_NO_PIXELFORMAT)";
+    case CG_BAD_PIXELFORMAT:  return "Unable to set the display pixel format (CG_BAD_PIXELFORMAT)";
+    case CG_NO_GLCONTEXT:     return "Unable to create an OpenGL rendering context (CG_NO_GLCONTEXT)";
+    case CG_BAD_GLCONTEXT:    return "The OpenGL rendering context is invalid (CG_BAD_GLCONTEXT)";
+    case CG_SUCCESS:          return "Success (CG_SUCCESS)";
+    case CG_UNSUPPORTED:      return "Unsupported operation (CG_UNSUPPORTED)";
+    case CG_NOT_READY:        return "Result not ready (CG_NOT_READY)";
+    case CG_TIMEOUT:          return "Wait completed due to timeout (CG_TIMEOUT)";
+    case CG_SIGNALED:         return "Wait completed due to event signal (CG_SIGNALED)";
+    case CG_BUFFER_TOO_SMALL: return "Buffer too small (CG_BUFFER_TOO_SMALL)";
+    case CG_NO_OPENCL:        return "No compatible OpenCL platforms or devices available (CG_NO_OPENCL)";
+    case CG_NO_OPENGL:        return "No compatible OpenGL devices are available (CG_NO_OPENGL)";
+    case CG_NO_GLSHARING:     return "OpenGL rendering context created but OpenCL interop unavailable (CG_NO_GLSHARING)";
     default:                   break;
     }
     return "Unknown Result";
@@ -1523,16 +1575,25 @@ cgEnumerateDevices
         goto error_cleanup;
     }
 
+    // enumerate all displays attached to the system.
+    if ((res = cgGlEnumerateDisplays(ctx)) != CG_SUCCESS)
+    {   // several things could have gone wrong.
+        goto error_cleanup;
+    }
+
     // enumerate all OpenCL platforms and devices in the system.
     if ((res = cgClEnumerateDevices(ctx)) != CG_SUCCESS)
     {   // several things could have gone wrong.
         goto error_cleanup;
     }
 
-    // enumerate all OpenGL displays in the system.
-    if ((res = cgGlEnumerateDisplays(ctx)) != CG_SUCCESS)
-    {   // several things could have gone wrong.
-        goto error_cleanup;
+    // create rendering contexts for each attached display.
+    // this sets up sharing between OpenGL and OpenCL and 
+    // establishes device<->display associations.
+    for (size_t i = 0, n = ctx->DisplayTable.ObjectCount; i < n; ++i)
+    {   // creating rendering contexts could fail for several reasons.
+        // we only care about whether the RC is interoperable with CL.
+        cgGlCreateRenderingContext(ctx, &ctx->DisplayTable.Objects[i]);
     }
 
     // update device count and handle tables:
@@ -1623,6 +1684,215 @@ cgGetContextInfo
         }
         return CG_SUCCESS;
 
+    default:
+        {
+            if (bytes_needed != NULL) *bytes_needed = 0;
+            return CG_INVALID_VALUE;
+        }
+    }
+
+#undef  BUFFER_CHECK_SIZE
+#undef  BUFFER_CHECK_TYPE
+}
+
+/// @summary Retrieve the number of compute devices found by cgEnumerateDevices.
+/// @param context The CGFX context returned by a prior call to cgEnumerateDevices().
+/// @return The number of OpenCL 1.2-capable compute devices.
+library_function size_t
+cgGetDeviceCount
+(
+    uintptr_t context
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    return ctx->DeviceTable.ObjectCount;
+}
+
+/// @summary Query device-level information.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param device_handle The handle of the device to query.
+/// @param param One of cg_context_param_e specifying the data to return.
+/// @param buffer A caller-managed buffer to receive the data.
+/// @param buffer_size The maximum number of bytes that can be written to @a buffer.
+/// @param bytes_needed On return, stores the number of bytes copied to the buffer, or the number of bytes required to store the data.
+/// @return CG_SUCCESS, CG_BUFFER_TOO_SMALL, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+library_function int
+cgGetDeviceInfo
+(
+    uintptr_t   context, 
+    cg_handle_t device_handle, 
+    int         param,
+    void       *data, 
+    size_t      buffer_size, 
+    size_t     *bytes_needed
+)
+{
+    CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
+    CG_DEVICE  *device =  NULL;
+
+    if ((device = cgObjectTableGet(&ctx->DeviceTable, device_handle)) == NULL)
+    {
+        if (bytes_needed != NULL) *bytes_needed = 0;
+        return CG_INVALID_HANDLE;
+    }
+
+    // reduce the amount of boilerplate code using these macros.
+#define BUFFER_CHECK_TYPE(type) \
+    if (buffer == NULL || buffer_size < sizeof(type)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = sizeof(type); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = sizeof(type); \
+    }
+#define BUFFER_CHECK_SIZE(size) \
+    if (buffer == NULL || buffer_size < (size)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = (size); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = (size); \
+    }
+    // ==========================================================
+    // ==========================================================
+
+    // retrieve parameter data:
+    switch (param)
+    {
+    // get cl_platform_id
+    // get cl_device_id
+    // get cl_context
+    // get cl_command_queue
+    // get HGLRC
+    // get attached display count
+    // get attached display IDs
+    default:
+        {
+            if (bytes_needed != NULL) *bytes_needed = 0;
+            return CG_INVALID_VALUE;
+        }
+    }
+
+#undef  BUFFER_CHECK_SIZE
+#undef  BUFFER_CHECK_TYPE
+}
+
+/// @summary Retrieve the number of displays found by cgEnumerateDevices.
+/// @param context The CGFX context returned by a prior call to cgEnumerateDevices().
+/// @return The number of attached displays.
+library_function size_t
+cgGetDisplayCount
+(
+    uintptr_t context
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*)context;
+    return ctx->DisplayTable.ObjectCount;
+}
+
+/// @summary Retrieve the handle of the primary display.
+/// @param context The CGFX context returned by a prior call to cgEnumerateDevices().
+/// @return The display handle, or CG_INVALID_HANDLE if no displays are attached.
+library_function cg_handle_t
+cgGetPrimaryDisplay
+(
+    uintptr_t context
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*)context;
+    for (size_t i = 0, n = ctx->DisplayTable.ObjectCount; i < n; ++i)
+    {
+        CG_DISPLAY *display = &ctx->DisplayTable.Objects[i];
+        if (display->DisplayInfo.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+            return cgMakeHandle(&ctx->DisplayTable, i);
+    }
+    return CG_INVALID_HANDLE;
+}
+
+/// @summary Retrieves the handle of a display identified by ordinal value.
+/// @param context The CGFX context returned by a prior call to cgEnumerateDevices().
+/// @param ordinal The zero-based index of the display to retrieve.
+/// @return The display handle, or CG_INVALID_HANDLE if the supplied ordinal is invalid.
+library_function cg_handle_t
+cgGetDisplayByOrdinal
+(
+    uintptr_t context, 
+    size_t    ordinal
+)
+{
+    CG_CONTEXT   *ctx = (CG_CONTEXT*)context;
+    if (ordinal < ctx->DisplayTable.ObjectCount)
+        return cgMakeHandle(&ctx->DisplayTable, ordinal);
+    else
+        return CG_INVALID_HANDLE;
+}
+
+/// @summary Query display information.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param display_handle The handle of the display to query.
+/// @param param One of cg_context_param_e specifying the data to return.
+/// @param buffer A caller-managed buffer to receive the data.
+/// @param buffer_size The maximum number of bytes that can be written to @a buffer.
+/// @param bytes_needed On return, stores the number of bytes copied to the buffer, or the number of bytes required to store the data.
+/// @return CG_SUCCESS, CG_BUFFER_TOO_SMALL, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+library_function int
+cgGetDisplayInfo
+(
+    uintptr_t   context, 
+    cg_handle_t display_handle, 
+    int         param,
+    void       *data, 
+    size_t      buffer_size, 
+    size_t     *bytes_needed
+)
+{
+    CG_CONTEXT *ctx     = (CG_CONTEXT*) context;
+    CG_DISPLAY *display =  NULL;
+
+    if ((display = cgObjectTableGet(&ctx->DisplayTable, display_handle)) == NULL)
+    {
+        if (bytes_needed != NULL) *bytes_needed = 0;
+        return CG_INVALID_HANDLE;
+    }
+
+    // reduce the amount of boilerplate code using these macros.
+#define BUFFER_CHECK_TYPE(type) \
+    if (buffer == NULL || buffer_size < sizeof(type)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = sizeof(type); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = sizeof(type); \
+    }
+#define BUFFER_CHECK_SIZE(size) \
+    if (buffer == NULL || buffer_size < (size)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = (size); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = (size); \
+    }
+    // ==========================================================
+    // ==========================================================
+
+    // retrieve parameter data:
+    switch (param)
+    {
+    // get cg_handle_t of shared OpenCL device
+    // get cl_platform_id of shared OpenCL device
+    // get cl_device_id of shared OpenCL device
+    // get HDC
+    // get HGLRC
+    // get bounding rectangle
+    // get orientation
     default:
         {
             if (bytes_needed != NULL) *bytes_needed = 0;

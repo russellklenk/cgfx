@@ -3,3 +3,9 @@ EXPORTS
     cgEnumerateDevices      @1
     cgResultString          @2
     cgGetContextInfo        @3
+    cgGetDeviceCount        @4
+    cgGetDeviceInfo         @5
+    cgGetDisplayCount       @6
+    cgGetPrimaryDisplay     @7
+    cgGetDisplayByOrdinal   @8
+    cgGetDisplayInfo        @9
