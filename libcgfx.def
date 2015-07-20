@@ -15,3 +15,6 @@ EXPORTS
     cgGetAcceleratorDevices        @13
     cgGetCPUDevicesInShareGroup    @14
     cgGetGPUDevicesInShareGroup    @15
+    cgConfigureCPUTaskParallel     @16
+    cgConfigureCPUHighThroughput   @17
+    cgConfigureCPUPartitionCount   @18

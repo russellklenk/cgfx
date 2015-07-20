@@ -73,23 +73,26 @@ struct cg_cpu_counts_t;
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
-typedef void*       (CG_API *cgMemoryAlloc_fn              )(size_t, size_t, int, uintptr_t);
-typedef void        (CG_API *cgMemoryFree_fn               )(void *, size_t, size_t, int, uintptr_t);
-typedef char const* (CG_API *cgResultString_fn             )(int);
-typedef int         (CG_API *cgEnumerateDevices_fn         )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
-typedef int         (CG_API *cgGetContextInfo_fn           )(uintptr_t, int, void *, size_t, size_t *);
-typedef size_t      (CG_API *cgGetDeviceCount_fn           )(uintptr_t);
-typedef int         (CG_API *cgGetDeviceInfo_fn            )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef size_t      (CG_API *cgGetDisplayCount_fn          )(uintptr_t);
-typedef cg_handle_t (CG_API *cgGetPrimaryDisplay_fn        )(uintptr_t);
-typedef cg_handle_t (CG_API *cgGetDisplayByOrdinal_fn      )(uintptr_t);
-typedef int         (CG_API *cgGetDisplayInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef cg_handle_t (CG_API *cgGetDisplayDevice_fn         )(uintptr_t, cg_handle_t);
-typedef int         (CG_API *cgGetCPUDevices_fn            )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetGPUDevices_fn            )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetAcceleratorDevices_fn    )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetCPUDevicesInShareGroup_fn)(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetGPUDevicesInShareGroup_fn)(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef void*       (CG_API *cgMemoryAlloc_fn               )(size_t, size_t, int, uintptr_t);
+typedef void        (CG_API *cgMemoryFree_fn                )(void *, size_t, size_t, int, uintptr_t);
+typedef char const* (CG_API *cgResultString_fn              )(int);
+typedef int         (CG_API *cgEnumerateDevices_fn          )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
+typedef int         (CG_API *cgGetContextInfo_fn            )(uintptr_t, int, void *, size_t, size_t *);
+typedef size_t      (CG_API *cgGetDeviceCount_fn            )(uintptr_t);
+typedef int         (CG_API *cgGetDeviceInfo_fn             )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef size_t      (CG_API *cgGetDisplayCount_fn           )(uintptr_t);
+typedef cg_handle_t (CG_API *cgGetPrimaryDisplay_fn         )(uintptr_t);
+typedef cg_handle_t (CG_API *cgGetDisplayByOrdinal_fn       )(uintptr_t);
+typedef int         (CG_API *cgGetDisplayInfo_fn            )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef cg_handle_t (CG_API *cgGetDisplayDevice_fn          )(uintptr_t, cg_handle_t);
+typedef int         (CG_API *cgGetCPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetGPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetAcceleratorDevices_fn     )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetCPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetGPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgConfigureCPUTaskParallel_fn  )(uintptr_t, cg_handle_t, size_t &, cg_handle_t *);
+typedef int         (CG_API *cgConfigureCPUHighThroughput_fn)(uintptr_t, cg_handle_t, size_t &, cg_handle_t *);
+typedef int         (CG_API *cgConfigureCPUPartitionCount_fn)(uintptr_t, cg_handle_t, int *, size_t, cg_handle_t *);
 
 /*//////////////////
 //   Data Types   //
@@ -358,6 +361,34 @@ cgGetGPUDevicesInShareGroup                     /// Retrieve the count of and ha
     size_t                       &gpu_count,    /// On return, stores the number of GPU devices in the sharegroup.
     size_t const                  max_devices,  /// The maximum number of device handles to write to gpu_devices.
     cg_handle_t                  *gpu_devices   /// On return, if non-NULL, stores min(max_devices, gpu_count) handles of devices in the share group.
+);
+
+int
+cgConfigureCPUTaskParallel                      /// Configure a CPU device for task-parallel operation.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cpu_device,   /// The handle of the CPU device to configure.
+    size_t                       &num_devices,  /// On return stores the number of logical devices.
+    cg_handle_t                  *sub_devices   /// On return, stores the logical device handles[cg_cpu_counts::PhysicalCores].
+);
+
+int
+cgConfigureCPUHighThroughput                    /// Configure a CPU device for maximum throughput with limited or no data sharing.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cpu_device,   /// The handle of the CPU device to configure.
+    size_t                       &num_devices,  /// On return, stores the number of logical devices.
+    cg_handle_t                  *sub_devices   /// On return, stores the logical device handles[cg_cpu_counts_t::NUMANodes].
+);
+
+int
+cgConfigureCPUPartitionCount                    /// Configure a CPU device with a custom partition scheme.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cpu_device,   /// The handle of the CPU device to configure.
+    int                          *thread_counts,/// An array of device_count, values specifying the number of hardware threads per-device.
+    size_t                        device_count, /// The number of logical sub-devices to create.
+    cg_handle_t                  *sub_devices   /// On return, stores the logical device handles[device_count].
 );
 
 #ifdef __cplusplus

@@ -2251,3 +2251,59 @@ cgGetGPUDevicesInShareGroup
     }
     return CG_SUCCESS;
 }
+
+/// @summary Configure a CPU device for task-parallel operation. One logical sub-device is created for each physical CPU core.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cpu_device The handle of the CPU compute device to configure.
+/// @param num_devices On return, stores the number of logical devices created.
+/// @param sub_devices An array of cg_cpu_counts_t::PhysicalCores handles to store the logical CPU device handles.
+/// @return CG_SUCCESS or CG_UNSUPPORTED.
+library_function int
+cgConfigureCPUTaskParallel
+(
+    uintptr_t    context, 
+    cg_handle_t  cpu_device, 
+    size_t      &num_devices, 
+    cg_handle_t *sub_devices
+)
+{
+    return CG_UNSUPPORTED;
+}
+
+/// @summary Configure a CPU device for maximum throughput operation using all available resources on each NUMA node.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cpu_device The handle of the CPU compute device to configure.
+/// @param num_devices On return, stores the number of logical devices created.
+/// @param sub_devices An array of cg_cpu_counts_t::NUMANodes handles to store the logical CPU device handles.
+/// @return CG_SUCCESS or CG_UNSUPPORTED.
+library_function int
+cgConfigureCPUHighThroughput
+(
+    uintptr_t    context, 
+    cg_handle_t  cpu_device, 
+    size_t      &num_devices,
+    cg_handle_t *sub_devices
+)
+{
+    return CG_UNSUPPORTED;
+}
+
+/// @summary Configure a CPU device with a custom partition scheme, which can be used to distribute or disable hardware threads.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cpu_device The handle of the CPU compute device to configure.
+/// @param thread_counts An array of device_count items specifying the number of hardware threads to use for each logical device.
+/// @param device_count The number of logical CPU devices to create.
+/// @param sub_devices An array of device_count items to store the logical CPU device handles.
+/// @return CG_SUCCESS or CG_UNSUPPORTED.
+library_function int
+cgConfigureCPUPartitionCount
+(
+    uintptr_t    context, 
+    cg_handle_t  cpu_device, 
+    int         *thread_counts,
+    size_t       device_count, 
+    cg_handle_t *sub_devices
+)
+{
+    return CG_UNSUPPORTED;
+}
