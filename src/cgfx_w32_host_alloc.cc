@@ -33,6 +33,7 @@ struct CG_HOST_ALLOCATOR
     uintptr_t           UserData;    /// Opaque user data to pass through to Allocate and Release.
     bool                Initialized; /// true if the allocator has been initialized.
 };
+#define CG_HOST_ALLOCATOR_STATIC_INIT    {NULL, NULL, 0, false}
 
 /*///////////////
 //   Globals   //
@@ -185,6 +186,13 @@ cgSetupUserHostAllocator
         cgHostAllocator.Release     = cgHostMemFreeStdC;
         cgHostAllocator.UserData    =(uintptr_t) 0;
         cgHostAllocator.Initialized = true;
+        if (alloc_fn != NULL)
+        {
+            alloc_fn->Allocate      = cgHostMemAllocStdC;
+            alloc_fn->Release       = cgHostMemFreeStdC;
+            alloc_fn->UserData      =(uintptr_t) 0;
+            alloc_fn->Initialized   = true;
+        }
         return CG_SUCCESS;
     }
     else
@@ -235,7 +243,7 @@ cgDeleteUserHostAllocator
 /// @param type One of uiss_allocation_type_e.
 /// @return A pointer to the host memory block, or NULL.
 public_function inline void*
-cgAllocateHostMemory
+cgAllocateHostMemoryGlobal
 (
     size_t     size, 
     size_t     alignment, 
@@ -269,7 +277,7 @@ cgAllocateHostMemory
 /// @param alignment The required alignment of the allocated block, in bytes.
 /// @param type One of uiss_allocation_type_e.
 public_function inline void
-cgFreeHostMemory
+cgFreeHostMemoryGlobal
 (
     void  *address,
     size_t size, 

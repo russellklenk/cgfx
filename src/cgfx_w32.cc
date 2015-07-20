@@ -514,10 +514,9 @@ cgClDeviceVersion
     bool  res      = true;
     char *version  = cgClDeviceString(ctx, device, CL_DEVICE_VERSION, CG_ALLOCATION_TYPE_TEMP);
     if   (version != NULL)
-    {   // the OpenCL version has to be parse out of the string.
-        int mj = 0;
-        int mi = 0;
-        if (sscanf(version, "OpenCL %d.%d", &major, &minor) == 2)
+    {   // the OpenCL version has to be parsed out of the string.
+        int mj = 0, mi = 0;
+        if (sscanf(version, "OpenCL %d.%d", &mj, &mi) == 2)
         {   // the device version was successfully parsed.
             major = mj;
             minor = mi;
@@ -599,6 +598,12 @@ cgClDeviceCapsQuery
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(mid), &mid, NULL);
     caps->MaxWorkItemDimension = mid;
     caps->MaxWorkItemSizes = (size_t*) cgAllocateHostMemory(&ctx->HostAllocator, mid * sizeof(size_t), 0, CG_ALLOCATION_TYPE_INTERNAL);
+    
+    // some OpenCL drivers don't properly zero-terminate lists, so ensure the memory is initialized:
+    memset(caps->PartitionTypes  , 0, 4 * sizeof(cl_device_partition_property));
+    memset(caps->AffinityDomains , 0, 7 * sizeof(cl_device_affinity_domain));
+    memset(caps->MaxWorkItemSizes, 0, mid * sizeof(size_t));
+
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES,     mid * sizeof(size_t),                      caps->MaxWorkItemSizes,     NULL);
     clGetDeviceInfo(device, CL_DEVICE_ENDIAN_LITTLE,                 sizeof(caps->LittleEndian),         &caps->LittleEndian,         NULL);
     clGetDeviceInfo(device, CL_DEVICE_ERROR_CORRECTION_SUPPORT,      sizeof(caps->SupportECC),           &caps->SupportECC,           NULL);
@@ -738,7 +743,7 @@ cgCreateContext
 )
 {
     CG_CONTEXT       *ctx = NULL;
-    CG_HOST_ALLOCATOR host_alloc;
+    CG_HOST_ALLOCATOR host_alloc = CG_HOST_ALLOCATOR_STATIC_INIT;
     if ((result = cgSetupUserHostAllocator(alloc_cb, &host_alloc)) != CG_SUCCESS)
     {   // cannot set up user allocator - can't allocate any memory.
         return NULL;
@@ -849,7 +854,7 @@ cgGetCpuCounts
         bufferp += size_t(info->Size);
     }
     // free the temporary buffer:
-    cgFreeHostMemory(&ctx->HostAllocator, size_t(buffer_size), 0, CG_ALLOCATION_TYPE_TEMP);
+    cgFreeHostMemory(&ctx->HostAllocator, lpibuf, size_t(buffer_size), 0, CG_ALLOCATION_TYPE_TEMP);
     return CG_SUCCESS;
 }
 
