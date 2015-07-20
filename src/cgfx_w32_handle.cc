@@ -26,10 +26,6 @@
 // 
 // CG_HANDLE_MASK_x_P => Mask in a packed value
 // CG_HANDLE_MASK_x_U => Mask in an unpacked value
-#define CG_MAX_OBJECTS_PER_TABLE    (64 * 1024)
-#define CG_OBJECT_INDEX_INVALID      0xFFFF
-#define CG_OBJECT_INDEX_MASK         0xFFFF
-#define CG_NEW_OBJECT_ID_ADD         0x10000
 #define CG_HANDLE_MASK_I_P           0x00000000FFFFFFFFULL
 #define CG_HANDLE_MASK_I_U           0x00000000FFFFFFFFULL
 #define CG_HANDLE_MASK_Y_P           0x00FFFFFF00000000ULL
@@ -46,25 +42,30 @@
 /// @summary Describes the location of an object within an object table.
 struct CG_OBJECT_INDEX
 {
-    uint32_t          Id;           /// The ID is the index-in-table + generation.
-    uint16_t          Index;        /// The zero-based index into the tightly-packed array.
-    uint16_t          Next;         /// The zero-based index of the next free slot.
+    uint32_t              Id;           /// The ID is the index-in-table + generation.
+    uint16_t              Index;        /// The zero-based index into the tightly-packed array.
+    uint16_t              Next;         /// The zero-based index of the next free slot.
 };
 
 /// @summary Defines a table mapping handles to internal data. Each table may be several MB. Do not allocate on the stack.
 /// The type T must have a field uint32_t ObjectId.
-template <typename T>
+/// The size N must be a power of two greater than zero. The maximum table capacity is 65536. 
+/// The table can hold one item less than the value of N.
+template <typename T, size_t N>
 struct CG_OBJECT_TABLE
 {
-    #define N         CG_MAX_OBJECTS_PER_TABLE
-    size_t            ObjectCount;  /// The number of live objects in the table.
-    uint16_t          FreeListTail; /// The index of the most recently freed item.
-    uint16_t          FreeListHead; /// The index of the next available item.
-    uint32_t          ObjectType;   /// One of cg_object_e specifying the type of object in this table.
-    size_t            TableIndex;   /// The zero-based index of this table, if there are multiple tables of this type.
-    CG_OBJECT_INDEX   Indices[N];   /// The sparse array used to look up the data in the packed array. 512KB.
-    T                 Objects[N];   /// The tightly packed array of object data.
-    #undef  N
+    static size_t   const MAX_OBJECTS_PER_TABLE = N;
+    static uint32_t const OBJECT_INDEX_INVALID  = N;
+    static uint32_t const OBJECT_INDEX_MASK     = N;
+    static uint32_t const NEW_OBJECT_ID_ADD     =(N + 1);
+
+    size_t                ObjectCount;  /// The number of live objects in the table.
+    uint16_t              FreeListTail; /// The index of the most recently freed item.
+    uint16_t              FreeListHead; /// The index of the next available item.
+    uint32_t              ObjectType;   /// One of cg_object_e specifying the type of object in this table.
+    size_t                TableIndex;   /// The zero-based index of this table, if there are multiple tables of this type.
+    CG_OBJECT_INDEX       Indices[N];   /// The sparse array used to look up the data in the packed array.
+    T                     Objects[N];   /// The tightly packed array of object data.
 };
 
 /*///////////////
@@ -200,21 +201,21 @@ cgGetTableIndex
 /// @param table The object table to initialize or clear.
 /// @param object_type The object type identifier for all objects in the table, one of cg_object_e.
 /// @param table_index The zero-based index of the object table. Max value 255.
-template <typename T>
+template <typename T, size_t N>
 public_function inline void
 cgObjectTableInit
 (
-    CG_OBJECT_TABLE<T> *table, 
-    uint32_t            object_type, 
-    size_t              table_index=0
+    CG_OBJECT_TABLE<T, N> *table, 
+    uint32_t               object_type, 
+    size_t                 table_index=0
 )
 {
     table->ObjectCount   = 0;
-    table->FreeListTail  = CG_MAX_OBJECTS_PER_TABLE - 1;
+    table->FreeListTail  = CG_OBJECT_TABLE<T,N>::MAX_OBJECTS_PER_TABLE - 1;
     table->FreeListHead  = 0;
     table->ObjectType    = object_type;
     table->TableIndex    = table_index;
-    for (size_t i = 0; i < CG_MAX_OBJECTS_PER_TABLE; ++i)
+    for (size_t i = 0; i < CG_OBJECT_TABLE<T,N>::MAX_OBJECTS_PER_TABLE; ++i)
     {
         table->Indices[i].Id   = uint32_t(i);
         table->Indices[i].Next = uint16_t(i-1);
@@ -225,34 +226,34 @@ cgObjectTableInit
 /// @param table The object table to query.
 /// @param handle The handle of the object to query.
 /// @return true if the handle references an object within the table.
-template <typename T>
+template <typename T, size_t N>
 public_function inline bool
 cgObjectTableHas
 (
-    CG_OBJECT_TABLE<T> *table, 
-    cg_handle_t         handle
+    CG_OBJECT_TABLE<T, N> *table, 
+    cg_handle_t            handle
 )
 {
     uint32_t        const  objid = cgGetObjectId(handle);
-    CG_OBJECT_INDEX const &index = table->Indices[objid & CG_OBJECT_INDEX_MASK];
-    return (index.Id == objid && index.Index != CG_OBJECT_INDEX_INVALID);
+    CG_OBJECT_INDEX const &index = table->Indices[objid & CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_MASK];
+    return (index.Id == objid && index.Index != CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_INVALID);
 }
 
 /// @summary Retrieve an item from an object table.
 /// @param table The object table to query.
 /// @param handle The handle of the object to query.
 /// @return A pointer to the object within the table, or NULL.
-template <typename T>
+template <typename T, size_t N>
 public_function inline T* 
 cgObjectTableGet
 (
-    CG_OBJECT_TABLE<T> *table,
-    cg_handle_t         handle
+    CG_OBJECT_TABLE<T, N> *table,
+    cg_handle_t            handle
 )
 {
     uint32_t        const  objid = cgGetObjectId(handle);
-    CG_OBJECT_INDEX const &index = table->Indices[objid & CG_OBJECT_INDEX_MASK];
-    if (index.Id == objid && index.Index != CG_OBJECT_INDEX_INVALID)
+    CG_OBJECT_INDEX const &index = table->Indices[objid & CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_MASK];
+    if (index.Id == objid && index.Index != CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_INVALID)
     {
         return &table->Objects[index.Index];
     }
@@ -263,26 +264,26 @@ cgObjectTableGet
 /// @param table The object table to update.
 /// @param data The object to insert into the table.
 /// @return The handle of the object within the table, or CG_INVALID_HANDLE.
-template <typename T>
+template <typename T, size_t N>
 public_function inline cg_handle_t
 cgObjectTableAdd
 (
-    CG_OBJECT_TABLE<T> *table, 
-    T const            &data
+    CG_OBJECT_TABLE<T, N> *table, 
+    T const               &data
 )
 {
-    if (table->ObjectCount < CG_MAX_OBJECTS_PER_TABLE)
+    if (table->ObjectCount < CG_OBJECT_TABLE<T,N>::MAX_OBJECTS_PER_TABLE)
     {
         uint32_t const    type = table->ObjectType;
         size_t   const    tidx = table->TableIndex;
-        CG_OBJECT_INDEX &index = table->Indices[table->FreeListHead]; // retrieve the next free object index
-        table->FreeListHead    = index.Index;                         // pop the item from the free list
-        index.Id              += CG_NEW_OBJECT_ID_ADD;                // assign the new item a unique ID
-        index.Index            =(uint16_t) table->ObjectCount;        // allocate the next unused slot in the packed array
-        T &object              = table->Objects[index.Index];         // object references the allocated slot
-        object                 = data;                                // copy data into the newly allocated slot
-        object.ObjectId        = index.Id;                            // and then store the new object ID in the data
-        table->ObjectCount++;                                         // update the number of valid items in the table
+        CG_OBJECT_INDEX &index = table->Indices[table->FreeListHead];     // retrieve the next free object index
+        table->FreeListHead    = index.Index;                             // pop the item from the free list
+        index.Id              += CG_OBJECT_TABLE<T,N>::NEW_OBJECT_ID_ADD; // assign the new item a unique ID
+        index.Index            =(uint16_t) table->ObjectCount;            // allocate the next unused slot in the packed array
+        T &object              = table->Objects[index.Index];             // object references the allocated slot
+        object                 = data;                                    // copy data into the newly allocated slot
+        object.ObjectId        = index.Id;                                // and then store the new object ID in the data
+        table->ObjectCount++;                                             // update the number of valid items in the table
         return cgMakeHandle(index.Id, type, tidx);
     }
     else return CG_INVALID_HANDLE;
@@ -293,18 +294,18 @@ cgObjectTableAdd
 /// @param handle The handle of the item to remove from the table.
 /// @param existing On return, a copy of the removed item is placed in this location. This can be useful if the removed object has memory references that need to be cleaned up.
 /// @return true if the item was removed and the data copied to existing.
-template <typename T>
+template <typename T, size_t N>
 public_function inline bool
 cgObjectTableRemove
 (
-    CG_OBJECT_TABLE<T> *table, 
-    cg_handle_t         handle, 
-    T                  &existing
+    CG_OBJECT_TABLE<T, N> *table, 
+    cg_handle_t            handle, 
+    T                     &existing
 )
 {
     uint32_t       const  objid = cgGetObjectId(handle);
-    CG_OBJECT_INDEX      &index = table->Indices[objid & CG_OBJECT_INDEX_MASK];
-    if (index.Id == objid && index.Index != CG_OBJECT_INDEX_INVALID)
+    CG_OBJECT_INDEX      &index = table->Indices[objid & CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_MASK];
+    if (index.Id == objid && index.Index != CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_INVALID)
     {   // object refers to the object being deleted.
         // save the data for the caller in case they need to free memory.
         // copy the data for the last object in the packed array over the item being deleted.
@@ -312,13 +313,13 @@ cgObjectTableRemove
         T &object = table->Objects[index.Index];
         existing  = object;
         object    = table->Objects[table->ObjectCount-1];
-        table->Indices[object.ObjectId & CG_OBJECT_INDEX_MASK].Index = index.Index;
+        table->Indices[object.ObjectId & CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_MASK].Index = index.Index;
         table->ObjectCount--;
         // mark the deleted object as being invalid.
         // return the object index to the free list.
-        index.Index  = CG_OBJECT_INDEX_INVALID;
-        table->Indices[table->FreeListTail].Next = objid & CG_OBJECT_INDEX_MASK;
-        table->FreeListTail = objid & CG_OBJECT_INDEX_MASK;
+        index.Index  = CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_INVALID;
+        table->Indices[table->FreeListTail].Next = objid & CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_MASK;
+        table->FreeListTail = objid & CG_OBJECT_TABLE<T,N>::OBJECT_INDEX_MASK;
         return true;
     }
     else return false;
@@ -328,12 +329,12 @@ cgObjectTableRemove
 /// @param table The object table to query.
 /// @param object_index The zero-based index of the object within the table.
 /// @return The handle value used to reference the object externally.
-template <typename T>
+template <typename T, size_t N>
 public_function inline cg_handle_t
 cgMakeHandle
 (
-    CG_OBJECT_TABLE<T> *table, 
-    size_t              object_index
+    CG_OBJECT_TABLE<T, N> *table, 
+    size_t                 object_index
 )
 {
     return cgMakeHandle(table->Objects[object_index].ObjectId, table->ObjectType, table->TableIndex);

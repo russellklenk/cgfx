@@ -122,88 +122,94 @@ struct CG_DISPLAY;
 /*/////////////////
 //   Constants   //
 /////////////////*/
+/// @summary Define object table indicies within a context. Used when building handles.
 local_persist size_t const CG_DEVICE_TABLE_ID    = 0;
 local_persist size_t const CG_DISPLAY_TABLE_ID   = 1;
 
+/// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
+/// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
+local_persist size_t const CG_MAX_DEVICES        = 4096;
+local_persist size_t const CG_MAX_DISPLAYS       = 32;
+
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
-#define CG_OPENGL_HIDDEN_WNDCLASS_NAME      _T("CGFX_GL_Hidden_WndClass")
+#define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
 
 /// @summary Define the maximum number of displays that can be driven by a single GPU.
-#define CG_OPENGL_MAX_ATTACHED_DISPLAYS     (16)
+#define CG_OPENGL_MAX_ATTACHED_DISPLAYS          (16)
 
 /// @summary Defines the maximum number of shader stages. OpenGL 3.2+ has
 /// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER and GL_FRAGMENT_SHADER.
-#define CG_OPENGL_MAX_SHADER_STAGES_32      (3U)
+#define CG_OPENGL_MAX_SHADER_STAGES_32           (3U)
 
 /// @summary Defines the maximum number of shader stages. OpenGL 4.0+ has
 /// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER, GL_FRAGMENT_SHADER,
 /// GL_TESS_CONTROL_SHADER, and GL_TESS_EVALUATION_SHADER.
-#define CG_OPENGL_MAX_SHADER_STAGES_40      (5U)
+#define CG_OPENGL_MAX_SHADER_STAGES_40           (5U)
 
 /// @summary Defines the maximum number of shader stages. OpenGL 4.3+ has
 /// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER, GL_FRAGMENT_SHADER,
 /// GL_TESS_CONTROL_SHADER, GL_TESS_EVALUATION_SHADER and GL_COMPUTE_SHADER.
-#define CG_OPENGL_MAX_SHADER_STAGES_43      (6U)
+#define CG_OPENGL_MAX_SHADER_STAGES_43           (6U)
 
 /// @summary Macro to convert a byte offset into a pointer.
 /// @param x The byte offset value.
 /// @return The offset value, as a pointer.
-#define CG_GL_BUFFER_OFFSET(x)             ((GLvoid*)(((uint8_t*)NULL)+(x)))
+#define CG_GL_BUFFER_OFFSET(x)                  ((GLvoid*)(((uint8_t*)NULL)+(x)))
 
 /// @summary Preprocessor identifier for OpenGL version 3.2 (GLSL 1.50).
-#define CG_OPENGL_VERSION_32                 32
+#define CG_OPENGL_VERSION_32                      32 
 
 /// @summary Preprocessor identifier for OpenGL version 3.3 (GLSL 3.30).
-#define CG_OPENGL_VERSION_33                 33
+#define CG_OPENGL_VERSION_33                      33
 
 /// @summary Preprocessor identifier for OpenGL version 4.0 (GLSL 4.00).
-#define CG_OPENGL_VERSION_40                 40
+#define CG_OPENGL_VERSION_40                      40
 
 /// @summary Preprocessor identifier for OpenGL version 4.1 (GLSL 4.10).
-#define CG_OPENGL_VERSION_41                 41
+#define CG_OPENGL_VERSION_41                      41
 
 /// @summary Preprocessor identifier for OpenGL version 4.3 (GLSL 4.30).
-#define CG_OPENGL_VERSION_43                 43
+#define CG_OPENGL_VERSION_43                      43
 
 /// @summary Preprocessor identifier for OpenGL version 4.5 (GLSL 4.50).
-#define CG_OPENGL_VERSION_45                 45
+#define CG_OPENGL_VERSION_45                      45
 
 /// @summary Define the version of OpenGL to build against.
 #ifndef CG_OPENGL_VERSION
-#define CG_OPENGL_VERSION                    CG_OPENGL_VERSION_32
+#define CG_OPENGL_VERSION                         CG_OPENGL_VERSION_32
 #endif
 
 /// @summary Define generic names for version-specific constants.
 #if     CG_OPENGL_VERSION == CG_OPENGL_VERSION_32
-#define CG_OPENGL_MAX_SHADER_STAGES          CG_OPENGL_MAX_SHADER_STAGES_32
-#define CG_OPENGL_VERSION_MAJOR              3
-#define CG_OPENGL_VERSION_MINOR              2
-#define CG_OPENGL_VERSION_SUPPORTED          GLEW_VERSION_3_2
+#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_32
+#define CG_OPENGL_VERSION_MAJOR                   3
+#define CG_OPENGL_VERSION_MINOR                   2
+#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_3_2
 #elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_33
-#define CG_OPENGL_MAX_SHADER_STAGES          CG_OPENGL_MAX_SHADER_STAGES_32
-#define CG_OPENGL_VERSION_MAJOR              3
-#define CG_OPENGL_VERSION_MINOR              3
-#define CG_OPENGL_VERSION_SUPPORTED          GLEW_VERSION_3_3
+#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_32
+#define CG_OPENGL_VERSION_MAJOR                   3
+#define CG_OPENGL_VERSION_MINOR                   3
+#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_3_3
 #elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_40
-#define CG_OPENGL_MAX_SHADER_STAGES          CG_OPENGL_MAX_SHADER_STAGES_40
-#define CG_OPENGL_VERSION_MAJOR              4
-#define CG_OPENGL_VERSION_MINOR              0
-#define CG_OPENGL_VERSION_SUPPORTED          GLEW_VERSION_4_0
+#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_40
+#define CG_OPENGL_VERSION_MAJOR                   4
+#define CG_OPENGL_VERSION_MINOR                   0
+#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_0
 #elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_41
-#define CG_OPENGL_MAX_SHADER_STAGES          CG_OPENGL_MAX_SHADER_STAGES_40
-#define CG_OPENGL_VERSION_MAJOR              4
-#define CG_OPENGL_VERSION_MINOR              1
-#define CG_OPENGL_VERSION_SUPPORTED          GLEW_VERSION_4_1
+#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_40
+#define CG_OPENGL_VERSION_MAJOR                   4
+#define CG_OPENGL_VERSION_MINOR                   1
+#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_1
 #elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_43
-#define CG_OPENGL_MAX_SHADER_STAGES          CG_OPENGL_MAX_SHADER_STAGES_43
-#define CG_OPENGL_VERSION_MAJOR              4
-#define CG_OPENGL_VERSION_MINOR              3
-#define CG_OPENGL_VERSION_SUPPORTED          GLEW_VERSION_4_3
+#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_43
+#define CG_OPENGL_VERSION_MAJOR                   4
+#define CG_OPENGL_VERSION_MINOR                   3
+#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_3
 #elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_45
-#define CG_OPENGL_MAX_SHADER_STAGES          CG_OPENGL_MAX_SHADER_STAGES_43
-#define CG_OPENGL_VERSION_MAJOR              4
-#define CG_OPENGL_VERSION_MINOR              5
-#define CG_OPENGL_VERSION_SUPPORTED          GLEW_VERSION_4_5
+#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_43
+#define CG_OPENGL_VERSION_MAJOR                   4
+#define CG_OPENGL_VERSION_MINOR                   5
+#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_5
 #else
 #error  No constants defined for target OpenGL version in cgfx_w32.cc!
 #endif
@@ -317,6 +323,10 @@ struct CG_DISPLAY
     WGLEWContext                 WGLEW;                /// OpenGL windowing extension function pointers for the attached displays.
 };
 
+/// @summary Typedef the object tables held by a context object.
+typedef CG_OBJECT_TABLE<CG_DEVICE , CG_MAX_DEVICES >       CG_DEVICE_TABLE;
+typedef CG_OBJECT_TABLE<CG_DISPLAY, CG_MAX_DISPLAYS>       CG_DISPLAY_TABLE;
+
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
 {
@@ -324,8 +334,8 @@ struct CG_CONTEXT
 
     cg_cpu_counts_t              CPUCounts;            /// Information about the CPU resources available in the local system.
 
-    CG_OBJECT_TABLE<CG_DEVICE>   DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
-    CG_OBJECT_TABLE<CG_DISPLAY>  DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
+    CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
+    CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
 };
 
 /*///////////////
