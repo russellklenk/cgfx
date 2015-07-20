@@ -73,17 +73,23 @@ struct cg_cpu_counts_t;
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
-typedef void*       (CG_API *cgMemoryAlloc_fn        )(size_t, size_t, int, uintptr_t);
-typedef void        (CG_API *cgMemoryFree_fn         )(void *, size_t, size_t, int, uintptr_t);
-typedef char const* (CG_API *cgResultString_fn       )(int);
-typedef int         (CG_API *cgEnumerateDevices_fn   )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
-typedef int         (CG_API *cgGetContextInfo_fn     )(uintptr_t, int, void *, size_t, size_t *);
-typedef size_t      (CG_API *cgGetDeviceCount_fn     )(uintptr_t);
-typedef int         (CG_API *cgGetDeviceInfo_fn      )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef size_t      (CG_API *cgGetDisplayCount_fn    )(uintptr_t);
-typedef cg_handle_t (CG_API *cgGetPrimaryDisplay_fn  )(uintptr_t);
-typedef cg_handle_t (CG_API *cgGetDisplayByOrdinal_fn)(uintptr_t);
-typedef int         (CG_API *cgGetDisplayInfo_fn     )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef void*       (CG_API *cgMemoryAlloc_fn              )(size_t, size_t, int, uintptr_t);
+typedef void        (CG_API *cgMemoryFree_fn               )(void *, size_t, size_t, int, uintptr_t);
+typedef char const* (CG_API *cgResultString_fn             )(int);
+typedef int         (CG_API *cgEnumerateDevices_fn         )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
+typedef int         (CG_API *cgGetContextInfo_fn           )(uintptr_t, int, void *, size_t, size_t *);
+typedef size_t      (CG_API *cgGetDeviceCount_fn           )(uintptr_t);
+typedef int         (CG_API *cgGetDeviceInfo_fn            )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef size_t      (CG_API *cgGetDisplayCount_fn          )(uintptr_t);
+typedef cg_handle_t (CG_API *cgGetPrimaryDisplay_fn        )(uintptr_t);
+typedef cg_handle_t (CG_API *cgGetDisplayByOrdinal_fn      )(uintptr_t);
+typedef int         (CG_API *cgGetDisplayInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef cg_handle_t (CG_API *cgGetDisplayDevice_fn         )(uintptr_t, cg_handle_t);
+typedef int         (CG_API *cgGetCPUDevices_fn            )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetGPUDevices_fn            )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetAcceleratorDevices_fn    )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetCPUDevicesInShareGroup_fn)(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef int         (CG_API *cgGetGPUDevicesInShareGroup_fn)(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
 
 /*//////////////////
 //   Data Types   //
@@ -298,6 +304,60 @@ cgGetDisplayInfo                                /// Retrieve display properties.
     void                         *data,         /// Buffer to receive the data.
     size_t                        buffer_size,  /// The maximum number of bytes to write to the data buffer.
     size_t                       *bytes_needed  /// On return, if non-NULL, store the number of bytes required to receive the data.
+);
+
+cg_handle_t
+cgGetDisplayDevice                              /// Retrieve the handle of the GPU devices that drives a given display.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   display       /// The handle of the display to query.
+);
+
+int
+cgGetCPUDevices                                 /// Retrieve the count of and handles to all CPU devices in the system.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    size_t                       &cpu_count,    /// On return, stores the number of CPU devices in the system.
+    size_t const                  max_devices,  /// The maximum number of device handles to write to cpu_devices.
+    cg_handle_t                  *cpu_devices   /// On return, if non-NULL, stores min(max_devices, cpu_count) handles of CPU devices.
+);
+
+int
+cgGetGPUDevices                                 /// Retrieve the count of and handles to all GPU devices in the system.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    size_t                       &gpu_count,    /// On return, stores the number of GPU devices in the system.
+    size_t const                  max_devices,  /// The maximum number of device handles to write to gpu_devices.
+    cg_handle_t                  *gpu_devices   /// On return, if non-NULL, stores min(max_devices, gpu_count) handles of GPU devices.
+);
+
+int
+cgGetAcceleratorDevices                         /// Retrieve the count of and handles to all accelerator devices in the system.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    size_t                       &acl_count,    /// On return, stores the number of accelerator devices in the system.
+    size_t const                  max_devices,  /// The maximum number of device handles to write to acl_devices.
+    cg_handle_t                  *acl_devices   /// On return, if non-NULL, stores min(max_devices, acl_count) handles of accelerator devices.
+);
+
+int
+cgGetCPUDevicesInShareGroup                     /// Retrieve the count of and handles to CPU devices that can share resources with a given device.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   device,       /// The handle of a device in the sharegroup.
+    size_t                       &cpu_count,    /// On return, stores the number of CPU devices in the sharegroup.
+    size_t const                  max_devices,  /// The maximum number of device handles to write to cpu_devices.
+    cg_handle_t                  *cpu_devices   /// On return, if non-NULL, stores min(max_devices, cpu_count) handles of devices in the share group.
+);
+
+int
+cgGetGPUDevicesInShareGroup                     /// Retrieve the count of and handles to GPU devices that can share resources with a given device.
+(
+    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   device,       /// The handle of a device in the sharegroup.
+    size_t                       &gpu_count,    /// On return, stores the number of GPU devices in the sharegroup.
+    size_t const                  max_devices,  /// The maximum number of device handles to write to gpu_devices.
+    cg_handle_t                  *gpu_devices   /// On return, if non-NULL, stores min(max_devices, gpu_count) handles of devices in the share group.
 );
 
 #ifdef __cplusplus

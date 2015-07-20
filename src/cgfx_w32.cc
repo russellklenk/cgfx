@@ -1974,7 +1974,7 @@ cgGetDisplayInfo
         {   BUFFER_CHECK_TYPE(cg_handle_t);
             if (display->DisplayDevice != NULL)
             {
-                cg_handle_t handle = cgMakeHandle(display->DisplayDevice->ObjectId, CG_OBJECT_DISPLAY, CG_DISPLAY_TABLE_ID);
+                cg_handle_t handle = cgMakeHandle(display->DisplayDevice->ObjectId, CG_OBJECT_DEVICE, CG_DEVICE_TABLE_ID);
                 BUFFER_SET_SCALAR(cg_handle_t, handle);
             }
             else BUFFER_SET_SCALAR(cg_handle_t, CG_INVALID_HANDLE);
@@ -2068,4 +2068,186 @@ cgGetDisplayInfo
 #undef  BUFFER_SET_SCALAR
 #undef  BUFFER_CHECK_SIZE
 #undef  BUFFER_CHECK_TYPE
+}
+
+/// @summary Retrieve the GPU compute device that drives the specified display.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param display_handle The handle of the display to query.
+/// @return The handle of the GPU device driving the display, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgGetDisplayDevice
+(
+    uintptr_t   context, 
+    cg_handle_t display_handle
+)
+{
+    CG_CONTEXT *ctx     = (CG_CONTEXT*) context;
+    CG_DISPLAY *display =  NULL;
+    if ((display = cgObjectTableGet(&ctx->DisplayTable, display_handle)) == NULL)
+    {   // the specified display handle is invalid.
+        return CG_INVALID_HANDLE;
+    }
+    if (display->DisplayDevice != NULL)
+    {   // return the handle of the associated device.
+        return cgMakeHandle(display->DisplayDevice->ObjectId, CG_OBJECT_DEVICE, CG_DEVICE_TABLE_ID);
+    }
+    else return CG_INVALID_HANDLE;
+}
+
+/// @summary Retrieves all CPU devices that can share resources with a given device.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cpu_count On return, stores the number of CPU devices that can share resources with the specified device.
+/// @param max_devices The maximum number of device handles to write to @a cpu_handles.
+/// @param cpu_handles An array of device handles indicating the CPU devices in the sharegroup.
+/// @return CG_SUCCESS.
+library_function int
+cgGetCPUDevices
+(
+    uintptr_t     context, 
+    size_t       &cpu_count, 
+    size_t const  max_devices, 
+    cg_handle_t  *cpu_handles
+)
+{
+    cpu_count = 0;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE &dev = ctx->DeviceTable.Objects[i];
+        if (dev.Type  == CL_DEVICE_TYPE_CPU)
+        {
+            if (cpu_count < max_devices)
+                cpu_handles[cpu_count] = cgMakeHandle(&ctx->DeviceTable, i);
+            cpu_count++;
+        }
+    }
+    return CG_SUCCESS;
+}
+
+/// @summary Retrieves all GPU devices that can share resources with a given device.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param gpu_count On return, stores the number of GPU devices that can share resources with the specified device.
+/// @param max_devices The maximum number of device handles to write to @a gpu_handles.
+/// @param gpu_handles An array of device handles indicating the GPU devices in the sharegroup.
+/// @return CG_SUCCESS.
+library_function int
+cgGetGPUDevices
+(
+    uintptr_t     context, 
+    size_t       &gpu_count, 
+    size_t const  max_devices, 
+    cg_handle_t  *gpu_handles
+)
+{
+    gpu_count = 0;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE &dev = ctx->DeviceTable.Objects[i];
+        if (dev.Type  == CL_DEVICE_TYPE_GPU)
+        {
+            if (gpu_count < max_devices)
+                gpu_handles[gpu_count] = cgMakeHandle(&ctx->DeviceTable, i);
+            gpu_count++;
+        }
+    }
+    return CG_SUCCESS;
+}
+
+/// @summary Retrieves all accelerator devices that can share resources with a given device.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param acl_count On return, stores the number of accelerator devices that can share resources with the specified device.
+/// @param max_devices The maximum number of device handles to write to @a acl_handles.
+/// @param acl_handles An array of device handles indicating the accelerator devices in the sharegroup.
+/// @return CG_SUCCESS.
+library_function int
+cgGetAcceleratorDevices
+(
+    uintptr_t     context, 
+    size_t       &acl_count, 
+    size_t const  max_devices, 
+    cg_handle_t  *acl_handles
+)
+{
+    acl_count = 0;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE &dev = ctx->DeviceTable.Objects[i];
+        if (dev.Type  == CL_DEVICE_TYPE_ACCELERATOR)
+        {
+            if (acl_count < max_devices)
+                acl_handles[acl_count] = cgMakeHandle(&ctx->DeviceTable, i);
+            acl_count++;
+        }
+    }
+    return CG_SUCCESS;
+}
+
+/// @summary Retrieves all CPU devices that can share resources with a given device.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param group_device The handle of the device to check.
+/// @param cpu_count On return, stores the number of CPU devices that can share resources with the specified device.
+/// @param max_devices The maximum number of device handles to write to @a cpu_handles.
+/// @param cpu_handles An array of device handles indicating the CPU devices in the sharegroup.
+/// @return CG_SUCCESS or CG_INVALID_VALUE.
+library_function int
+cgGetCPUDevicesInShareGroup
+(
+    uintptr_t     context, 
+    cg_handle_t   group_device, 
+    size_t       &cpu_count, 
+    size_t const  max_devices, 
+    cg_handle_t  *cpu_handles
+)
+{
+    cpu_count = 0;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    CG_DEVICE  *dev =  cgObjectTableGet(&ctx->DeviceTable, group_device);
+    if (dev == NULL)   return CG_INVALID_VALUE;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE *device  =&ctx->DeviceTable.Objects[i];
+        if (device->Type  == CL_DEVICE_TYPE_CPU && device->PlatformId == dev->PlatformId && device != dev)
+        {
+            if (cpu_count < max_devices)
+                cpu_handles[cpu_count] = cgMakeHandle(&ctx->DeviceTable, i);
+            cpu_count++;
+        }
+    }
+    return CG_SUCCESS;
+}
+
+/// @summary Retrieves all GPU devices that can share resources with a given device.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param group_device The handle of the device to check.
+/// @param gpu_count On return, stores the number of GPU devices that can share resources with the specified device.
+/// @param max_devices The maximum number of device handles to write to @a gpu_handles.
+/// @param gpu_handles An array of device handles indicating the GPU devices in the sharegroup.
+/// @return CG_SUCCESS or CG_INVALID_VALUE.
+library_function int
+cgGetGPUDevicesInShareGroup
+(
+    uintptr_t     context, 
+    cg_handle_t   group_device, 
+    size_t       &gpu_count, 
+    size_t const  max_devices, 
+    cg_handle_t  *gpu_handles
+)
+{
+    gpu_count = 0;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    CG_DEVICE  *dev =  cgObjectTableGet(&ctx->DeviceTable, group_device);
+    if (dev == NULL)   return CG_INVALID_VALUE;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE *device  =&ctx->DeviceTable.Objects[i];
+        if (device->Type  == CL_DEVICE_TYPE_GPU && device->PlatformId == dev->PlatformId && device != dev)
+        {
+            if (gpu_count < max_devices)
+                gpu_handles[gpu_count] = cgMakeHandle(&ctx->DeviceTable, i);
+            gpu_count++;
+        }
+    }
+    return CG_SUCCESS;
 }
