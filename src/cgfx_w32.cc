@@ -727,7 +727,7 @@ cgDeleteDisplay
     CG_CONTEXT    *ctx, 
     CG_DISPLAY    *display
 )
-{
+{   UNREFERENCED_PARAMETER(ctx);
     if (display->DisplayDC != NULL)
     {
         ReleaseDC(display->DisplayHWND, display->DisplayDC);
@@ -1093,7 +1093,6 @@ cgGlDoesDisplayExist
 internal_function bool
 cgGlInitializeWGLEW
 (
-    CG_CONTEXT *ctx, 
     CG_DISPLAY *display, 
     int         x, 
     int         y, 
@@ -1187,7 +1186,7 @@ cgGlCreateRenderingContext
 
     // initialize wgl GLEW function pointers to assist with pixel format 
     // selection and  OpenGL rendering context creation.
-    if (!cgGlInitializeWGLEW(ctx, display, x, y, w, h))
+    if (!cgGlInitializeWGLEW(display, x, y, w, h))
     {   // can't initialize GLEW, so only OpenGL 1.1 would be available.
         return CG_NO_OPENGL;
     }
@@ -1408,9 +1407,8 @@ cgGlEnumerateDisplays
 )
 {
     DISPLAY_DEVICE dd; dd.cb =  sizeof(DISPLAY_DEVICE);
-    HINSTANCE      instance  = (HINSTANCE)&__ImageBase;
-    WNDCLASSEX     wndclass  = {};
-    size_t    valid_displays = 0;
+    HINSTANCE       instance = (HINSTANCE)&__ImageBase;
+    WNDCLASSEX      wndclass = {};
     bool          check_list = true;
 
     if (ctx->DisplayTable.ObjectCount == 0)
@@ -1675,6 +1673,8 @@ cgGetContextInfo
     { \
         *bytes_needed = (size); \
     }
+#define BUFFER_SET_SCALAR(type, value) \
+    *((type*)buffer) = (value)
     // ==========================================================
     // ==========================================================
 
@@ -1689,13 +1689,13 @@ cgGetContextInfo
 
     case CG_CONTEXT_DEVICE_COUNT:
         {   BUFFER_CHECK_TYPE(size_t);
-            *((size_t*) buffer) = ctx->DeviceTable.ObjectCount;
+            BUFFER_SET_SCALAR(size_t, ctx->DeviceTable.ObjectCount);
         }
         return CG_SUCCESS;
 
     case CG_CONTEXT_DISPLAY_COUNT:
         {   BUFFER_CHECK_TYPE(size_t);
-            *((size_t*) buffer) = ctx->DisplayTable.ObjectCount;
+            BUFFER_SET_SCALAR(size_t, ctx->DisplayTable.ObjectCount);
         }
         return CG_SUCCESS;
 
@@ -1706,6 +1706,7 @@ cgGetContextInfo
         }
     }
 
+#undef  BUFFER_SET_SCALAR
 #undef  BUFFER_CHECK_SIZE
 #undef  BUFFER_CHECK_TYPE
 }
@@ -1737,7 +1738,7 @@ cgGetDeviceInfo
     uintptr_t   context, 
     cg_handle_t device_handle, 
     int         param,
-    void       *data, 
+    void       *buffer, 
     size_t      buffer_size, 
     size_t     *bytes_needed
 )
@@ -1772,19 +1773,84 @@ cgGetDeviceInfo
     { \
         *bytes_needed = (size); \
     }
+#define BUFFER_SET_SCALAR(type, value) \
+    *((type*)buffer) = (value)
     // ==========================================================
     // ==========================================================
 
     // retrieve parameter data:
     switch (param)
     {
-    // get cl_platform_id
-    // get cl_device_id
-    // get cl_context
-    // get cl_command_queue
-    // get HGLRC
-    // get attached display count
-    // get attached display IDs
+    case CG_DEVICE_CL_PLATFORM_ID:
+        {   BUFFER_CHECK_TYPE(cl_platform_id);
+            BUFFER_SET_SCALAR(cl_platform_id, device->PlatformId);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_CL_DEVICE_ID:
+        {   BUFFER_CHECK_TYPE(cl_device_id);
+            BUFFER_SET_SCALAR(cl_device_id, device->DeviceId);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_CL_DEVICE_TYPE:
+        {   BUFFER_CHECK_TYPE(cl_device_type);
+            BUFFER_SET_SCALAR(cl_device_type, device->Type);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_WINDOWS_HGLRC:
+        {   BUFFER_CHECK_TYPE(HGLRC);
+            BUFFER_SET_SCALAR(HGLRC, device->DisplayRC);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_DISPLAY_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, device->DisplayCount);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_ATTACHED_DISPLAYS:
+        {   BUFFER_CHECK_SIZE(device->DisplayCount * sizeof(cg_handle_t));
+            memcpy(buffer, device->AttachedDisplays, device->DisplayCount * sizeof(cg_handle_t));
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_PRIMARY_DISPLAY:
+        {   BUFFER_CHECK_TYPE(cg_handle_t);
+            for (size_t i = 0, n = ctx->DisplayTable.ObjectCount; i < n; ++i)
+            {
+                CG_DISPLAY *display = &ctx->DisplayTable.Objects[i];
+                if (display->DisplayInfo.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+                {
+                    cg_handle_t handle = cgMakeHandle(&ctx->DisplayTable, i);
+                    BUFFER_SET_SCALAR(cg_handle_t, handle);
+                    return CG_SUCCESS;
+                }
+            }
+            BUFFER_SET_SCALAR(cg_handle_t, CG_INVALID_HANDLE);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_CL_CONTEXT:
+        {   BUFFER_CHECK_TYPE(cl_context);
+            BUFFER_SET_SCALAR(cl_context, device->ComputeContext);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_CL_COMPUTE_QUEUE:
+        {   BUFFER_CHECK_TYPE(cl_command_queue);
+            BUFFER_SET_SCALAR(cl_command_queue, device->ComputeQueue);
+        }
+        return CG_SUCCESS;
+
+    case CG_DEVICE_CL_TRANSFER_QUEUE:
+        {   BUFFER_CHECK_TYPE(cl_command_queue);
+            BUFFER_SET_SCALAR(cl_command_queue, device->TransferQueue);
+        }
+        return CG_SUCCESS;
+
     default:
         {
             if (bytes_needed != NULL) *bytes_needed = 0;
@@ -1792,6 +1858,7 @@ cgGetDeviceInfo
         }
     }
 
+#undef  BUFFER_SET_SCALAR
 #undef  BUFFER_CHECK_SIZE
 #undef  BUFFER_CHECK_TYPE
 }
@@ -1860,7 +1927,7 @@ cgGetDisplayInfo
     uintptr_t   context, 
     cg_handle_t display_handle, 
     int         param,
-    void       *data, 
+    void       *buffer, 
     size_t      buffer_size, 
     size_t     *bytes_needed
 )
@@ -1895,19 +1962,102 @@ cgGetDisplayInfo
     { \
         *bytes_needed = (size); \
     }
+#define BUFFER_SET_SCALAR(type, value) \
+    *((type*)buffer) = (value)
     // ==========================================================
     // ==========================================================
 
     // retrieve parameter data:
     switch (param)
     {
-    // get cg_handle_t of shared OpenCL device
-    // get cl_platform_id of shared OpenCL device
-    // get cl_device_id of shared OpenCL device
-    // get HDC
-    // get HGLRC
-    // get bounding rectangle
-    // get orientation
+    case CG_DISPLAY_DEVICE:
+        {   BUFFER_CHECK_TYPE(cg_handle_t);
+            if (display->DisplayDevice != NULL)
+            {
+                cg_handle_t handle = cgMakeHandle(display->DisplayDevice->ObjectId, CG_OBJECT_DISPLAY, CG_DISPLAY_TABLE_ID);
+                BUFFER_SET_SCALAR(cg_handle_t, handle);
+            }
+            else BUFFER_SET_SCALAR(cg_handle_t, CG_INVALID_HANDLE);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_CL_PLATFORM_ID:
+        {   BUFFER_CHECK_TYPE(cl_platform_id);
+            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_platform_id, display->DisplayDevice->PlatformId);
+            else BUFFER_SET_SCALAR(cl_platform_id, CG_INVALID_HANDLE);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_CL_DEVICE_ID:
+        {   BUFFER_CHECK_TYPE(cl_device_id);
+            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_device_id, display->DisplayDevice->DeviceId);
+            else BUFFER_SET_SCALAR(cl_device_id, CG_INVALID_HANDLE);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_WINDOWS_HDC:
+        {   BUFFER_CHECK_TYPE(HDC);
+            BUFFER_SET_SCALAR(HDC, display->DisplayDC);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_WINDOWS_HGLRC:
+        {   BUFFER_CHECK_TYPE(HGLRC);
+            BUFFER_SET_SCALAR(HGLRC, display->DisplayRC);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_CL_CONTEXT:
+        {   BUFFER_CHECK_TYPE(cl_context);
+            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_context, display->DisplayDevice->ComputeContext);
+            else BUFFER_SET_SCALAR(cl_context, NULL);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_CL_COMPUTE_QUEUE:
+        {   BUFFER_CHECK_TYPE(cl_command_queue);
+            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_command_queue, display->DisplayDevice->ComputeQueue);
+            else BUFFER_SET_SCALAR(cl_command_queue, NULL);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_CL_TRANSFER_QUEUE:
+        {   BUFFER_CHECK_TYPE(cl_command_queue);
+            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_command_queue, display->DisplayDevice->ComputeQueue);
+            else BUFFER_SET_SCALAR(cl_command_queue, NULL);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_POSITION:
+        {   BUFFER_CHECK_SIZE(2 * sizeof(int));
+            int xy[2] = { display->DisplayX, display->DisplayY };
+            memcpy(buffer, xy, 2 * sizeof(int));
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_SIZE:
+        {   BUFFER_CHECK_SIZE(2 * sizeof(size_t));
+            size_t wh[2] = { display->DisplayWidth, display->DisplayHeight };
+            memcpy(buffer, wh, 2 * sizeof(size_t));
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_ORIENTATION:
+        {   BUFFER_CHECK_TYPE(cg_display_orientation_e);
+            DEVMODE dm; dm.dmSize = sizeof(DEVMODE);
+            EnumDisplaySettingsEx(display->DisplayInfo.DeviceName, ENUM_CURRENT_SETTINGS, &dm, 0);
+            if (dm.dmPelsWidth >= dm.dmPelsHeight) BUFFER_SET_SCALAR(cg_display_orientation_e, CG_DISPLAY_ORIENTATION_LANDSCAPE);
+            else BUFFER_SET_SCALAR(cg_display_orientation_e, CG_DISPLAY_ORIENTATION_PORTRAIT);
+        }
+        return CG_SUCCESS;
+
+    case CG_DISPLAY_REFRESH_RATE:
+        {   BUFFER_CHECK_TYPE(float);
+            float refresh_rate_hz = (float) GetDeviceCaps(display->DisplayDC, VREFRESH);
+            BUFFER_SET_SCALAR(float, refresh_rate_hz);
+        }
+        return CG_SUCCESS;
+
     default:
         {
             if (bytes_needed != NULL) *bytes_needed = 0;
@@ -1915,6 +2065,7 @@ cgGetDisplayInfo
         }
     }
 
+#undef  BUFFER_SET_SCALAR
 #undef  BUFFER_CHECK_SIZE
 #undef  BUFFER_CHECK_TYPE
 }

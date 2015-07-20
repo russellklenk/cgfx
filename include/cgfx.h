@@ -151,6 +151,46 @@ enum cg_context_info_param_e : int
     CG_CONTEXT_DISPLAY_COUNT      = 2,             /// Retrieve the number of capable display devices attached to the system. Data is size_t. 
 };
 
+/// @summary Define the queryable or settable data on a CGFX device.
+enum cg_device_info_param_e : int
+{
+    CG_DEVICE_CL_PLATFORM_ID      = 0,             /// Retrieve the OpenCL platform ID of the device. Data is cl_platform_id.
+    CG_DEVICE_CL_DEVICE_ID        = 1,             /// Retrieve the OpenCL device ID of the device. Data is cl_device_id.
+    CG_DEVICE_CL_DEVICE_TYPE      = 2,             /// Retrieve the OpenCL device type of the device. Data is cl_device_type.
+    CG_DEVICE_WINDOWS_HGLRC       = 3,             /// Retrieve the OpenGL rendering context of the device. Windows-only. Data is HGLRC.
+    CG_DEVICE_DISPLAY_COUNT       = 4,             /// Retrieve the number of displays attached to the device. Data is size_t.
+    CG_DEVICE_ATTACHED_DISPLAYS   = 5,             /// Retrieve the object handles of the attached displays. Data is cg_handle_t[CG_DEVICE_DISPLAY_COUNT].
+    CG_DEVICE_PRIMARY_DISPLAY     = 6,             /// Retrieve the primary display attached to the device. Data is cg_handle_t.
+    CG_DEVICE_CL_CONTEXT          = 7,             /// Retrieve the OpenCL context of the device. Data is cl_context.
+    CG_DEVICE_CL_COMPUTE_QUEUE    = 8,             /// Retrieve the OpenCL command queue used for submitting compute work to the device. Data is cl_command_queue.
+    CG_DEVICE_CL_TRANSFER_QUEUE   = 9,             /// Retrieve the OpenCL command queue used for submitting data transfers to and from the device. Data is cl_command_queue.
+};
+
+/// @summary Define the queryable or settable data on a CGFX display.
+enum cg_display_info_param_e : int
+{
+    CG_DISPLAY_DEVICE             = 0,             /// Retrieve the CGFX handle of the compute device driving the display. Data is cg_handle_t.
+    CG_DISPLAY_CL_PLATFORM_ID     = 1,             /// Retrieve the OpenCL platform ID of the device driving the display. Data is cl_platform_id.
+    CG_DISPLAY_CL_DEVICE_ID       = 2,             /// Retrieve the OpenCL device ID of the device driving the display. Data is cl_platform_id.
+    CG_DISPLAY_WINDOWS_HDC        = 3,             /// Retrieve the Windows device context of the display. Data is HDC.
+    CG_DISPLAY_WINDOWS_HGLRC      = 4,             /// Retrieve the Windows OpenGL rendering context of the device. Data is HGLRC.
+    CG_DISPLAY_CL_CONTEXT         = 5,             /// Retrieve the OpenCL context of the device driving the display. Data is cl_context.
+    CG_DISPLAY_CL_COMPUTE_QUEUE   = 6,             /// Retrieve the OpenCL command queue used for submitting compute work to the device. Data is cl_command_queue.
+    CG_DISPLAY_CL_TRANSFER_QUEUE  = 7,             /// Retrieve the OpenCL command queue used for submitting data transfers to and from the device. Data is cl_command_queue.
+    CG_DISPLAY_POSITION           = 8,             /// Retrieve the x and y-coordinate of the upper-left corner of the display. Data is int[2].
+    CG_DISPLAY_SIZE               = 9,             /// Retrieve the width and height of the display, in pixels. Data is size_t[2].
+    CG_DISPLAY_ORIENTATION        = 10,            /// Retrieve the current orientation of the display. Data is cg_display_orientation_e.
+    CG_DISPLAY_REFRESH_RATE       = 11,            /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.
+};
+
+/// @summary Define the recognized display orientation values.
+enum cg_display_orientation_e : int
+{
+    CG_DISPLAY_ORIENTATION_UNKNOWN   = 0,          /// The display orientation is not known.
+    CG_DISPLAY_ORIENTATION_LANDSCAPE = 1,          /// The display device is in landscape mode.
+    CG_DISPLAY_ORIENTATION_PORTRAIT  = 2,          /// The display device is in portrait mode.
+};
+
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
 struct cg_application_info_t
 {
