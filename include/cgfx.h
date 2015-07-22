@@ -107,6 +107,7 @@ enum cg_result_e : int
     CG_BAD_PIXELFORMAT            = -5,            /// Unable to set the drawable's pixel format.
     CG_NO_GLCONTEXT               = -6,            /// Unable to create the OpenGL rendering context.
     CG_BAD_GLCONTEXT              = -7,            /// Unable to activate the OpenGL rendering context.
+    CG_NO_CLCONTEXT               = -8,            /// Unable to create the OpenCL device context.
     CG_SUCCESS                    =  0,            /// The operation completed successfully.
     CG_UNSUPPORTED                =  1,            /// The function completed successfully, but the operation is not supported.
     CG_NOT_READY                  =  2,            /// The function completed successfully, but the result is not available yet.
