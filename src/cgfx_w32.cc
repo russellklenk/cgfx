@@ -118,18 +118,21 @@
 ////////////////////////////*/
 struct CG_DEVICE;
 struct CG_DISPLAY;
+struct CG_EXEC_GROUP;
 
 /*/////////////////
 //   Constants   //
 /////////////////*/
 /// @summary Define object table indicies within a context. Used when building handles.
-local_persist size_t const CG_DEVICE_TABLE_ID    = 0;
-local_persist size_t const CG_DISPLAY_TABLE_ID   = 1;
+local_persist size_t const CG_DEVICE_TABLE_ID     = 0;
+local_persist size_t const CG_DISPLAY_TABLE_ID    = 1;
+local_persist size_t const CG_EXEC_GROUP_TABLE_ID = 2;
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
-local_persist size_t const CG_MAX_DEVICES        = 4096;
-local_persist size_t const CG_MAX_DISPLAYS       = 32;
+local_persist size_t const CG_MAX_DEVICES         = 4096;
+local_persist size_t const CG_MAX_DISPLAYS        = 32;
+local_persist size_t const CG_MAX_EXEC_GROUPS     = CG_MAX_DEVICES;
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -278,6 +281,8 @@ struct CL_DEVICE_CAPS
 struct CG_DEVICE
 {
     #define AD                   CG_OPENGL_MAX_ATTACHED_DISPLAYS
+    cg_handle_t                  ExecutionGroup;       /// The handle of the execution group that owns the device. A device can only belong to one group.
+
     cl_platform_id               PlatformId;           /// The OpenCL platform identifier. Same-platform devices can share resources.
     cl_device_id                 DeviceId;             /// The OpenCL device identifier, which may or may not be the same as the MasterDeviceId.
     cl_device_id                 MasterDeviceId;       /// The OpenCL device identifier of the parent device.
@@ -288,10 +293,6 @@ struct CG_DEVICE
     char                        *Version;              /// The OpenCL version supported by the device.
     char                        *Driver;               /// The version of the OpenCL driver for the device.
     char                        *Extensions;           /// A space-delimited list of extensions supported by the device.
-
-    cl_context                   ComputeContext;       /// The OpenCL resource context associated with the device, which may or may not be shared with other devices.
-    cl_command_queue             ComputeQueue;         /// The OpenCL command queue for submitting compute jobs to the device.
-    cl_command_queue             TransferQueue;        /// The OpenCL command queue for submitting data transfers to the device.
 
     size_t                       DisplayCount;         /// The number of attached displays.
     CG_DISPLAY                  *AttachedDisplays[AD]; /// The set of attached display objects.
@@ -323,9 +324,27 @@ struct CG_DISPLAY
     WGLEWContext                 WGLEW;                /// OpenGL windowing extension function pointers for the attached displays.
 };
 
+/// @summary Define the state associated with a device execution group.
+struct CG_EXEC_GROUP
+{
+    CG_DEVICE                   *RootDevice;           /// The root device used to create the execution group.
+    cl_platform_id               PlatformId;           /// The OpenCL platform ID for all devices in the group.
+    size_t                       DeviceCount;          /// The number of devices in the execution group.
+    CG_DEVICE                  **DeviceList;           /// The devices making up the execution group.
+    cl_device_id                *DeviceIds;            /// The OpenCL device ID for each device in the group.
+    cl_context                  *ComputeContext;       /// The compute context for each device in the group, which may reference the same context.
+    cl_command_queue            *ComputeQueue;         /// The command queue used to submit compute kernel dispatch operations for each device in the group.
+    cl_command_queue            *TransferQueue;        /// The command queue used to submit data transfer operations for each device in the group.
+    size_t                       DisplayCount;         /// The number of displays attached to the group.
+    CG_DISPLAY                 **AttachedDisplays;     /// The displays the execution group can output to.
+    HDC                         *DisplayDC;            /// The Windows GDI device context for each attached display.
+    HGLRC                       *DisplayRC;            /// The Windows OpenGL rendering context for each attached display.
+};
+
 /// @summary Typedef the object tables held by a context object.
-typedef CG_OBJECT_TABLE<CG_DEVICE , CG_MAX_DEVICES >       CG_DEVICE_TABLE;
-typedef CG_OBJECT_TABLE<CG_DISPLAY, CG_MAX_DISPLAYS>       CG_DISPLAY_TABLE;
+typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
+typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
+typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -336,6 +355,7 @@ struct CG_CONTEXT
 
     CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
     CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
+    CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
 };
 
 /*///////////////
@@ -400,6 +420,29 @@ cgStristr
         }
     }
     return NULL;
+}
+
+/// @summary Duplicate a string, allocating memory through a CG_CONTEXT.
+/// @param ctx The CG_CONTEXT to use for memory allocation.
+/// @param str A NULL-terminated string to copy.
+/// @param type The CGFX allocation type, one of cg_allocation_type_e.
+/// @return A pointer to the duplicate string, or NULL. Free with cgClFreeString.
+internal_function char*
+cgStrdup
+(
+    CG_CONTEXT *ctx, 
+    char const *str, 
+    int         type
+)
+{
+    if (str == NULL)
+    {   // input was NULL, return NULL.
+        return NULL;
+    }
+    size_t len = strlen(str) + 1;
+    char  *mem =(char*) cgAllocateHostMemory(&ctx->HostAllocator, len, 0, type);
+    if    (mem != NULL) memcpy(mem, str, len+1);
+    return mem;
 }
 
 /// @summary Retrieve the length of an OpenCL platform string value, allocate a buffer and store a copy of the value.
@@ -689,18 +732,6 @@ cgDeleteDevice
     CG_DEVICE      *device
 )
 {
-    if (device->ComputeQueue != NULL)
-    {
-        clReleaseCommandQueue(device->ComputeQueue);
-    }
-    if (device->TransferQueue != NULL)
-    {
-        clReleaseCommandQueue(device->TransferQueue);
-    }
-    if (device->ComputeContext != NULL)
-    {
-        clReleaseContext(device->ComputeContext);
-    }
     if (device->DisplayRC != NULL)
     {
         wglDeleteContext(device->DisplayRC);
@@ -739,6 +770,41 @@ cgDeleteDisplay
     memset(display, 0, sizeof(CG_DISPLAY));
 }
 
+/// @summary Frees all resources and releases all references held by an execution group object.
+/// @param ctx The CGFX context that owns the execution group object.
+/// @param group The execution group object to delete.
+internal_function void
+cgDeleteExecutionGroup
+(
+    CG_CONTEXT    *ctx, 
+    CG_EXEC_GROUP *group
+)
+{
+    CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // release references to OpenCL objects.
+    for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+    {
+        clReleaseCommandQueue(group->TransferQueue[i]);
+        clReleaseCommandQueue(group->ComputeQueue [i]);
+        clReleaseContext(group->ComputeContext[i]);
+        clReleaseDevice(group->DeviceIds[i]);
+    }
+    // release device references back to the execution group.
+    for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+    {
+        group->DeviceList[i]->ExecutionGroup = CG_INVALID_HANDLE;
+    }
+    cgFreeHostMemory(host_alloc, group->DisplayRC       , group->DisplayCount * sizeof(HGLRC)           , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->DisplayDC       , group->DisplayCount * sizeof(HDC)             , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->AttachedDisplays, group->DisplayCount * sizeof(CG_DISPLAY*)     , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->TransferQueue   , group->DeviceCount  * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->ComputeQueue    , group->DisplayCount * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->ComputeContext  , group->DeviceCount  * sizeof(cl_context)      , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->DeviceIds       , group->DeviceCount  * sizeof(cl_device_id)    , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->DeviceList      , group->DeviceCount  * sizeof(CG_DEVICE*)      , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    memset(group, 0, sizeof(CG_EXEC_GROUP));
+}
+
 /// @summary Allocates memory for and initializes an empty CGFX context object.
 /// @param app_info Information about the application associated with the context.
 /// @param alloc_cb User-supplied host memory allocator callbacks, or NULL.
@@ -765,8 +831,9 @@ cgCreateContext
     }
 
     // initialize the various object tables on the context to empty.
-    cgObjectTableInit(&ctx->DeviceTable , CG_OBJECT_DEVICE , CG_DEVICE_TABLE_ID);
-    cgObjectTableInit(&ctx->DisplayTable, CG_OBJECT_DISPLAY, CG_DISPLAY_TABLE_ID);
+    cgObjectTableInit(&ctx->DeviceTable   , CG_OBJECT_DEVICE         , CG_DEVICE_TABLE_ID);
+    cgObjectTableInit(&ctx->DisplayTable  , CG_OBJECT_DISPLAY        , CG_DISPLAY_TABLE_ID);
+    cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -783,14 +850,20 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all execution group objects:
+    for (size_t i = 0, n = ctx->ExecGroupTable.ObjectCount; i < n; ++i)
+    {
+        CG_EXEC_GROUP *group = &ctx->ExecGroupTable.Objects[i];
+        cgDeleteExecutionGroup(ctx, group);
+    }
     // free all device objects:
-    for (size_t i = 0; i < ctx->DeviceTable.ObjectCount; ++i)
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
     {
         CG_DEVICE  *obj = &ctx->DeviceTable.Objects[i];
         cgDeleteDevice(ctx, obj);
     }
     // free all display objects:
-    for (size_t i = 0; i < ctx->DisplayTable.ObjectCount; ++i)
+    for (size_t i = 0, n = ctx->DisplayTable.ObjectCount; i < n; ++i)
     {
         CG_DISPLAY *obj = &ctx->DisplayTable.Objects[i];
         cgDeleteDisplay(ctx, obj);
@@ -987,6 +1060,8 @@ cgClEnumerateDevices
             CG_DEVICE dev;
             
             // save basic device information.
+            dev.ExecutionGroup   = CG_INVALID_HANDLE;
+
             clGetDeviceInfo(device, CL_DEVICE_TYPE, sizeof(cl_device_type), &dev.Type, NULL);
             dev.PlatformId       = platform;
             dev.DeviceId         = device;
@@ -996,11 +1071,6 @@ cgClEnumerateDevices
             dev.Version          = cgClDeviceString  (ctx, device  , CL_DEVICE_VERSION   , CG_ALLOCATION_TYPE_INTERNAL);
             dev.Driver           = cgClDeviceString  (ctx, device  , CL_DRIVER_VERSION   , CG_ALLOCATION_TYPE_INTERNAL);
             dev.Extensions       = cgClDeviceString  (ctx, device  , CL_DEVICE_EXTENSIONS, CG_ALLOCATION_TYPE_INTERNAL);
-
-            // the following are set up when the device is configured.
-            dev.ComputeContext   = NULL;
-            dev.ComputeQueue     = NULL;
-            dev.TransferQueue    = NULL;
 
             // the following are setup during display enumeration.
             dev.DisplayCount     = 0;
@@ -1508,6 +1578,356 @@ cgGlEnumerateDisplays
     return CG_SUCCESS;
 }
 
+/// @summary Create a new logical device for each device partition and update the context device table.
+/// @param ctx The CGFX context to update.
+/// @param device The CG_DEVICE object representing the parent device.
+/// @param sub_ids The list of OpenCL device IDs for the sub devices.
+/// @param num_subdevs The number of items in @a sub_ids.
+/// @param num_devices On return, stores the number of devices created.
+/// @param sub_devices On return, populated with references to each new device object.
+internal_function void
+cgCreateLogicalDevices
+(
+    CG_CONTEXT   *ctx, 
+    CG_DEVICE    *device, 
+    cl_device_id *sub_ids, 
+    cl_uint       num_subdevs,
+    size_t       &num_devices, 
+    CG_DEVICE   **sub_devices
+)
+{
+    num_devices = 0;
+    for (size_t sub_index = 0, sub_count = size_t(num_subdevs); sub_index < sub_count; ++sub_index)
+    {
+        CG_DEVICE sub_dev;
+
+        sub_dev.ExecutionGroup = device->ExecutionGroup;
+
+        sub_dev.PlatformId     = device->PlatformId;
+        sub_dev.DeviceId       = sub_ids[sub_index];
+        sub_dev.MasterDeviceId = device->DeviceId;
+        sub_dev.Type           = device->Type;
+
+        sub_dev.Name           = cgClDeviceString  (ctx, sub_ids[sub_index], CL_DEVICE_NAME      , CG_ALLOCATION_TYPE_INTERNAL);
+        sub_dev.Platform       = cgClPlatformString(ctx, device->PlatformId, CL_PLATFORM_NAME    , CG_ALLOCATION_TYPE_INTERNAL);
+        sub_dev.Version        = cgClDeviceString  (ctx, sub_ids[sub_index], CL_DEVICE_VERSION   , CG_ALLOCATION_TYPE_INTERNAL);
+        sub_dev.Driver         = cgClDeviceString  (ctx, sub_ids[sub_index], CL_DRIVER_VERSION   , CG_ALLOCATION_TYPE_INTERNAL);
+        sub_dev.Extensions     = cgClDeviceString  (ctx, sub_ids[sub_index], CL_DEVICE_EXTENSIONS, CG_ALLOCATION_TYPE_INTERNAL);
+
+        // the following are setup during display enumeration.
+        sub_dev.DisplayCount   = device->DisplayCount;
+        sub_dev.DisplayRC      = device->DisplayRC;
+        memcpy(sub_dev.AttachedDisplays, device->AttachedDisplays, CG_OPENGL_MAX_ATTACHED_DISPLAYS * sizeof(CG_DISPLAY*));
+        memcpy(sub_dev.DisplayDC       , device->DisplayDC       , CG_OPENGL_MAX_ATTACHED_DISPLAYS * sizeof(HDC));
+
+        // query and cache all of the device capabilities.
+        cgClDeviceCapsQuery(ctx, &sub_dev.Capabilities, sub_ids[sub_index]);
+
+        // insert the logical device record into the device table.
+        cg_handle_t handle = cgObjectTableAdd(&ctx->DeviceTable, sub_dev);
+        if (handle != CG_INVALID_HANDLE)
+        {   // save the device reference for the caller.
+            CG_DEVICE *dev   = cgObjectTableGet(&ctx->DeviceTable, handle);
+            if (sub_devices != NULL)
+                sub_devices[num_devices] = dev;
+            num_devices++;
+        }
+        else
+        {   // free all of the device memory; the table is full.
+            cgClDeviceCapsFree(ctx, &sub_dev.Capabilities);
+            cgClFreeString(ctx, sub_dev.Extensions, CG_ALLOCATION_TYPE_INTERNAL);
+            cgClFreeString(ctx, sub_dev.Driver    , CG_ALLOCATION_TYPE_INTERNAL);
+            cgClFreeString(ctx, sub_dev.Version   , CG_ALLOCATION_TYPE_INTERNAL);
+            cgClFreeString(ctx, sub_dev.Platform  , CG_ALLOCATION_TYPE_INTERNAL);
+            cgClFreeString(ctx, sub_dev.Name      , CG_ALLOCATION_TYPE_INTERNAL);
+        }
+    }
+}
+
+/// @summary Configure a CPU device for task-parallel operation. One logical sub-device is created for each physical CPU core.
+/// @param ctx A CGFX context returned by cgEnumerateDevices.
+/// @param cpu The handle of the CPU compute device to configure.
+/// @param num_devices On return, stores the number of logical devices created.
+/// @param sub_devices An array of cg_cpu_counts_t::PhysicalCores handles to store the logical CPU device handles.
+/// @return CG_SUCCESS, CG_UNSUPPORTED, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+internal_function int
+cgConfigureCPUTaskParallel
+(
+    CG_CONTEXT  *ctx, 
+    cg_handle_t  cpu, 
+    size_t      &num_devices, 
+    CG_DEVICE  **sub_devices
+)
+{
+    CG_DEVICE   *device = cgObjectTableGet(&ctx->DeviceTable, cpu);
+    if (device == NULL || device->Type != CL_DEVICE_TYPE_CPU)
+    {   // invalid device or not a CPU device.
+        num_devices  = 0;
+        return CG_INVALID_VALUE;
+    }
+
+    size_t const                 props_n     = 4;
+    size_t                       props_out   = 0;
+    cl_device_partition_property props[props_n] ;
+    cl_device_id                 master_id   = device->DeviceId;
+    cl_device_id                *sub_ids     = NULL;
+    cl_uint                      sub_count   = 0;
+    cl_uint                      divisor     = 1;
+    bool                         supported   = false;
+
+    // query the number of sub-devices available and supported partition types.
+    memset(props, 0, props_n * sizeof(cl_device_partition_property));
+    clGetDeviceInfo(master_id, CL_DEVICE_PARTITION_MAX_SUB_DEVICES, sizeof(cl_uint), &sub_count, NULL);
+    clGetDeviceInfo(master_id, CL_DEVICE_PARTITION_PROPERTIES     , sizeof(cl_device_partition_property) * props_n, props, &props_out);
+    if (sub_count == 0)
+    {   // this device doesn't support partitioning.
+        num_devices = 0;
+        return CG_UNSUPPORTED;
+    }
+    // ensure that the runtime supports CL_DEVICE_PARTITION_EQUALLY.
+    for (size_t i = 0, n = props_out / sizeof(cl_device_partition_property); i < n; ++i)
+    {
+        if (props[i] == CL_DEVICE_PARTITION_EQUALLY)
+        {
+            supported = true;
+            break;
+        }
+    }
+    if (!supported)
+    {   // the required partition type isn't supported.
+        num_devices = 0;
+        return CG_UNSUPPORTED;
+    }
+    
+    // configure device fission for hyperthreading. 
+    if (ctx->CPUCounts.HardwareThreads == (ctx->CPUCounts.PhysicalCores * 2))
+    {   // the CPU(s) support SMT; each device gets two threads.
+        divisor = 2;
+    }
+    else divisor = 1;
+
+    // allocate some temporary storage for the sub-device IDs.
+    size_t memsz = (sub_count / divisor) * sizeof(cl_device_id);
+    if ((sub_ids = (cl_device_id*) cgAllocateHostMemory(&ctx->HostAllocator, memsz, 0, CG_ALLOCATION_TYPE_TEMP)) == NULL)
+    {   // unable to allocate the required memory.
+        num_devices = 0;
+        return CG_OUT_OF_MEMORY;
+    }
+
+    // partition the device equally into a number of sub-devices:
+    cl_device_partition_property partition_list[3] = 
+    {
+        (cl_device_partition_property) CL_DEVICE_PARTITION_EQUALLY, 
+        (cl_device_partition_property) divisor, 
+        (cl_device_partition_property) 0
+    };
+    cl_uint num_entries = sub_count / divisor;
+    cl_uint num_subdevs = 0;
+    clCreateSubDevices(master_id, partition_list, num_entries, sub_ids, &num_subdevs);
+    if (num_subdevs == 0)
+    {   // unable to partition the device.
+        cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+        num_devices  = 0;
+        return CG_INVALID_VALUE;
+    }
+
+    // add the new logical devices to the context device list and clean up.
+    cgCreateLogicalDevices(ctx, device  , sub_ids, num_subdevs, num_devices, sub_devices);
+    cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+    return CG_SUCCESS;
+}
+
+/// @summary Configure a CPU device for maximum throughput operation using all available resources on each NUMA node.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cpu_device The handle of the CPU compute device to configure.
+/// @param num_devices On return, stores the number of logical devices created.
+/// @param sub_devices An array of cg_cpu_counts_t::NUMANodes handles to store the logical CPU device handles.
+/// @return CG_SUCCESS, CG_UNSUPPORTED, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+internal_function int
+cgConfigureCPUHighThroughput
+(
+    CG_CONTEXT  *ctx, 
+    cg_handle_t  cpu, 
+    size_t      &num_devices,
+    CG_DEVICE  **sub_devices
+)
+{
+    CG_DEVICE   *device = cgObjectTableGet(&ctx->DeviceTable, cpu);
+    if (device == NULL || device->Type != CL_DEVICE_TYPE_CPU)
+    {   // invalid device or not a CPU device.
+        num_devices  = 0;
+        return CG_INVALID_VALUE;
+    }
+
+    size_t const                 props_n     = 4;
+    size_t                       props_out   = 0;
+    cl_device_partition_property props[props_n] ;
+    cl_device_id                 master_id   = device->DeviceId;
+    cl_device_id                *sub_ids     = NULL;
+    cl_uint                      sub_count   = 0;
+    cl_uint                      divisor     = 1;
+    bool                         supported   = false;
+
+    // query the number of sub-devices available and supported partition types.
+    memset(props, 0, props_n * sizeof(cl_device_partition_property));
+    clGetDeviceInfo(master_id, CL_DEVICE_PARTITION_MAX_SUB_DEVICES, sizeof(cl_uint), &sub_count, NULL);
+    clGetDeviceInfo(master_id, CL_DEVICE_PARTITION_PROPERTIES     , sizeof(cl_device_partition_property) * props_n, props, &props_out);
+    if (sub_count == 0)
+    {   // this device doesn't support partitioning.
+        num_devices = 0;
+        return CG_UNSUPPORTED;
+    }
+    // ensure that the runtime supports CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN.
+    for (size_t i = 0, n = props_out / sizeof(cl_device_partition_property); i < n; ++i)
+    {
+        if (props[i] == CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN)
+        {
+            supported = true;
+            break;
+        }
+    }
+    if (!supported)
+    {   // the required partition type isn't supported.
+        num_devices = 0;
+        return CG_UNSUPPORTED;
+    }
+
+    // allocate some temporary storage for the sub-device IDs.
+    size_t memsz =  ctx->CPUCounts.NUMANodes * sizeof(cl_device_id);
+    if ((sub_ids = (cl_device_id*) cgAllocateHostMemory(&ctx->HostAllocator, memsz, 0, CG_ALLOCATION_TYPE_TEMP)) == NULL)
+    {   // unable to allocate the required memory.
+        num_devices = 0;
+        return CG_OUT_OF_MEMORY;
+    }
+
+    // partition the device equally into a number of sub-devices:
+    cl_device_partition_property partition_list[3] = 
+    {
+        (cl_device_partition_property) CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN, 
+        (cl_device_partition_property) CL_DEVICE_AFFINITY_DOMAIN_NUMA, 
+        (cl_device_partition_property) 0
+    };
+    cl_uint num_entries = ctx->CPUCounts.NUMANodes;
+    cl_uint num_subdevs = 0;
+    clCreateSubDevices(master_id, partition_list, num_entries, sub_ids, &num_subdevs);
+    if (num_subdevs == 0)
+    {   // unable to partition the device.
+        cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+        num_devices  = 0;
+        return CG_INVALID_VALUE;
+    }
+
+    // add the new logical devices to the context device list and clean up.
+    cgCreateLogicalDevices(ctx, device  , sub_ids, num_subdevs, num_devices, sub_devices);
+    cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+    return CG_SUCCESS;
+}
+
+/// @summary Configure a CPU device with a custom partition scheme, which can be used to distribute or disable hardware threads.
+/// @param ctx A CGFX context returned by cgEnumerateDevices.
+/// @param cpu The handle of the CPU compute device to configure.
+/// @param thread_counts An array of device_count items specifying the number of hardware threads to use for each logical device.
+/// @param device_count The number of logical CPU devices to create.
+/// @param sub_devices An array of device_count items to store the logical CPU device handles.
+/// @return CG_SUCCESS or CG_UNSUPPORTED.
+internal_function int
+cgConfigureCPUPartitionCount
+(
+    CG_CONTEXT  *ctx, 
+    cg_handle_t  cpu, 
+    int         *thread_counts, 
+    size_t       device_count,
+    size_t      &num_devices, 
+    CG_DEVICE  **sub_devices
+)
+{   // to disable hardware threads for OpenCL use, using an example 8 (physical) core SMT system where we only want 4 cores to be used:
+    // size_t const device_count = 1
+    // int threads_per_device[device_count] = { 8 }; // enable 8 hardware threads out of 16 total
+    // cgConfigureCPUPartitionCount(ctx, cpu, threads_per_device, device_count, ...)
+    CG_DEVICE   *device = cgObjectTableGet(&ctx->DeviceTable, cpu);
+    if (device == NULL || device->Type != CL_DEVICE_TYPE_CPU)
+    {   // invalid device or not a CPU device.
+        num_devices  = 0;
+        return CG_INVALID_VALUE;
+    }
+
+    size_t const                 props_n     = 4;
+    size_t                       props_out   = 0;
+    cl_device_partition_property props[props_n] ;
+    cl_device_id                 master_id   = device->DeviceId;
+    cl_device_id                *sub_ids     = NULL;
+    cl_uint                      sub_count   = 0;
+    cl_uint                      divisor     = 1;
+    bool                         supported   = false;
+
+    // query the number of sub-devices available and supported partition types.
+    memset(props, 0, props_n * sizeof(cl_device_partition_property));
+    clGetDeviceInfo(master_id, CL_DEVICE_PARTITION_MAX_SUB_DEVICES, sizeof(cl_uint), &sub_count, NULL);
+    clGetDeviceInfo(master_id, CL_DEVICE_PARTITION_PROPERTIES     , sizeof(cl_device_partition_property) * props_n, props, &props_out);
+    if (sub_count == 0)
+    {   // this device doesn't support partitioning.
+        num_devices = 0;
+        return CG_UNSUPPORTED;
+    }
+    // ensure that the runtime supports CL_DEVICE_PARTITION_BY_COUNTS.
+    for (size_t i = 0, n = props_out / sizeof(cl_device_partition_property); i < n; ++i)
+    {
+        if (props[i] == CL_DEVICE_PARTITION_BY_COUNTS)
+        {
+            supported = true;
+            break;
+        }
+    }
+    if (!supported)
+    {   // the required partition type isn't supported.
+        num_devices = 0;
+        return CG_UNSUPPORTED;
+    }
+
+    // allocate some temporary storage for the sub-device IDs.
+    size_t memsz =  device_count *  sizeof(cl_device_id);
+    if ((sub_ids = (cl_device_id *) cgAllocateHostMemory(&ctx->HostAllocator, memsz, 0, CG_ALLOCATION_TYPE_TEMP)) == NULL)
+    {   // unable to allocate the required memory.
+        num_devices = 0;
+        return CG_OUT_OF_MEMORY;
+    }
+
+    // allocate some temporary storage for the partition list:
+    size_t lstsz = (device_count + 2) * sizeof(cl_device_partition_property);
+    void  *lstbp =  cgAllocateHostMemory(&ctx->HostAllocator, lstsz, 0, CG_ALLOCATION_TYPE_TEMP);
+    if (lstbp == NULL)
+    {   // unable to allocate the required memory.
+        cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+        num_devices = 0;
+        return CG_OUT_OF_MEMORY;
+    }
+
+    // partition the device into the specified number of sub-devices:
+    cl_device_partition_property *partition_list = (cl_device_partition_property*) lstbp;
+    partition_list[0] = CL_DEVICE_PARTITION_BY_COUNTS;
+    for (size_t i = 1, d = 0; d < device_count; ++i, ++d)
+    {
+        partition_list[i] = (cl_device_partition_property) thread_counts[d];
+    }
+    partition_list[lstsz-1] = CL_DEVICE_PARTITION_BY_COUNTS_LIST_END;
+    cl_uint num_entries     = cl_uint(device_count);
+    cl_uint num_subdevs     = 0;
+    clCreateSubDevices(master_id, partition_list, num_entries, sub_ids, &num_subdevs);
+    if (num_subdevs == 0)
+    {   // unable to partition the device.
+        cgFreeHostMemory(&ctx->HostAllocator, lstbp  , lstsz, 0, CG_ALLOCATION_TYPE_TEMP);
+        cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+        num_devices  = 0;
+        return CG_INVALID_VALUE;
+    }
+
+    // add the new logical devices to the context device list and clean up.
+    cgCreateLogicalDevices(ctx, device  , sub_ids, num_subdevs, num_devices, sub_devices);
+    cgFreeHostMemory(&ctx->HostAllocator, lstbp  , lstsz, 0, CG_ALLOCATION_TYPE_TEMP);
+    cgFreeHostMemory(&ctx->HostAllocator, sub_ids, memsz, 0, CG_ALLOCATION_TYPE_TEMP);
+    return CG_SUCCESS;
+}
+
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
@@ -1833,24 +2253,6 @@ cgGetDeviceInfo
         }
         return CG_SUCCESS;
 
-    case CG_DEVICE_CL_CONTEXT:
-        {   BUFFER_CHECK_TYPE(cl_context);
-            BUFFER_SET_SCALAR(cl_context, device->ComputeContext);
-        }
-        return CG_SUCCESS;
-
-    case CG_DEVICE_CL_COMPUTE_QUEUE:
-        {   BUFFER_CHECK_TYPE(cl_command_queue);
-            BUFFER_SET_SCALAR(cl_command_queue, device->ComputeQueue);
-        }
-        return CG_SUCCESS;
-
-    case CG_DEVICE_CL_TRANSFER_QUEUE:
-        {   BUFFER_CHECK_TYPE(cl_command_queue);
-            BUFFER_SET_SCALAR(cl_command_queue, device->TransferQueue);
-        }
-        return CG_SUCCESS;
-
     default:
         {
             if (bytes_needed != NULL) *bytes_needed = 0;
@@ -2004,27 +2406,6 @@ cgGetDisplayInfo
     case CG_DISPLAY_WINDOWS_HGLRC:
         {   BUFFER_CHECK_TYPE(HGLRC);
             BUFFER_SET_SCALAR(HGLRC, display->DisplayRC);
-        }
-        return CG_SUCCESS;
-
-    case CG_DISPLAY_CL_CONTEXT:
-        {   BUFFER_CHECK_TYPE(cl_context);
-            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_context, display->DisplayDevice->ComputeContext);
-            else BUFFER_SET_SCALAR(cl_context, NULL);
-        }
-        return CG_SUCCESS;
-
-    case CG_DISPLAY_CL_COMPUTE_QUEUE:
-        {   BUFFER_CHECK_TYPE(cl_command_queue);
-            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_command_queue, display->DisplayDevice->ComputeQueue);
-            else BUFFER_SET_SCALAR(cl_command_queue, NULL);
-        }
-        return CG_SUCCESS;
-
-    case CG_DISPLAY_CL_TRANSFER_QUEUE:
-        {   BUFFER_CHECK_TYPE(cl_command_queue);
-            if (display->DisplayDevice != NULL) BUFFER_SET_SCALAR(cl_command_queue, display->DisplayDevice->ComputeQueue);
-            else BUFFER_SET_SCALAR(cl_command_queue, NULL);
         }
         return CG_SUCCESS;
 
@@ -2252,58 +2633,211 @@ cgGetGPUDevicesInShareGroup
     return CG_SUCCESS;
 }
 
-/// @summary Configure a CPU device for task-parallel operation. One logical sub-device is created for each physical CPU core.
-/// @param context A CGFX context returned by cgEnumerateDevices.
-/// @param cpu_device The handle of the CPU compute device to configure.
-/// @param num_devices On return, stores the number of logical devices created.
-/// @param sub_devices An array of cg_cpu_counts_t::PhysicalCores handles to store the logical CPU device handles.
-/// @return CG_SUCCESS or CG_UNSUPPORTED.
-library_function int
-cgConfigureCPUTaskParallel
+internal_function void
+cgAdjustDeviceCountForCPUPartitions
 (
-    uintptr_t    context, 
-    cg_handle_t  cpu_device, 
+    CG_CONTEXT *ctx, 
+    uint32_t    create_flags, 
+    size_t      partition_count, 
+    size_t     &device_count
+)
+{
+    if (create_flags & CG_EXECUTION_GROUP_CPU_PARTITION)
+    {   // TASK_PARALLEL may also be specified, which acts 
+        // as a modifier when creating queues, and not as 
+        // a partition method, so check CPU_PARTITION first.
+        device_count += partition_count;
+        return;
+    }
+    if (create_flags & CG_EXECUTION_GROUP_TASK_PARALLEL)
+    {   // TASK_PARALLEL partitioning creates one device 
+        // for each physical core in the system.
+        device_count += ctx->CPUCounts.PhysicalCores;
+        return;
+    }
+    if (create_flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT)
+    {   // HIGH_THROUGHPUT partitioning creates one device
+        // for each NUMA node in the system.
+        device_count += ctx->CPUCounts.NUMANodes;
+    }
+}
+
+internal_function cg_handle_t*
+cgCreateImplicitDeviceList
+(   
+    CG_CONTEXT  *ctx, 
+    cg_handle_t  root_device, 
+    uint32_t     create_flags, 
+    int         *thread_counts, 
+    size_t       partition_count,
     size_t      &num_devices, 
-    cg_handle_t *sub_devices
+    int         &result
 )
 {
-    return CG_UNSUPPORTED;
+    CG_DEVICE     *root_dev  = cgObjectTableGet(&ctx->DeviceTable, root_device);
+    cl_platform_id group_id  = root_dev->PlatformId;
+    cg_handle_t   *devices   = NULL;
+    size_t         num_cpu   = 0; // number of CPU devices
+    size_t         num_gpu   = 0; // number of GPU devices
+    size_t         num_acl   = 0; // number of accelerator devices
+    size_t         num_part  = 0; // number of CPU devices post-partition
+    size_t         num_total = 0;
+
+    // count the number of devices to be included in the list.
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE *dev = &ctx->DeviceTable.Objects[i];
+        if (dev->PlatformId == group_id && dev->ExecutionGroup == CG_INVALID_HANDLE)
+        {   // this device is part of the same share group and is currently unassigned.
+            if (dev->Type == CL_DEVICE_TYPE_CPU && (create_flags & CG_EXECUTION_GROUP_CPUS) != 0)
+            {   num_cpu++;
+                continue;
+            }
+            if (dev->Type == CL_DEVICE_TYPE_GPU && (create_flags & CG_EXECUTION_GROUP_GPUS) != 0)
+            {   num_gpu++;
+                continue;
+            }
+            if (dev->Type == CL_DEVICE_TYPE_ACCELERATOR && (create_flags & CG_EXECUTION_GROUP_ACCELERATORS) != 0)
+            {   num_acl++;
+                continue;
+            }
+        }
+    }
+    
+    // expand the count to include partitioned CPU devices:
+    if (num_cpu > 0)
+    {
+        cgAdjustDeviceCountForCPUPartitions(ctx, create_flags, partition_count, num_part);
+        num_cpu = 0; // use the partitioned devices
+    }
+
+    // calculate the total count:
+    num_total = num_cpu + num_gpu + num_acl + num_part;
+
+    // allocate storage for the device handles:
+    if ((devices = (cg_handle_t*) cgAllocateHostMemory(&ctx->HostAllocator, num_total * sizeof(cg_handle_t), 0, CG_ALLOCATION_TYPE_TEMP)) == NULL)
+    {   // unable to allocate the necessary memory.
+        result      = CG_OUT_OF_MEMORY;
+        num_devices = 0;
+        return NULL;
+    }
+
+    // populate the device list.
+    num_devices = 0;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE *dev = &ctx->DeviceTable.Objects[i];
+        if (dev->PlatformId == group_id && dev->ExecutionGroup == CG_INVALID_HANDLE)
+        {   // this device is part of the same share group and is currently unassigned.
+            if (dev->Type == CL_DEVICE_TYPE_CPU && (create_flags & CG_EXECUTION_GROUP_CPUS) != 0)
+            {   // partition the device per user preference.
+                if (create_flags & CG_EXECUTION_GROUP_CPU_PARTITION)
+                {   size_t out_count = 0;
+                    if ((result  = cgConfigureCPUPartitionCount(ctx, dev, thread_counts, partition_count, out_count, &devices[num_devices])) != CG_SUCCESS)
+                    { // TODO(rlk): error handling
+                    }
+                    num_devices += out_count;
+                    continue;
+                }
+                if (create_flags & CG_EXECUTION_GROUP_TASK_PARALLEL)
+                {   size_t out_count = 0;
+                    if ((result  = cgConfigureCPUTaskParallel(ctx, dev, out_count, &devices[num_devices])) != CG_SUCCESS)
+                    { // TODO(rlk): error handling
+                    }
+                    num_devices += out_count;
+                    continue;
+                }
+                if (create_flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT)
+                {   size_t out_count = 0;
+                    if ((result  = cgConfigureCPUHighThroughput(ctx, dev, out_count, &devices[num_devices])) != CG_SUCCESS)
+                    { // TODO(rlk): error handling
+                    }
+                    num_devices += out_count;
+                    continue;
+                }
+                // else, do not partition the device.
+                devices[num_devices++] = cgMakeHandle(&ctx->DeviceTable, i);
+                continue;
+            }
+            if (dev->Type == CL_DEVICE_TYPE_GPU && (create_flags & CG_EXECUTION_GROUP_GPUS) != 0)
+            {   devices[num_devices++] = cgMakeHandle(&ctx->DeviceTable, i);
+                continue;
+            }
+            if (dev->Type == CL_DEVICE_TYPE_ACCELERATOR && (create_flags & CG_EXECUTION_GROUP_ACCELERATORS) != 0)
+            {   devices[num_devices++] = cgMakeHandle(&ctx->DeviceTable, i);
+                continue;
+            }
+        }
+    }
 }
 
-/// @summary Configure a CPU device for maximum throughput operation using all available resources on each NUMA node.
-/// @param context A CGFX context returned by cgEnumerateDevices.
-/// @param cpu_device The handle of the CPU compute device to configure.
-/// @param num_devices On return, stores the number of logical devices created.
-/// @param sub_devices An array of cg_cpu_counts_t::NUMANodes handles to store the logical CPU device handles.
-/// @return CG_SUCCESS or CG_UNSUPPORTED.
-library_function int
-cgConfigureCPUHighThroughput
+internal_function cg_handle_t*
+cgCreateExplicitDeviceList
 (
-    uintptr_t    context, 
-    cg_handle_t  cpu_device, 
-    size_t      &num_devices,
-    cg_handle_t *sub_devices
+    CG_CONTEXT  *ctx, 
+    cg_handle_t *root_device
 )
 {
-    return CG_UNSUPPORTED;
 }
 
-/// @summary Configure a CPU device with a custom partition scheme, which can be used to distribute or disable hardware threads.
+/// @summary Create an execution group out of a set of devices.
 /// @param context A CGFX context returned by cgEnumerateDevices.
-/// @param cpu_device The handle of the CPU compute device to configure.
-/// @param thread_counts An array of device_count items specifying the number of hardware threads to use for each logical device.
-/// @param device_count The number of logical CPU devices to create.
-/// @param sub_devices An array of device_count items to store the logical CPU device handles.
-/// @return CG_SUCCESS or CG_UNSUPPORTED.
-library_function int
-cgConfigureCPUPartitionCount
+/// @param config A description of the execution group to create.
+/// @param result On return, set to CG_SUCCESS or another result code.
+library_function cg_handle_t
+cgCreateExecutionGroup
 (
-    uintptr_t    context, 
-    cg_handle_t  cpu_device, 
-    int         *thread_counts,
-    size_t       device_count, 
-    cg_handle_t *sub_devices
+    uintptr_t                   context, 
+    cg_execution_group_t const *config, 
+    int                        &result
 )
 {
-    return CG_UNSUPPORTED;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    uint32_t    flags  = config->CreateFlags;
+    bool implicit_list = false;
+
+    // sanitize the CPU device configuration flags.
+    if (flags & CG_EXECUTION_GROUP_TASK_PARALLEL)
+    {   // cannot also specify HIGH_THROUGHPUT.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if (flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT)
+    {   // cannot also specify CPU_PARTITION.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if (flags & CG_EXECUTION_GROUP_CPU_PARTITION)
+    {   // TASK_PARALLEL may also be specified, if desired.
+        if (config->PartitionCount == 0 || config->ThreadCounts == NULL)
+        {   // the user didn't specify any explicit partitions.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+    }
+
+    if ((config->CreateFlags & CG_EXECUTION_GROUP_CPUS) != 0 || 
+        (config->CreateFlags & CG_EXECUTION_GROUP_GPUS) != 0 || 
+        (config->CreateFlags & CG_EXECUTION_GROUP_ACCELERATORS) != 0)
+    {   // user requests implicit construction of the device list.
+        implicit_list = true;
+    }
+    else
+    {   // the device list is the root device, plus any extra devices 
+    }
+    // all devices must be in the same platform as the root device.
+    // there is only one CPU device per-platform, even if there are multiple physical CPUs.
+}
+
+library_function int
+cgDestroyExecutionGroup
+(
+    uintptr_t   context, 
+    cg_handle_t group_handle
+)
+{
+    // when destroying the execution group, *delete* any device records
+    // that point back to this execution group AND have a device ID that
+    // is not equal to the master ID (these were logical devices created
+    // when the execution group was created.)
 }

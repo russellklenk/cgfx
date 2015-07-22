@@ -134,22 +134,23 @@ enum cg_object_e : uint32_t
     CG_OBJECT_NONE                = (0 <<  0),     /// An invalid object type identifier.
     CG_OBJECT_DEVICE              = (1 <<  0),     /// The object type identifier for a device.
     CG_OBJECT_DISPLAY             = (1 <<  1),     /// The object type identifier for a display output.
-    CG_OBJECT_QUEUE               = (1 <<  2),     /// The object type identifier for a queue.
-    CG_OBJECT_COMMAND_BUFFER      = (1 <<  3),     /// The object type identifier for a command buffer.
-    CG_OBJECT_MEMORY              = (1 <<  4),     /// The object type identifier for a generic memory object.
-    CG_OBJECT_FENCE               = (1 <<  5),     /// The object type identifier for a fence.
-    CG_OBJECT_EVENT               = (1 <<  6),     /// The object type identifier for a waitable event.
-    CG_OBJECT_QUERY_POOL          = (1 <<  7),     /// The object type identifier for a query pool.
-    CG_OBJECT_IMAGE               = (1 <<  8),     /// The object type identifier for an image.
-    CG_OBJECT_KERNEL              = (1 <<  9),     /// The object type identifier for a compute or shader kernel.
-    CG_OBJECT_PIPELINE            = (1 << 10),     /// The object type identifier for a compute or display pipeline.
-    CG_OBJECT_SAMPLER             = (1 << 11),     /// The object type identifier for an image sampler.
-    CG_OBJECT_DESCRIPTOR_SET      = (1 << 12),     /// The object type identifier for a descriptor set.
-    CG_OBJECT_RASTER_STATE        = (1 << 13),     /// The object type identifier for a rasterizer state description.
-    CG_OBJECT_VIEWPORT_STATE      = (1 << 14),     /// The object type identifier for a viewport state description.
-    CG_OBJECT_BLEND_STATE         = (1 << 15),     /// The object type identifier for a blend state description.
-    CG_OBJECT_DEPTH_STENCIL_STATE = (1 << 16),     /// The object type identifier for a depth/stencil state description.
-    CG_OBJECT_MULTISAMPLE_STATE   = (1 << 17),     /// The object type identifier for a multisample antialiasing state description.
+    CG_OBJECT_EXECUTION_GROUP     = (1 <<  2),     /// The object type identifier for an execution group.
+    CG_OBJECT_QUEUE               = (1 <<  3),     /// The object type identifier for a queue.
+    CG_OBJECT_COMMAND_BUFFER      = (1 <<  4),     /// The object type identifier for a command buffer.
+    CG_OBJECT_MEMORY              = (1 <<  5),     /// The object type identifier for a generic memory object.
+    CG_OBJECT_FENCE               = (1 <<  6),     /// The object type identifier for a fence.
+    CG_OBJECT_EVENT               = (1 <<  7),     /// The object type identifier for a waitable event.
+    CG_OBJECT_QUERY_POOL          = (1 <<  8),     /// The object type identifier for a query pool.
+    CG_OBJECT_IMAGE               = (1 <<  9),     /// The object type identifier for an image.
+    CG_OBJECT_KERNEL              = (1 << 10),     /// The object type identifier for a compute or shader kernel.
+    CG_OBJECT_PIPELINE            = (1 << 11),     /// The object type identifier for a compute or display pipeline.
+    CG_OBJECT_SAMPLER             = (1 << 12),     /// The object type identifier for an image sampler.
+    CG_OBJECT_DESCRIPTOR_SET      = (1 << 13),     /// The object type identifier for a descriptor set.
+    CG_OBJECT_RASTER_STATE        = (1 << 14),     /// The object type identifier for a rasterizer state description.
+    CG_OBJECT_VIEWPORT_STATE      = (1 << 15),     /// The object type identifier for a viewport state description.
+    CG_OBJECT_BLEND_STATE         = (1 << 16),     /// The object type identifier for a blend state description.
+    CG_OBJECT_DEPTH_STENCIL_STATE = (1 << 17),     /// The object type identifier for a depth/stencil state description.
+    CG_OBJECT_MULTISAMPLE_STATE   = (1 << 18),     /// The object type identifier for a multisample antialiasing state description.
 };
 
 /// @summary Define the queryable or settable data on a CGFX context.
@@ -170,9 +171,6 @@ enum cg_device_info_param_e : int
     CG_DEVICE_DISPLAY_COUNT       = 4,             /// Retrieve the number of displays attached to the device. Data is size_t.
     CG_DEVICE_ATTACHED_DISPLAYS   = 5,             /// Retrieve the object handles of the attached displays. Data is cg_handle_t[CG_DEVICE_DISPLAY_COUNT].
     CG_DEVICE_PRIMARY_DISPLAY     = 6,             /// Retrieve the primary display attached to the device. Data is cg_handle_t.
-    CG_DEVICE_CL_CONTEXT          = 7,             /// Retrieve the OpenCL context of the device. Data is cl_context.
-    CG_DEVICE_CL_COMPUTE_QUEUE    = 8,             /// Retrieve the OpenCL command queue used for submitting compute work to the device. Data is cl_command_queue.
-    CG_DEVICE_CL_TRANSFER_QUEUE   = 9,             /// Retrieve the OpenCL command queue used for submitting data transfers to and from the device. Data is cl_command_queue.
 };
 
 /// @summary Define the queryable or settable data on a CGFX display.
@@ -183,13 +181,10 @@ enum cg_display_info_param_e : int
     CG_DISPLAY_CL_DEVICE_ID       = 2,             /// Retrieve the OpenCL device ID of the device driving the display. Data is cl_platform_id.
     CG_DISPLAY_WINDOWS_HDC        = 3,             /// Retrieve the Windows device context of the display. Data is HDC.
     CG_DISPLAY_WINDOWS_HGLRC      = 4,             /// Retrieve the Windows OpenGL rendering context of the device. Data is HGLRC.
-    CG_DISPLAY_CL_CONTEXT         = 5,             /// Retrieve the OpenCL context of the device driving the display. Data is cl_context.
-    CG_DISPLAY_CL_COMPUTE_QUEUE   = 6,             /// Retrieve the OpenCL command queue used for submitting compute work to the device. Data is cl_command_queue.
-    CG_DISPLAY_CL_TRANSFER_QUEUE  = 7,             /// Retrieve the OpenCL command queue used for submitting data transfers to and from the device. Data is cl_command_queue.
-    CG_DISPLAY_POSITION           = 8,             /// Retrieve the x and y-coordinate of the upper-left corner of the display. Data is int[2].
-    CG_DISPLAY_SIZE               = 9,             /// Retrieve the width and height of the display, in pixels. Data is size_t[2].
-    CG_DISPLAY_ORIENTATION        = 10,            /// Retrieve the current orientation of the display. Data is cg_display_orientation_e.
-    CG_DISPLAY_REFRESH_RATE       = 11,            /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.
+    CG_DISPLAY_POSITION           = 5,             /// Retrieve the x and y-coordinate of the upper-left corner of the display. Data is int[2].
+    CG_DISPLAY_SIZE               = 6,             /// Retrieve the width and height of the display, in pixels. Data is size_t[2].
+    CG_DISPLAY_ORIENTATION        = 7,             /// Retrieve the current orientation of the display. Data is cg_display_orientation_e.
+    CG_DISPLAY_REFRESH_RATE       = 8,             /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.
 };
 
 /// @summary Define the recognized display orientation values.
@@ -200,12 +195,32 @@ enum cg_display_orientation_e : int
     CG_DISPLAY_ORIENTATION_PORTRAIT  = 2,          /// The display device is in portrait mode.
 };
 
+/// @summary Define the supported types of execution group queues.
+enum cg_queue_type_e : int
+{
+    CG_QUEUE_TYPE_COMPUTE              =  0,       /// The queue is used for submitting compute kernel dispatch commands.
+    CG_QUEUE_TYPE_GRAPHICS             =  1,       /// The queue is used for submitting graphics kernel dispatch commands.
+    CG_QUEUE_TYPE_TRANSFER             =  2,       /// The queue is used for submitting data transfer commands using a DMA engine.
+};
+
+/// @summary Define flags that can be specified when creating an execution group.
+enum cg_execution_group_flags_e : uint32_t
+{
+    CG_EXECUTION_GROUP_FLAGS_NONE      = (0 << 0), /// Configure CPUs for data parallel operation, specify devices explicitly.
+    CG_EXECUTION_GROUP_TASK_PARALLEL   = (1 << 0), /// Configure all CPU devices in the group for task-parallel operation.
+    CG_EXECUTION_GROUP_HIGH_THROUGHPUT = (1 << 1), /// Configure all CPU devices in the group for maximum throughput.
+    CG_EXECUTION_GROUP_CPU_PARTITION   = (1 << 2), /// Configure CPU devices according to a specified partition layout.
+    CG_EXECUTION_GROUP_CPUS            = (1 << 3), /// Include all CPUs in the sharegroup of the master device.
+    CG_EXECUTION_GROUP_GPUS            = (1 << 4), /// Include all GPUs in the sharegroup of the master device.
+    CG_EXECUTION_GROUP_ACCELERATORS    = (1 << 5), /// Include all accelerators in the sharegroup of the master device.
+};
+
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
 struct cg_application_info_t
 {
     char const                   *AppName;         /// The name of the application.
     char const                   *DriverName;      /// The name of the application driver.
-    uint32_t                      ApiVersion;      /// The version of the UISS API being requested.
+    uint32_t                      ApiVersion;      /// The version of the CGFX API being requested.
     uint32_t                      AppVersion;      /// The version of the application.
     uint32_t                      DriverVersion;   /// The version of the application driver.
 };
@@ -216,6 +231,22 @@ struct cg_allocation_callbacks_t
     cgMemoryAlloc_fn              Allocate;        /// Called when CGFX needs to allocate memory.
     cgMemoryFree_fn               Release;         /// Called when CGFX wants to return memory.
     uintptr_t                     UserData;        /// Opaque data to be passed to the callbacks. May be 0.
+};
+
+/// @summary Define the data used to create an execution group.
+struct cg_execution_group_t
+{
+    cg_handle_t                   RootDevice;      /// The handle of the root device used to determine the share group.
+    size_t                        DeviceCount;     /// The number of explicitly-specified devices in the execution group.
+    cg_handle_t                  *DeviceList;      /// An array of DeviceCount handles of the explicitly-specified devices in the execution group.
+    size_t                        QueueCount;      /// The number of queues to create for the execution group. Must be at least 1.
+    int                          *QueueTypes;      /// An array of QueueCount items specifying the type of queue to create. Each queue type can only be specified once.
+    size_t                        PartitionCount;  /// The number of CPU device partitions specified.
+    int                          *ThreadCounts;    /// An array of PartitionCount items specifying the number of hardware threads per-partition.
+    size_t                        ExtensionCount;  /// The number of extensions to enable.
+    char const                  **ExtensionNames;  /// An array of ExtensionCount NULL-terminated ASCII strings naming the extensions to enable.
+    uint32_t                      CreateFlags;     /// A combination of cg_extension_group_flags_e specifying group creation flags.
+    int                           ValidationLevel; /// One of cg_validation_level_e specifying the validation level to enable.
 };
 
 /// @summary Define the data returned when querying for the CPU resources available in the system.
@@ -363,32 +394,12 @@ cgGetGPUDevicesInShareGroup                     /// Retrieve the count of and ha
     cg_handle_t                  *gpu_devices   /// On return, if non-NULL, stores min(max_devices, gpu_count) handles of devices in the share group.
 );
 
-int
-cgConfigureCPUTaskParallel                      /// Configure a CPU device for task-parallel operation.
+cg_handle_t
+cgCreateExecutionGroup                          /// Create an execution group consisting of one or more devices.
 (
     uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   cpu_device,   /// The handle of the CPU device to configure.
-    size_t                       &num_devices,  /// On return stores the number of logical devices.
-    cg_handle_t                  *sub_devices   /// On return, stores the logical device handles[cg_cpu_counts::PhysicalCores].
-);
-
-int
-cgConfigureCPUHighThroughput                    /// Configure a CPU device for maximum throughput with limited or no data sharing.
-(
-    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   cpu_device,   /// The handle of the CPU device to configure.
-    size_t                       &num_devices,  /// On return, stores the number of logical devices.
-    cg_handle_t                  *sub_devices   /// On return, stores the logical device handles[cg_cpu_counts_t::NUMANodes].
-);
-
-int
-cgConfigureCPUPartitionCount                    /// Configure a CPU device with a custom partition scheme.
-(
-    uintptr_t                     context,      /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   cpu_device,   /// The handle of the CPU device to configure.
-    int                          *thread_counts,/// An array of device_count, values specifying the number of hardware threads per-device.
-    size_t                        device_count, /// The number of logical sub-devices to create.
-    cg_handle_t                  *sub_devices   /// On return, stores the logical device handles[device_count].
+    cg_execution_group_t const   *create_info,  /// Information describing the share group configuration.
+    int                          &result        /// On return, set to CG_SUCCESS or another result code.
 );
 
 #ifdef __cplusplus
