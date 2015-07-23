@@ -56,8 +56,8 @@ struct CG_OBJECT_TABLE
 {
     static size_t   const MAX_OBJECTS_PER_TABLE = N;
     static uint32_t const OBJECT_INDEX_INVALID  = N;
-    static uint32_t const OBJECT_INDEX_MASK     = N;
-    static uint32_t const NEW_OBJECT_ID_ADD     =(N + 1);
+    static uint32_t const OBJECT_INDEX_MASK     =(N - 1);
+    static uint32_t const NEW_OBJECT_ID_ADD     = N;
 
     size_t                ObjectCount;  /// The number of live objects in the table.
     uint16_t              FreeListTail; /// The index of the most recently freed item.
@@ -218,7 +218,7 @@ cgObjectTableInit
     for (size_t i = 0; i < CG_OBJECT_TABLE<T,N>::MAX_OBJECTS_PER_TABLE; ++i)
     {
         table->Indices[i].Id   = uint32_t(i);
-        table->Indices[i].Next = uint16_t(i-1);
+        table->Indices[i].Next = uint16_t(i+1);
     }
 }
 
@@ -277,7 +277,7 @@ cgObjectTableAdd
         uint32_t const    type = table->ObjectType;
         size_t   const    tidx = table->TableIndex;
         CG_OBJECT_INDEX &index = table->Indices[table->FreeListHead];     // retrieve the next free object index
-        table->FreeListHead    = index.Index;                             // pop the item from the free list
+        table->FreeListHead    = index.Next;                              // pop the item from the free list
         index.Id              += CG_OBJECT_TABLE<T,N>::NEW_OBJECT_ID_ADD; // assign the new item a unique ID
         index.Index            =(uint16_t) table->ObjectCount;            // allocate the next unused slot in the packed array
         T &object              = table->Objects[index.Index];             // object references the allocated slot
