@@ -108,6 +108,8 @@ enum cg_result_e : int
     CG_NO_GLCONTEXT               = -6,            /// Unable to create the OpenGL rendering context.
     CG_BAD_GLCONTEXT              = -7,            /// Unable to activate the OpenGL rendering context.
     CG_NO_CLCONTEXT               = -8,            /// Unable to create the OpenCL device context.
+    CG_BAD_CLCONTEXT              = -9,            /// The OpenCL context is invalid.
+    CG_OUT_OF_OBJECTS             =-10,            /// There are no more available objects of the requested type.
     CG_SUCCESS                    =  0,            /// The operation completed successfully.
     CG_UNSUPPORTED                =  1,            /// The function completed successfully, but the operation is not supported.
     CG_NOT_READY                  =  2,            /// The function completed successfully, but the result is not available yet.
@@ -240,8 +242,6 @@ struct cg_execution_group_t
     cg_handle_t                   RootDevice;      /// The handle of the root device used to determine the share group.
     size_t                        DeviceCount;     /// The number of explicitly-specified devices in the execution group.
     cg_handle_t                  *DeviceList;      /// An array of DeviceCount handles of the explicitly-specified devices in the execution group.
-    size_t                        QueueCount;      /// The number of queues to create for the execution group. Must be at least 1.
-    int                          *QueueTypes;      /// An array of QueueCount items specifying the type of queue to create. Each queue type can only be specified once.
     size_t                        PartitionCount;  /// The number of CPU device partitions specified.
     int                          *ThreadCounts;    /// An array of PartitionCount items specifying the number of hardware threads per-partition.
     size_t                        ExtensionCount;  /// The number of extensions to enable.
@@ -282,6 +282,12 @@ cgEnumerateDevices                              /// Enumerate all devices and di
     cg_handle_t                  *device_list,  /// On return, populated with a list of device handles.
     size_t                        max_devices,  /// The maximum number of device handles to write to device_list.
     uintptr_t                    &context       /// If 0, on return, store the handle of a new CGFX context; otherwise, specifies an existing CGFX context.
+);
+
+int
+cgDestroyContext                                /// Free all resources associated with a CGFX context.
+(
+    uintptr_t                     context       /// A CGFX context returned by cgEnumerateDevices.
 );
 
 int

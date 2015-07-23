@@ -1,17 +1,19 @@
 LIBRARY
 EXPORTS
     cgEnumerateDevices             @1
-    cgResultString                 @2
-    cgGetContextInfo               @3
-    cgGetDeviceCount               @4
-    cgGetDeviceInfo                @5
-    cgGetDisplayCount              @6
-    cgGetPrimaryDisplay            @7
-    cgGetDisplayByOrdinal          @8
-    cgGetDisplayInfo               @9
-    cgGetDisplayDevice             @10
-    cgGetCPUDevices                @11
-    cgGetGPUDevices                @12
-    cgGetAcceleratorDevices        @13
-    cgGetCPUDevicesInShareGroup    @14
-    cgGetGPUDevicesInShareGroup    @15
+    cgDestroyContext               @2
+    cgResultString                 @3
+    cgGetContextInfo               @4
+    cgGetDeviceCount               @5
+    cgGetDeviceInfo                @6
+    cgGetDisplayCount              @7
+    cgGetPrimaryDisplay            @8
+    cgGetDisplayByOrdinal          @9
+    cgGetDisplayInfo               @10
+    cgGetDisplayDevice             @11
+    cgGetCPUDevices                @12
+    cgGetGPUDevices                @13
+    cgGetAcceleratorDevices        @14
+    cgGetCPUDevicesInShareGroup    @15
+    cgGetGPUDevicesInShareGroup    @16
+    cgCreateExecutionGroup         @17

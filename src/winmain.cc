@@ -297,6 +297,9 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     uintptr_t             context      = 0;
     size_t                device_count = 0;
     cg_handle_t          *device_list  = NULL;
+    cg_handle_t           exec_ctx     = CG_INVALID_HANDLE;
+    cg_handle_t           display      = CG_INVALID_HANDLE;
+    cg_handle_t           display_dev  = CG_INVALID_HANDLE;
     cg_application_info_t app_info;
     app_info.AppName        = "cgfxTest";
     app_info.AppVersion     =  CG_MAKE_VERSION(1, 0, 0);
@@ -312,9 +315,34 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     }
     if (device_count == 0)
     {
+        cgDestroyContext(context);
         OutputDebugString(_T("ERROR: No CGFX devices available on the system.\n"));
         return 0;
     }
+    
+    display     = cgGetPrimaryDisplay(context);
+    display_dev = cgGetDisplayDevice (context, display);
+
+    cg_execution_group_t  exec_info;
+    exec_info.RootDevice      = display_dev;
+    exec_info.DeviceCount     = 0;
+    exec_info.DeviceList      = NULL;
+    exec_info.ExtensionCount  = 0;
+    exec_info.ExtensionNames  = NULL;
+    exec_info.PartitionCount  = 0;
+    exec_info.ThreadCounts    = NULL;
+    exec_info.CreateFlags     = CG_EXECUTION_GROUP_CPUS | CG_EXECUTION_GROUP_TASK_PARALLEL;
+    exec_info.ValidationLevel = 0;
+    if ((exec_ctx = cgCreateExecutionGroup(context, &exec_info, cgres)) == CG_INVALID_HANDLE)
+    {
+        cgDestroyContext(context);
+        OutputDebugString(_T("ERROR: Unable to create execution group: "));
+        OutputDebugStringA(cgResultString(cgres));
+        OutputDebugString(_T(".\n"));
+        return 0;
+    }
+
+    cgDestroyContext(context);
 
     // create the main application window on the primary display.
     HWND main_window = NULL;
