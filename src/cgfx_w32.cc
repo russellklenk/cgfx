@@ -3021,6 +3021,12 @@ cgCreateExecutionGroup
         if (thread_count == 0 || thread_count > ctx->CPUCounts.HardwareThreads)
             goto error_invalid_value;
     }
+    // if HIGH_THROUGHPUT is specified, but there's only one NUMA node, 
+    // HIGH_THROUGHPUT doesn't specify any behavior different from the default.
+    if ((flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT) && (ctx->CPUCounts.NUMANodes == 1))
+    {   // so clear the HIGH_THROUGHPUT flag and don't try to partition the device.
+        flags &=~CG_EXECUTION_GROUP_HIGH_THROUGHPUT;
+    }
 
     // construct the complete list of devices in the execution group.
     // this also creates any logical devices for CPU partitions.
