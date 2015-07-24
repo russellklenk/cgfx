@@ -102,6 +102,7 @@ typedef cg_handle_t (CG_API *cgGetQueueForDisplay_fn        )(uintptr_t, cg_hand
 /// @summary Define the recognized function return codes.
 enum cg_result_e : int
 {
+    // CORE API RESULT CODES - FAILURE
     CG_ERROR                           = -1,        /// A generic error occurred.
     CG_INVALID_VALUE                   = -2,        /// One or more input values are invalid.
     CG_OUT_OF_MEMORY                   = -3,        /// The requested memory could not be allocated.
@@ -111,8 +112,13 @@ enum cg_result_e : int
     CG_BAD_GLCONTEXT                   = -7,        /// Unable to activate the OpenGL rendering context.
     CG_NO_CLCONTEXT                    = -8,        /// Unable to create the OpenCL device context.
     CG_BAD_CLCONTEXT                   = -9,        /// The OpenCL context is invalid.
-    CG_OUT_OF_OBJECTS                  =-10,        /// There are no more available objects of the requested type.
-    CG_UNKNOWN_GROUP                   =-11,        /// The object has no associated execution group.
+    CG_OUT_OF_OBJECTS                  = -10,       /// There are no more available objects of the requested type.
+    CG_UNKNOWN_GROUP                   = -11,       /// The object has no associated execution group.
+
+    // EXTENSION API RESULT CODES - FAILURE
+    CG_RESULT_FAILURE_EXT              = -100000,   /// The first valid failure result code for extensions.
+
+    // CORE API RESULT CODES - NON-FAILURE
     CG_SUCCESS                         =  0,        /// The operation completed successfully.
     CG_UNSUPPORTED                     =  1,        /// The function completed successfully, but the operation is not supported.
     CG_NOT_READY                       =  2,        /// The function completed successfully, but the result is not available yet.
@@ -123,6 +129,9 @@ enum cg_result_e : int
     CG_NO_OPENGL                       =  7,        /// The display does not support the required version of OpenGL.
     CG_NO_GLSHARING                    =  8,        /// Rendering context created, but no sharing between OpenGL and OpenCL is available.
     CG_NO_QUEUE_OF_TYPE                =  9,        /// The device or display does not have a queue of the specified type.
+
+    // EXTENSION API RESULT CODES - NON-FAILURE
+    CG_RESULT_NON_FAILURE_EXT          =  100000,   /// The first valid non-failure result code for extensions.
 };
 
 /// @summary Define the categories of host memory allocations performed by CGFX.
@@ -188,7 +197,7 @@ enum cg_display_info_param_e : int
     CG_DISPLAY_CL_DEVICE_ID            = 2,         /// Retrieve the OpenCL device ID of the device driving the display. Data is cl_platform_id.
     CG_DISPLAY_WINDOWS_HDC             = 3,         /// Retrieve the Windows device context of the display. Data is HDC.
     CG_DISPLAY_WINDOWS_HGLRC           = 4,         /// Retrieve the Windows OpenGL rendering context of the device. Data is HGLRC.
-    CG_DISPLAY_POSITION                = 5,         /// Retrieve the x and y-coordinate of the upper-left corner of the display. Data is int[2].
+    CG_DISPLAY_POSITION                = 5,         /// Retrieve the x and y-coordinate of the upper-left corner of the display in global display coordinates. Data is int[2].
     CG_DISPLAY_SIZE                    = 6,         /// Retrieve the width and height of the display, in pixels. Data is size_t[2].
     CG_DISPLAY_ORIENTATION             = 7,         /// Retrieve the current orientation of the display. Data is cg_display_orientation_e.
     CG_DISPLAY_REFRESH_RATE            = 8,         /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.

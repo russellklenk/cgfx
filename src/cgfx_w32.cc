@@ -1,44 +1,10 @@
 /*/////////////////////////////////////////////////////////////////////////////
-/// @summary 
+/// @summary Implements the core CGFX API functions for Microsoft Windows.
 ///////////////////////////////////////////////////////////////////////////80*/
 
 /*////////////////////
 //   Preprocessor   //
 ////////////////////*/
-/// @summary Tag used to mark a function as available for use outside of the 
-/// current translation unit (the default visibility).
-#ifndef library_function
-#define library_function    
-#endif
-
-/// @summary Tag used to mark a function as available for use outside of the
-/// current translation unit (the default visibility).
-#ifndef export_function
-#define export_function     library_function
-#endif
-
-/// @summary Tag used to mark a function as available for public use, but not
-/// exported outside of the translation unit.
-#ifndef public_function
-#define public_function     static
-#endif
-
-/// @summary Tag used to mark a function internal to the translation unit.
-#ifndef internal_function
-#define internal_function   static
-#endif
-
-/// @summary Tag used to mark a variable as local to a function, and persistent
-/// across invocations of that function.
-#ifndef local_persist
-#define local_persist       static
-#endif
-
-/// @summary Tag used to mark a variable as global to the translation unit.
-#ifndef global_variable
-#define global_variable     static
-#endif
-
 /// @summary Disable excessive warnings (MSVC).
 #ifdef _MSC_VER
 /// 4505: Unreferenced local function was removed
@@ -59,36 +25,13 @@
 #endif
 #endif /* _MSC_VER */
 
-/// @summary Enable heap checking and leak tracing in debug builds (MSVC).
-#ifdef  _MSC_VER
-#ifdef  _DEBUG
-#define _CRTDBG_MAP_ALLOC
-#include <stdlib.h>
-#include <crtdbg.h>
-#endif
-#endif /* _MSC_VER */
-
 /*////////////////
 //   Includes   //
 ////////////////*/
-#include <Windows.h>
-#include <windowsx.h>
-#include <tchar.h>
+#include "cgfx.h"
+#include "cgfx_ext_win.h"
+#include "cgfx_w32_private.h"
 
-#include <assert.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <malloc.h> // _msize
-#include <float.h>
-
-#include <atomic>
-#include <thread>
-
-#define  GLEW_MX
-#define  GLEW_STATIC
-#include "GL/glew.h"
-#include "GL/wglew.h"
 #include "glew.c"
 
 #undef   glewGetContext
@@ -97,284 +40,21 @@
 #undef   wglewGetContext
 #define  wglewGetContext()   (&display->WGLEW)
 
-#include "CL/cl.h"
-#include "CL/cl_gl.h"
-#include "CL/cl_gl_ext.h"
 #include "icd.c"
 #include "icd_dispatch.c"
 #include "icd_windows.c"
 
-#include "intrinsics.h"
-#include "atomicfifo.h"
-#include "cgfx.h"
-
-#include "cgfx_w32_host_alloc.cc"
-#include "cgfx_w32_handle.cc"
-#include "cgfx_w32_opencl.cc"
-#include "cgfx_w32_opengl.cc"
-
 /*////////////////////////////
 //   Forward Declarations   //
 ////////////////////////////*/
-struct CG_DEVICE;
-struct CG_DISPLAY;
-struct CG_EXEC_GROUP;
 
 /*/////////////////
 //   Constants   //
 /////////////////*/
-/// @summary Define object table indicies within a context. Used when building handles.
-local_persist size_t const CG_DEVICE_TABLE_ID     = 0;
-local_persist size_t const CG_DISPLAY_TABLE_ID    = 1;
-local_persist size_t const CG_QUEUE_TABLE_ID      = 2;
-local_persist size_t const CG_EXEC_GROUP_TABLE_ID = 3;
-
-/// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
-/// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
-local_persist size_t const CG_MAX_DEVICES         = 4096;
-local_persist size_t const CG_MAX_DISPLAYS        = 32;
-local_persist size_t const CG_MAX_QUEUES          = CG_MAX_DEVICES * 4;
-local_persist size_t const CG_MAX_EXEC_GROUPS     = CG_MAX_DEVICES;
-
-/// @summary Define the registered name of the WNDCLASS used for hidden windows.
-#define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
-
-/// @summary Define the maximum number of displays that can be driven by a single GPU.
-#define CG_OPENGL_MAX_ATTACHED_DISPLAYS          (16)
-
-/// @summary Defines the maximum number of shader stages. OpenGL 3.2+ has
-/// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER and GL_FRAGMENT_SHADER.
-#define CG_OPENGL_MAX_SHADER_STAGES_32           (3U)
-
-/// @summary Defines the maximum number of shader stages. OpenGL 4.0+ has
-/// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER, GL_FRAGMENT_SHADER,
-/// GL_TESS_CONTROL_SHADER, and GL_TESS_EVALUATION_SHADER.
-#define CG_OPENGL_MAX_SHADER_STAGES_40           (5U)
-
-/// @summary Defines the maximum number of shader stages. OpenGL 4.3+ has
-/// stages GL_VERTEX_SHADER, GL_GEOMETRY_SHADER, GL_FRAGMENT_SHADER,
-/// GL_TESS_CONTROL_SHADER, GL_TESS_EVALUATION_SHADER and GL_COMPUTE_SHADER.
-#define CG_OPENGL_MAX_SHADER_STAGES_43           (6U)
-
-/// @summary Macro to convert a byte offset into a pointer.
-/// @param x The byte offset value.
-/// @return The offset value, as a pointer.
-#define CG_GL_BUFFER_OFFSET(x)                  ((GLvoid*)(((uint8_t*)NULL)+(x)))
-
-/// @summary Preprocessor identifier for OpenGL version 3.2 (GLSL 1.50).
-#define CG_OPENGL_VERSION_32                      32 
-
-/// @summary Preprocessor identifier for OpenGL version 3.3 (GLSL 3.30).
-#define CG_OPENGL_VERSION_33                      33
-
-/// @summary Preprocessor identifier for OpenGL version 4.0 (GLSL 4.00).
-#define CG_OPENGL_VERSION_40                      40
-
-/// @summary Preprocessor identifier for OpenGL version 4.1 (GLSL 4.10).
-#define CG_OPENGL_VERSION_41                      41
-
-/// @summary Preprocessor identifier for OpenGL version 4.3 (GLSL 4.30).
-#define CG_OPENGL_VERSION_43                      43
-
-/// @summary Preprocessor identifier for OpenGL version 4.5 (GLSL 4.50).
-#define CG_OPENGL_VERSION_45                      45
-
-/// @summary Define the version of OpenGL to build against.
-#ifndef CG_OPENGL_VERSION
-#define CG_OPENGL_VERSION                         CG_OPENGL_VERSION_32
-#endif
-
-/// @summary Define generic names for version-specific constants.
-#if     CG_OPENGL_VERSION == CG_OPENGL_VERSION_32
-#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_32
-#define CG_OPENGL_VERSION_MAJOR                   3
-#define CG_OPENGL_VERSION_MINOR                   2
-#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_3_2
-#elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_33
-#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_32
-#define CG_OPENGL_VERSION_MAJOR                   3
-#define CG_OPENGL_VERSION_MINOR                   3
-#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_3_3
-#elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_40
-#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_40
-#define CG_OPENGL_VERSION_MAJOR                   4
-#define CG_OPENGL_VERSION_MINOR                   0
-#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_0
-#elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_41
-#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_40
-#define CG_OPENGL_VERSION_MAJOR                   4
-#define CG_OPENGL_VERSION_MINOR                   1
-#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_1
-#elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_43
-#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_43
-#define CG_OPENGL_VERSION_MAJOR                   4
-#define CG_OPENGL_VERSION_MINOR                   3
-#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_3
-#elif   CG_OPENGL_VERSION == CG_OPENGL_VERSION_45
-#define CG_OPENGL_MAX_SHADER_STAGES               CG_OPENGL_MAX_SHADER_STAGES_43
-#define CG_OPENGL_VERSION_MAJOR                   4
-#define CG_OPENGL_VERSION_MINOR                   5
-#define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_5
-#else
-#error  No constants defined for target OpenGL version in cgfx_w32.cc!
-#endif
 
 /*///////////////////
 //   Local Types   //
 ///////////////////*/
-/// @summary Store the capabilities of an OpenCL 1.2-compliant device.
-struct CL_DEVICE_CAPS
-{
-    cl_bool                      LittleEndian;         /// CL_DEVICE_ENDIAN_LITTLE
-    cl_bool                      SupportECC;           /// CL_DEVICE_ERROR_CORRECTION_SUPPORT
-    cl_bool                      UnifiedMemory;        /// CL_DEVICE_HOST_UNIFIED_MEMORY
-    cl_bool                      CompilerAvailable;    /// CL_DEVICE_COMPILER_AVAILABLE
-    cl_bool                      LinkerAvailable;      /// CL_DEVICE_LINKER_AVAILABLE
-    cl_bool                      PreferUserSync;       /// CL_DEVICE_PREFERRED_INTEROP_USER_SYNC
-    cl_uint                      AddressBits;          /// CL_DEVICE_ADDRESS_BITS
-    cl_uint                      AddressAlign;         /// CL_DEVICE_MEM_BASE_ADDR_ALIGN
-    cl_uint                      MinTypeAlign;         /// CL_DEVICE_MIN_DATA_TYPE_ALIGN_SIZE
-    size_t                       MaxPrintfBuffer;      /// CL_DEVICE_PRINTF_BUFFER_SIZE
-    size_t                       TimerResolution;      /// CL_DEVICE_PROFILING_TIMER_RESOLUTION
-    size_t                       MaxWorkGroupSize;     /// CL_DEVICE_MAX_WORK_GROUP_SIZE
-    cl_ulong                     MaxMallocSize;        /// CL_DEVICE_MAX_MEM_ALLOC_SIZE
-    size_t                       MaxParamSize;         /// CL_DEVICE_MAX_PARAMETER_SIZE
-    cl_uint                      MaxConstantArgs;      /// CL_DEVICE_MAX_CONSTANT_ARGS
-    cl_ulong                     MaxCBufferSize;       /// CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE
-    cl_ulong                     GlobalMemorySize;     /// CL_DEVICE_GLOBAL_MEM_SIZE
-    cl_device_mem_cache_type     GlobalCacheType;      /// CL_DEVICE_GLOBAL_MEM_CACHE_TYPE
-    cl_ulong                     GlobalCacheSize;      /// CL_DEVICE_GLOBAL_MEM_CACHE_SIZE
-    cl_uint                      GlobalCacheLineSize;  /// CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE
-    cl_device_local_mem_type     LocalMemoryType;      /// CL_DEVICE_LOCAL_MEM_TYPE 
-    cl_ulong                     LocalMemorySize;      /// CL_DEVICE_LOCAL_MEM_SIZE
-    cl_uint                      ClockFrequency;       /// CL_DEVICE_MAX_CLOCK_FREQUENCY
-    cl_uint                      ComputeUnits;         /// CL_DEVICE_MAX_COMPUTE_UNITS
-    cl_uint                      VecWidthChar;         /// CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR
-    cl_uint                      VecWidthShort;        /// CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT
-    cl_uint                      VecWidthInt;          /// CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT
-    cl_uint                      VecWidthLong;         /// CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG
-    cl_uint                      VecWidthSingle;       /// CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT
-    cl_uint                      VecWidthDouble;       /// CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE
-    cl_device_fp_config          FPSingleConfig;       /// CL_DEVICE_SINGLE_FP_CONFIG
-    cl_device_fp_config          FPDoubleConfig;       /// CL_DEVICE_DOUBLE_FP_CONFIG
-    cl_command_queue_properties  CmdQueueConfig;       /// CL_DEVICE_QUEUE_PROPERTIES
-    cl_device_exec_capabilities  ExecutionCapability;  /// CL_DEVICE_EXECUTION_CAPABILITIES
-    cl_uint                      MaxSubDevices;        /// CL_DEVICE_PARTITION_MAX_SUB_DEVICES
-    size_t                       NumPartitionTypes;    /// Computed; number of valid items in PartitionTypes.
-    cl_device_partition_property PartitionTypes[4];    /// CL_DEVICE_PARTITION_PROPERTIES
-    size_t                       NumAffinityDomains;   /// Computed; number of valid items in AffinityDomains.
-    cl_device_affinity_domain    AffinityDomains[7];   /// CL_DEVICE_PARTITION_AFFINITY_DOMAIN
-    cl_bool                      SupportImage;         /// CL_DEVICE_IMAGE_SUPPORT
-    size_t                       MaxWidth2D;           /// CL_DEVICE_IMAGE2D_MAX_WIDTH
-    size_t                       MaxHeight2D;          /// CL_DEVICE_IMAGE2D_MAX_HEIGHT
-    size_t                       MaxWidth3D;           /// CL_DEVICE_IMAGE3D_MAX_WIDTH
-    size_t                       MaxHeight3D;          /// CL_DEVICE_IMAGE3D_MAX_HEIGHT
-    size_t                       MaxDepth3D;           /// CL_DEVICE_IMAGE3D_MAX_DEPTH
-    size_t                       MaxImageArraySize;    /// CL_DEVICE_IMAGE_MAX_ARRAY_SIZE
-    size_t                       MaxImageBufferSize;   /// CL_DEVICE_IMAGE_MAX_BUFFER_SIZE
-    cl_uint                      MaxSamplers;          /// CL_DEVICE_MAX_SAMPLERS
-    cl_uint                      MaxImageSources;      /// CL_DEVICE_MAX_READ_IMAGE_ARGS
-    cl_uint                      MaxImageTargets;      /// CL_DEVICE_MAX_WRITE_IMAGE_ARGS
-    cl_uint                      MaxWorkItemDimension; /// CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS
-    size_t                      *MaxWorkItemSizes;     /// CL_DEVICE_MAX_WORK_ITEM_SIZES
-};
-
-/// @summary Define the state associated with an OpenCL 1.2 compatible device.
-struct CG_DEVICE
-{   
-    #define AD                   CG_OPENGL_MAX_ATTACHED_DISPLAYS
-    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
-
-    cg_handle_t                  ExecutionGroup;       /// The handle of the execution group that owns the device. A device can only belong to one group.
-
-    cl_platform_id               PlatformId;           /// The OpenCL platform identifier. Same-platform devices can share resources.
-    cl_device_id                 DeviceId;             /// The OpenCL device identifier, which may or may not be the same as the MasterDeviceId.
-    cl_device_id                 MasterDeviceId;       /// The OpenCL device identifier of the parent device.
-    cl_device_type               Type;                 /// The OpenCL device type (CPU, GPU, ACCELERATOR or CUSTOM.)
-
-    char                        *Name;                 /// The friendly name of the device.
-    char                        *Platform;             /// The friendly name of the platform.
-    char                        *Version;              /// The OpenCL version supported by the device.
-    char                        *Driver;               /// The version of the OpenCL driver for the device.
-    char                        *Extensions;           /// A space-delimited list of extensions supported by the device.
-
-    size_t                       DisplayCount;         /// The number of attached displays.
-    CG_DISPLAY                  *AttachedDisplays[AD]; /// The set of attached display objects.
-    HDC                          DisplayDC[AD];        /// The set of Windows GDI device context for the attached displays.
-    HGLRC                        DisplayRC;            /// The Windows OpenGL rendering context for the attached displays, or NULL.
-
-    CL_DEVICE_CAPS               Capabilities;         /// Cached device capabilities reported by OpenCL.
-    #undef  AD
-};
-
-/// @summary Define the state associated with an OpenGL 3.2 compatible display.
-struct CG_DISPLAY
-{
-    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
-    DWORD                        Ordinal;              /// The zero-based index of the display passed to EnumDisplayDevices.
-    CG_DEVICE                   *DisplayDevice;        /// A reference to the GPU device that drives the display.
-    HWND                         DisplayHWND;          /// The hidden fullscreen window used to retrieve the display device context.
-    HDC                          DisplayDC;            /// The Windows GDI device context for the hidden fullscreen window.
-    HGLRC                        DisplayRC;            /// The OpenGL rendering context for the device driving the display.
-    int                          DisplayX;             /// The x-coordinate of the upper-left corner of the display.
-    int                          DisplayY;             /// The y-coordinate of the upper-left corner of the display.
-    size_t                       DisplayWidth;         /// The width of the display, in pixels.
-    size_t                       DisplayHeight;        /// The height of the display, in pixels.
-    DISPLAY_DEVICE               DisplayInfo;          /// Information about the display returned by Windows.
-    DEVMODE                      DisplayMode;          /// Information about the current display mode, orientation and geometry.
-    GLEWContext                  GLEW;                 /// OpenGL extension function pointers for the attached displays.
-    WGLEWContext                 WGLEW;                /// OpenGL windowing extension function pointers for the attached displays.
-};
-
-/// @summary Define the data used to identify a device queue. The queue may be used for compute, graphics, or data transfer.
-/// Command buffer construction may be performed from multiple threads, but command buffer submission must be performed from the 
-/// thread that called cgEnumerateDevices().
-struct CG_QUEUE
-{
-    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
-    int                          QueueType;            /// One of cg_queue_type_e.
-    cl_context                   ComputeContext;       /// The OpenCL resource context associated with the queue.
-    cl_command_queue             CommandQueue;         /// The OpenCL command queue for COMPUTE and TRANSFER queues. NULL for GRAPHICS queues.
-    HDC                          DisplayDC;            /// The Windows GDI device context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
-    HGLRC                        DisplayRC;            /// The Windows OpenGL rendering context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
-};
-
-/// @summary Define the state associated with a device execution group.
-struct CG_EXEC_GROUP
-{
-    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
-    cl_platform_id               PlatformId;           /// The OpenCL platform ID for all devices in the group.
-    size_t                       DeviceCount;          /// The number of devices in the execution group.
-    CG_DEVICE                  **DeviceList;           /// The devices making up the execution group.
-    cl_device_id                *DeviceIds;            /// The OpenCL device ID for each device in the group.
-    cl_context                  *ComputeContexts;      /// The compute context for each device in the group, which may reference the same context.
-    CG_QUEUE                   **ComputeQueues;        /// The command queue used to submit compute kernel dispatch operations for each device in the group.
-    CG_QUEUE                   **TransferQueues;       /// The command queue used to submit data transfer operations for each device in the group.
-    size_t                       DisplayCount;         /// The number of displays attached to the group.
-    CG_DISPLAY                 **AttachedDisplays;     /// The displays the execution group can output to.
-    CG_QUEUE                   **GraphicsQueues;       /// The command queue used to submit graphics dispatch operations for each display in the group. 
-    size_t                       QueueCount;           /// The number of unique queue objects associated with the group.
-    CG_QUEUE                   **QueueList;            /// The set of references to queue objects owned by this execution group.
-};
-
-/// @summary Typedef the object tables held by a context object.
-typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
-typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
-typedef CG_OBJECT_TABLE<CG_QUEUE     , CG_MAX_QUEUES     > CG_QUEUE_TABLE;
-typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
-
-/// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
-struct CG_CONTEXT
-{
-    CG_HOST_ALLOCATOR            HostAllocator;        /// The allocator implementation used to allocate host memory.
-
-    cg_cpu_counts_t              CPUCounts;            /// Information about the CPU resources available in the local system.
-
-    CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
-    CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
-    CG_QUEUE_TABLE               QueueTable;           /// The object table of all 
-    CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
-};
 
 /*///////////////
 //   Globals   //
@@ -391,6 +71,166 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 /*///////////////////////
 //   Local Functions   //
 ///////////////////////*/
+/// @summary Implements a no-op host memory allocator that always returns NULL.
+/// @param size The desired allocation size, in bytes.
+/// @param alignment The required alignment of the returned address, in bytes.
+/// @param type One of uiss_allocation_type_e.
+/// @param user_data Opaque data specified when the allocator implementation was registered.
+/// @return A pointer to the host memory block, or NULL.
+internal_function void* CG_API
+cgHostMemAllocNoOp
+(
+    size_t    size,
+    size_t    alignment, 
+    int       type, 
+    uintptr_t user_data
+)
+{
+    UNREFERENCED_PARAMETER(size);
+    UNREFERENCED_PARAMETER(alignment);
+    UNREFERENCED_PARAMETER(type);
+    UNREFERENCED_PARAMETER(user_data);
+    return NULL;
+}
+
+/// @summary Implements a host memory allocator using the standard malloc function.
+/// @param size The desired allocation size, in bytes.
+/// @param alignment The required alignment of the returned address, in bytes.
+/// @param type One of uiss_allocation_type_e.
+/// @param user_data Opaque data specified when the allocator implementation was registered.
+/// @return A pointer to the host memory block, or NULL.
+internal_function void* CG_API
+cgHostMemAllocStdC
+(
+    size_t    size,
+    size_t    alignment, 
+    int       type, 
+    uintptr_t user_data
+)
+{
+    UNREFERENCED_PARAMETER(type);
+    UNREFERENCED_PARAMETER(user_data);
+    if (alignment <= 1) return malloc(size);
+    else return _aligned_malloc(size, alignment);
+}
+
+/// @summary Implements a no-op host memory release function.
+/// @param address The address of the memory block to free, as returned by the allocation function.
+/// @param size The requested size of the allocated block, in bytes.
+/// @param alignment The required alignment of the allocated block, in bytes.
+/// @param type One of uiss_allocation_type_e.
+/// @param user_data Opaque data specified when the allocator implementation was registered.
+internal_function void CG_API
+cgHostMemFreeNoOp
+(
+    void     *address, 
+    size_t    size, 
+    size_t    alignment, 
+    int       type, 
+    uintptr_t user_data
+)
+{
+    UNREFERENCED_PARAMETER(address);
+    UNREFERENCED_PARAMETER(size);
+    UNREFERENCED_PARAMETER(alignment);
+    UNREFERENCED_PARAMETER(type);
+    UNREFERENCED_PARAMETER(user_data);
+}
+
+/// @summary Implements a host memory release function using the standard free function.
+/// @param address The address of the memory block to free, as returned by the allocation function.
+/// @param size The requested size of the allocated block, in bytes.
+/// @param alignment The required alignment of the allocated block, in bytes.
+/// @param type One of uiss_allocation_type_e.
+/// @param user_data Opaque data specified when the allocator implementation was registered.
+internal_function void CG_API
+cgHostMemFreeStdC
+(
+    void     *address, 
+    size_t    size, 
+    size_t    alignment, 
+    int       type, 
+    uintptr_t user_data
+)
+{
+    UNREFERENCED_PARAMETER(size);
+    UNREFERENCED_PARAMETER(type);
+    UNREFERENCED_PARAMETER(user_data);
+    if (alignment <= 1) return free(address);
+    else return _aligned_free(address);
+}
+
+/// @summary Validate and initialize a user-defined memory allocator.
+/// @param alloc_cb The user-supplied host memory allocation callbacks. Specify NULL to fall back to malloc and free.
+/// @param alloc_fn The memory allocator state to initialize.
+/// @return CG_SUCCESS, or CG_INVALID_VALUE if one or more inputs are invalid.
+internal_function int
+cgSetupUserHostAllocator
+(
+    cg_allocation_callbacks_t *alloc_cb, 
+    CG_HOST_ALLOCATOR         *alloc_fn
+)
+{
+    if (alloc_fn == NULL)
+    {   // no user allocator instance supplied.
+        return CG_INVALID_VALUE;
+    }
+    if (alloc_fn->Initialized)
+    {   // the new values must exactly match the current values.
+        if (alloc_cb == NULL)
+        {   // check against the default allocator implementation.
+            if (alloc_fn->Allocate == cgHostMemAllocStdC && 
+                alloc_fn->Release  == cgHostMemFreeStdC  && 
+                alloc_fn->UserData ==(uintptr_t) 0)
+            {   // the setup matches.
+                return CG_SUCCESS;
+            }
+            else return CG_INVALID_VALUE;
+        }
+        else
+        {   // check against the current user allocator implementation.
+            if (alloc_fn->Allocate == alloc_cb->Allocate && 
+                alloc_fn->Release  == alloc_cb->Release  && 
+                alloc_fn->UserData == alloc_cb->UserData)
+            {   // the setup matches.
+                return CG_SUCCESS;
+            }
+            else return CG_INVALID_VALUE;
+        }
+    }
+    if (alloc_cb == NULL)
+    {   // use the default allocator implementation.
+        alloc_fn->Allocate      = cgHostMemAllocStdC;
+        alloc_fn->Release       = cgHostMemFreeStdC;
+        alloc_fn->UserData      =(uintptr_t) 0;
+        alloc_fn->Initialized   = true;
+        return CG_SUCCESS;
+    }
+    else
+    {   // initialize with a user-supplied allocator implementation.
+        if (alloc_cb->Allocate  == NULL) return CG_INVALID_VALUE;
+        if (alloc_cb->Release   == NULL) return CG_INVALID_VALUE;
+        alloc_fn->Allocate       = alloc_cb->Allocate;
+        alloc_fn->Release        = alloc_cb->Release;
+        alloc_fn->UserData       = alloc_cb->UserData;
+        alloc_fn->Initialized    = true;
+        return CG_SUCCESS;
+    }
+}
+
+/// @summary Delete a host allocator by setting it up to reference the no-op allocator implementation. All calls to allocate memory will fail.
+/// @param host The host allocator state to delete.
+internal_function void
+cgDeleteUserHostAllocator
+(
+    CG_HOST_ALLOCATOR *host
+)
+{
+    host->Allocate = cgHostMemAllocNoOp;
+    host->Release  = cgHostMemFreeNoOp;
+    host->UserData =(uintptr_t) 0;
+}
+
 /// @summary Locate one substring within another, ignoring case.
 /// @param search The string to search.
 /// @param find The string to locate within the search string.
@@ -2325,7 +2165,10 @@ cgResultString
     case CG_NO_QUEUE_OF_TYPE:  return "The object does not have a command queue of the specified type (CG_NO_QUEUE_OF_TYPE)";
     default:                   break;
     }
-    return "Unknown Result";
+    if (result <= CG_RESULT_FAILURE_EXT || result >= CG_RESULT_NON_FAILURE_EXT)
+        return cgResultStringEXT(result);
+    else
+        return "Unknown Result (CORE)";
 }
 
 /// @summary Register the application with CGFX and enumerate all compute resources and displays in the system.

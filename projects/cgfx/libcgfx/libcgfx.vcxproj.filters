@@ -24,9 +24,18 @@
     <ClInclude Include="..\..\..\include\cgfx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\include\cgfx_ext_win.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\include\cgfx_w32_private.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\cgfx_w32.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\src\cgfx_ext_win.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
