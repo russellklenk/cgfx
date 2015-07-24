@@ -20,3 +20,9 @@ EXPORTS
     cgGetExecutionGroupInfo        @18
     cgGetQueueForDevice            @19
     cgGetQueueForDisplay           @20
+    cgDisplayForWindowEXT          @21
+    cgMakeWindowOnDisplayEXT       @22
+    cgAttachWindowToDisplayEXT     @23
+    cgSetDisplayDrawableEXT        @24
+    cgSetActiveDrawableEXT         @25
+    cgPresentDrawableEXT           @26

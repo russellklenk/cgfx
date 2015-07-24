@@ -35,7 +35,8 @@
 /// @summary Define the recognized function return codes (extended).
 enum cg_result_ext_e : int
 {
-    CG_SOME_FAILURE_EXT          = CG_RESULT_FAILURE_EXT    -1, /// 
+    CG_BAD_WINDOW_EXT            = CG_RESULT_FAILURE_EXT    -1, /// The window was invalid, or window information could not be retrieved.
+    CG_BAD_DRAWABLE_EXT          = CG_RESULT_FAILURE_EXT    -2, /// The device context was invalid or not associated with a window.
     CG_WINDOW_RECREATED_EXT      = CG_RESULT_NON_FAILURE_EXT+0, /// The window was destroyed and re-created successfully.
 };
 
