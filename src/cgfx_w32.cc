@@ -126,12 +126,14 @@ struct CG_EXEC_GROUP;
 /// @summary Define object table indicies within a context. Used when building handles.
 local_persist size_t const CG_DEVICE_TABLE_ID     = 0;
 local_persist size_t const CG_DISPLAY_TABLE_ID    = 1;
-local_persist size_t const CG_EXEC_GROUP_TABLE_ID = 2;
+local_persist size_t const CG_QUEUE_TABLE_ID      = 2;
+local_persist size_t const CG_EXEC_GROUP_TABLE_ID = 3;
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
 local_persist size_t const CG_MAX_DEVICES         = 4096;
 local_persist size_t const CG_MAX_DISPLAYS        = 32;
+local_persist size_t const CG_MAX_QUEUES          = CG_MAX_DEVICES * 4;
 local_persist size_t const CG_MAX_EXEC_GROUPS     = CG_MAX_DEVICES;
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
@@ -324,6 +326,19 @@ struct CG_DISPLAY
     WGLEWContext                 WGLEW;                /// OpenGL windowing extension function pointers for the attached displays.
 };
 
+/// @summary Define the data used to identify a device queue. The queue may be used for compute, graphics, or data transfer.
+/// Command buffer construction may be performed from multiple threads, but command buffer submission must be performed from the 
+/// thread that called cgEnumerateDevices().
+struct CG_QUEUE
+{
+    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
+    int                          QueueType;            /// One of cg_queue_type_e.
+    cl_context                   ComputeContext;       /// The OpenCL resource context associated with the queue.
+    cl_command_queue             CommandQueue;         /// The OpenCL command queue for COMPUTE and TRANSFER queues. NULL for GRAPHICS queues.
+    HDC                          DisplayDC;            /// The Windows GDI device context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
+    HGLRC                        DisplayRC;            /// The Windows OpenGL rendering context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
+};
+
 /// @summary Define the state associated with a device execution group.
 struct CG_EXEC_GROUP
 {
@@ -332,18 +347,20 @@ struct CG_EXEC_GROUP
     size_t                       DeviceCount;          /// The number of devices in the execution group.
     CG_DEVICE                  **DeviceList;           /// The devices making up the execution group.
     cl_device_id                *DeviceIds;            /// The OpenCL device ID for each device in the group.
-    cl_context                  *ComputeContext;       /// The compute context for each device in the group, which may reference the same context.
-    cl_command_queue            *ComputeQueue;         /// The command queue used to submit compute kernel dispatch operations for each device in the group.
-    cl_command_queue            *TransferQueue;        /// The command queue used to submit data transfer operations for each device in the group.
+    cl_context                  *ComputeContexts;      /// The compute context for each device in the group, which may reference the same context.
+    CG_QUEUE                   **ComputeQueues;        /// The command queue used to submit compute kernel dispatch operations for each device in the group.
+    CG_QUEUE                   **TransferQueues;       /// The command queue used to submit data transfer operations for each device in the group.
     size_t                       DisplayCount;         /// The number of displays attached to the group.
     CG_DISPLAY                 **AttachedDisplays;     /// The displays the execution group can output to.
-    HDC                         *DisplayDC;            /// The Windows GDI device context for each attached display.
-    HGLRC                       *DisplayRC;            /// The Windows OpenGL rendering context for each attached display.
+    CG_QUEUE                   **GraphicsQueues;       /// The command queue used to submit graphics dispatch operations for each display in the group. 
+    size_t                       QueueCount;           /// The number of unique queue objects associated with the group.
+    CG_QUEUE                   **QueueList;            /// The set of references to queue objects owned by this execution group.
 };
 
 /// @summary Typedef the object tables held by a context object.
 typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
 typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
+typedef CG_OBJECT_TABLE<CG_QUEUE     , CG_MAX_QUEUES     > CG_QUEUE_TABLE;
 typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
@@ -355,6 +372,7 @@ struct CG_CONTEXT
 
     CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
     CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
+    CG_QUEUE_TABLE               QueueTable;           /// The object table of all 
     CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
 };
 
@@ -770,6 +788,21 @@ cgDeleteDisplay
     memset(display, 0, sizeof(CG_DISPLAY));
 }
 
+/// @summary Frees all resources and releases all references held by a queue object.
+/// @param ctx The CGFX context that owns the queue object.
+/// @param queue The queue object to delete.
+internal_function void
+cgDeleteQueue
+(
+    CG_CONTEXT *ctx, 
+    CG_QUEUE   *queue
+)
+{   UNREFERENCED_PARAMETER(ctx);
+    if (queue->CommandQueue != NULL)
+        clReleaseCommandQueue(queue->CommandQueue);
+    memset(queue, 0, sizeof(CG_QUEUE));
+}
+
 /// @summary Allocate memory for an execution group and initialize the device and display lists.
 /// @param ctx The CGFX context that owns the execution group.
 /// @param group The execution group to initialize.
@@ -791,31 +824,36 @@ cgAllocExecutionGroup
     CG_DEVICE       **device_refs      = NULL;
     cl_device_id     *device_ids       = NULL;
     cl_context       *compute_contexts = NULL;
-    cl_command_queue *compute_queues   = NULL;
-    cl_command_queue *transfer_queues  = NULL;
+    CG_QUEUE        **compute_queues   = NULL;
+    CG_QUEUE        **transfer_queues  = NULL;
     CG_DISPLAY      **display_refs     = NULL;
-    HDC              *display_dcs      = NULL;
-    HGLRC            *display_rcs      = NULL;
+    CG_QUEUE        **graphics_queues  = NULL;
+    CG_QUEUE        **queue_refs       = NULL;
     size_t            display_count    = 0;
+    size_t            queue_count      = 0;
 
     // zero out the execution groupn definition.
     memset(group, 0, sizeof(CG_EXEC_GROUP));
 
-    // determine the number of attached displays:
+    // determine the number of attached displays and queues.
     for (size_t i = 0; i < device_count; ++i)
     {
         CG_DEVICE *device = cgObjectTableGet(&ctx->DeviceTable, device_list[i]);
         display_count    += device->DisplayCount;
+        if (device->Capabilities.UnifiedMemory == CL_FALSE)
+            queue_count++;        // this device will have a transfer queue
     }
+    queue_count += device_count;  // account for compute queues
+    queue_count += display_count; // account for graphics queues
 
     // allocate storage. there's always at least one device, but possibly no attached displays.
     if (device_count > 0)
     {   // allocate all of the device list storage.
-        device_refs      = (CG_DEVICE      **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_DEVICE*)      , 0, CG_ALLOCATION_TYPE_OBJECT);
-        device_ids       = (cl_device_id    *) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_device_id)    , 0, CG_ALLOCATION_TYPE_OBJECT);
-        compute_contexts = (cl_context      *) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_context)      , 0, CG_ALLOCATION_TYPE_OBJECT);
-        compute_queues   = (cl_command_queue*) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_OBJECT);
-        transfer_queues  = (cl_command_queue*) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_OBJECT);
+        device_refs      = (CG_DEVICE   **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        device_ids       = (cl_device_id *) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_OBJECT);
+        compute_contexts = (cl_context   *) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        compute_queues   = (CG_QUEUE    **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+        transfer_queues  = (CG_QUEUE    **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
         if (device_refs == NULL || device_ids == NULL || compute_contexts == NULL || transfer_queues == NULL)
             goto error_cleanup;
         // populate the device reference list and initialize everything else to NULL.
@@ -825,28 +863,34 @@ cgAllocExecutionGroup
             device_ids [device_index] = device_refs[device_index]->DeviceId;
         }
         memset(compute_contexts, 0, device_count * sizeof(cl_context));
-        memset(compute_queues  , 0, device_count * sizeof(cl_command_queue));
-        memset(transfer_queues , 0, device_count * sizeof(cl_command_queue));
+        memset(compute_queues  , 0, device_count * sizeof(CG_QUEUE*));
+        memset(transfer_queues , 0, device_count * sizeof(CG_QUEUE*));
     }
     if (display_count > 0)
     {   // allocate all of the display list storage.
-        display_refs     = (CG_DISPLAY     **) cgAllocateHostMemory(&ctx->HostAllocator, display_count * sizeof(CG_DISPLAY*)     , 0, CG_ALLOCATION_TYPE_OBJECT);
-        display_dcs      = (HDC             *) cgAllocateHostMemory(&ctx->HostAllocator, display_count * sizeof(HDC)             , 0, CG_ALLOCATION_TYPE_OBJECT);
-        display_rcs      = (HGLRC           *) cgAllocateHostMemory(&ctx->HostAllocator, display_count * sizeof(HGLRC)           , 0, CG_ALLOCATION_TYPE_OBJECT);
-        if (display_refs == NULL || display_dcs == NULL || display_rcs == NULL)
+        display_refs     = (CG_DISPLAY**) cgAllocateHostMemory(&ctx->HostAllocator, display_count * sizeof(CG_DISPLAY*), 0, CG_ALLOCATION_TYPE_OBJECT);
+        graphics_queues  = (CG_QUEUE  **) cgAllocateHostMemory(&ctx->HostAllocator, display_count * sizeof(CG_QUEUE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        if (display_refs == NULL || graphics_queues == NULL)
             goto error_cleanup;
         // populate the display list with data.
         for (size_t device_index = 0; device_index < device_count; ++device_index)
         {
             CG_DEVICE  *device = cgObjectTableGet(&ctx->DeviceTable, device_list[device_index]);
-            for (size_t display_index = 0, display_count = device->DisplayCount; display_index < display_count; ++display_index)
+            for (size_t display_index = 0, num_displays = device->DisplayCount; display_index < num_displays; ++display_index)
             {
                 display_refs[group->DisplayCount] = device->AttachedDisplays[display_index];
-                display_dcs [group->DisplayCount] = device->DisplayDC[display_index];
-                display_rcs [group->DisplayCount] = device->DisplayRC;
                 group->DisplayCount++;
             }
         }
+        memset(graphics_queues, 0, display_count * sizeof(CG_QUEUE*));
+    }
+    if (queue_count > 0)
+    {   // allocate all of the queue list storage.
+        queue_refs  = (CG_QUEUE**) cgAllocateHostMemory(&ctx->HostAllocator, queue_count * sizeof(CG_QUEUE*), 0, CG_ALLOCATION_TYPE_OBJECT);
+        if (queue_refs == NULL)
+            goto error_cleanup;
+        // NULL out all of the queue references.
+        memset(queue_refs, 0, queue_count * sizeof(CG_QUEUE*));
     }
 
     // initialization was successful, save all of the references.
@@ -854,24 +898,25 @@ cgAllocExecutionGroup
     group->DeviceCount      = device_count;
     group->DeviceList       = device_refs;
     group->DeviceIds        = device_ids;
-    group->ComputeContext   = compute_contexts;
-    group->ComputeQueue     = compute_queues;
-    group->TransferQueue    = transfer_queues;
+    group->ComputeContexts  = compute_contexts;
+    group->ComputeQueues    = compute_queues;
+    group->TransferQueues   = transfer_queues;
     group->DisplayCount     = display_count;
     group->AttachedDisplays = display_refs;
-    group->DisplayDC        = display_dcs;
-    group->DisplayRC        = display_rcs;
+    group->GraphicsQueues   = graphics_queues;
+    group->QueueCount       = queue_count;
+    group->QueueList        = queue_refs;
     return CG_SUCCESS;
 
 error_cleanup:
-    cgFreeHostMemory(&ctx->HostAllocator, display_rcs     , display_count * sizeof(HGLRC)           , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, display_dcs     , display_count * sizeof(HGLRC)           , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, display_refs    , display_count * sizeof(CG_DISPLAY*)     , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, transfer_queues , device_count  * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, compute_queues  , device_count  * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, compute_contexts, device_count  * sizeof(cl_context)      , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, device_ids      , device_count  * sizeof(cl_device_id)    , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, device_refs     , device_count  * sizeof(CG_DEVICE*)      , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, queue_refs      , queue_count   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, graphics_queues , display_count * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, display_refs    , display_count * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, transfer_queues , device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, compute_queues  , device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, compute_contexts, device_count  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, device_ids      , device_count  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, device_refs     , device_count  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     return CG_OUT_OF_MEMORY;
 }
 
@@ -886,26 +931,20 @@ cgDeleteExecutionGroup
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
-    // release references to OpenCL objects.
-    for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
-    {
-        clReleaseCommandQueue(group->TransferQueue[i]);
-        clReleaseCommandQueue(group->ComputeQueue [i]);
-        clReleaseContext(group->ComputeContext[i]);
-    }
     // release device references back to the execution group.
     for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
     {
+        clReleaseContext(group->ComputeContexts[i]);
         group->DeviceList[i]->ExecutionGroup = CG_INVALID_HANDLE;
     }
-    cgFreeHostMemory(host_alloc, group->DisplayRC       , group->DisplayCount * sizeof(HGLRC)           , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->DisplayDC       , group->DisplayCount * sizeof(HDC)             , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->AttachedDisplays, group->DisplayCount * sizeof(CG_DISPLAY*)     , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->TransferQueue   , group->DeviceCount  * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->ComputeQueue    , group->DisplayCount * sizeof(cl_command_queue), 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->ComputeContext  , group->DeviceCount  * sizeof(cl_context)      , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->DeviceIds       , group->DeviceCount  * sizeof(cl_device_id)    , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->DeviceList      , group->DeviceCount  * sizeof(CG_DEVICE*)      , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->QueueList       , group->QueueCount   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->GraphicsQueues  , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->AttachedDisplays, group->DisplayCount * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->TransferQueues  , group->DeviceCount  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->ComputeQueues   , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->ComputeContexts , group->DeviceCount  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->DeviceIds       , group->DeviceCount  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_INTERNAL);
+    cgFreeHostMemory(host_alloc, group->DeviceList      , group->DeviceCount  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_INTERNAL);
     memset(group, 0, sizeof(CG_EXEC_GROUP));
 }
 
@@ -937,6 +976,7 @@ cgCreateContext
     // initialize the various object tables on the context to empty.
     cgObjectTableInit(&ctx->DeviceTable   , CG_OBJECT_DEVICE         , CG_DEVICE_TABLE_ID);
     cgObjectTableInit(&ctx->DisplayTable  , CG_OBJECT_DISPLAY        , CG_DISPLAY_TABLE_ID);
+    cgObjectTableInit(&ctx->QueueTable    , CG_OBJECT_QUEUE          , CG_QUEUE_TABLE_ID);
     cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
 
     // the context has been fully initialized.
@@ -954,11 +994,17 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all command queue objects:
+    for (size_t i = 0, n = ctx->QueueTable.ObjectCount; i < n; ++i)
+    {
+        CG_QUEUE *obj = &ctx->QueueTable.Objects[i];
+        cgDeleteQueue(ctx, obj);
+    }
     // free all execution group objects:
     for (size_t i = 0, n = ctx->ExecGroupTable.ObjectCount; i < n; ++i)
     {
-        CG_EXEC_GROUP *group = &ctx->ExecGroupTable.Objects[i];
-        cgDeleteExecutionGroup(ctx, group);
+        CG_EXEC_GROUP *obj = &ctx->ExecGroupTable.Objects[i];
+        cgDeleteExecutionGroup(ctx, obj);
     }
     // free all device objects:
     for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
@@ -2256,22 +2302,27 @@ cgResultString
 {
     switch (result)
     {
-    case CG_ERROR:            return "Generic error (CG_ERROR)";
-    case CG_INVALID_VALUE:    return "One or more arguments are invalid (CG_INVALID_VALUE)";
-    case CG_OUT_OF_MEMORY:    return "Unable to allocate required memory (CG_OUT_OF_MEMORY)";
-    case CG_NO_PIXELFORMAT:   return "No accelerated pixel format could be found (CG_NO_PIXELFORMAT)";
-    case CG_BAD_PIXELFORMAT:  return "Unable to set the display pixel format (CG_BAD_PIXELFORMAT)";
-    case CG_NO_GLCONTEXT:     return "Unable to create an OpenGL rendering context (CG_NO_GLCONTEXT)";
-    case CG_BAD_GLCONTEXT:    return "The OpenGL rendering context is invalid (CG_BAD_GLCONTEXT)";
-    case CG_SUCCESS:          return "Success (CG_SUCCESS)";
-    case CG_UNSUPPORTED:      return "Unsupported operation (CG_UNSUPPORTED)";
-    case CG_NOT_READY:        return "Result not ready (CG_NOT_READY)";
-    case CG_TIMEOUT:          return "Wait completed due to timeout (CG_TIMEOUT)";
-    case CG_SIGNALED:         return "Wait completed due to event signal (CG_SIGNALED)";
-    case CG_BUFFER_TOO_SMALL: return "Buffer too small (CG_BUFFER_TOO_SMALL)";
-    case CG_NO_OPENCL:        return "No compatible OpenCL platforms or devices available (CG_NO_OPENCL)";
-    case CG_NO_OPENGL:        return "No compatible OpenGL devices are available (CG_NO_OPENGL)";
-    case CG_NO_GLSHARING:     return "OpenGL rendering context created but OpenCL interop unavailable (CG_NO_GLSHARING)";
+    case CG_ERROR:             return "Generic error (CG_ERROR)";
+    case CG_INVALID_VALUE:     return "One or more arguments are invalid (CG_INVALID_VALUE)";
+    case CG_OUT_OF_MEMORY:     return "Unable to allocate required memory (CG_OUT_OF_MEMORY)";
+    case CG_NO_PIXELFORMAT:    return "No accelerated pixel format could be found (CG_NO_PIXELFORMAT)";
+    case CG_BAD_PIXELFORMAT:   return "Unable to set the display pixel format (CG_BAD_PIXELFORMAT)";
+    case CG_NO_GLCONTEXT:      return "Unable to create an OpenGL rendering context (CG_NO_GLCONTEXT)";
+    case CG_BAD_GLCONTEXT:     return "The OpenGL rendering context is invalid (CG_BAD_GLCONTEXT)";
+    case CG_NO_CLCONTEXT:      return "Unable to create an OpenCL resource context (CG_NO_CLCONTEXT)";
+    case CG_BAD_CLCONTEXT:     return "The OpenCL resource context is invalid (CG_BAD_CLCONTEXT)";
+    case CG_OUT_OF_OBJECTS:    return "The maximum number of objects has been exceeded (CG_OUT_OF_OBJECTS)";
+    case CG_UNKNOWN_GROUP:     return "The object is not associated with an execution group (CG_UNKNOWN_GROUP)";
+    case CG_SUCCESS:           return "Success (CG_SUCCESS)";
+    case CG_UNSUPPORTED:       return "Unsupported operation (CG_UNSUPPORTED)";
+    case CG_NOT_READY:         return "Result not ready (CG_NOT_READY)";
+    case CG_TIMEOUT:           return "Wait completed due to timeout (CG_TIMEOUT)";
+    case CG_SIGNALED:          return "Wait completed due to event signal (CG_SIGNALED)";
+    case CG_BUFFER_TOO_SMALL:  return "Buffer too small (CG_BUFFER_TOO_SMALL)";
+    case CG_NO_OPENCL:         return "No compatible OpenCL platforms or devices available (CG_NO_OPENCL)";
+    case CG_NO_OPENGL:         return "No compatible OpenGL devices are available (CG_NO_OPENGL)";
+    case CG_NO_GLSHARING:      return "OpenGL rendering context created but OpenCL interop unavailable (CG_NO_GLSHARING)";
+    case CG_NO_QUEUE_OF_TYPE:  return "The object does not have a command queue of the specified type (CG_NO_QUEUE_OF_TYPE)";
     default:                   break;
     }
     return "Unknown Result";
@@ -2975,6 +3026,7 @@ cgCreateExecutionGroup
 {
     size_t      context_count = 0;
     size_t       device_count = 0;
+    size_t        queue_index = 0;
     cg_handle_t *devices      = NULL;
     cg_handle_t  group_handle = CG_INVALID_HANDLE;
     CG_CONTEXT  *ctx          =(CG_CONTEXT*)context;
@@ -3070,7 +3122,7 @@ cgCreateExecutionGroup
                     }
                     return CG_INVALID_HANDLE;
                 }
-                group.ComputeContext[i] = cl_ctx;
+                group.ComputeContexts[i] = cl_ctx;
                 context_count++;
             }
         }
@@ -3083,7 +3135,7 @@ cgCreateExecutionGroup
         // use the execution group's device ID list as storage.
         for (size_t i = 0; i < device_count; ++i)
         {
-            if (group.ComputeContext[i] == NULL)
+            if (group.ComputeContexts[i] == NULL)
                 device_ids[ndevs++] = group.DeviceList[i]->DeviceId;
         }
         cl_context_properties props[] = 
@@ -3110,10 +3162,10 @@ cgCreateExecutionGroup
         for (size_t i = 0; i < device_count; ++i)
         {
             group.DeviceIds[i] = group.DeviceList[i]->DeviceId;
-            if (group.ComputeContext[i] == NULL)
+            if (group.ComputeContexts[i] == NULL)
             {
                 clRetainContext(cl_ctx);
-                group.ComputeContext[i]  = cl_ctx;
+                group.ComputeContexts[i]  = cl_ctx;
             }
         }
         // release the 'global' reference to the context.
@@ -3123,13 +3175,17 @@ cgCreateExecutionGroup
     // create compute and transfer queues. each device gets its own unique 
     // compute queue, and each GPU or accelerator device that doesn't have
     // its unified memory capability set gets its own transfer queue.
-    for (size_t i = 0;  i < device_count; ++i)
+    for (size_t i = 0; i < device_count; ++i)
     {   // create the command queue used for submitting compute dispatch operations.
         cl_int       cl_err = CL_SUCCESS;
-        cl_context   cl_ctx = group.ComputeContext[i];
+        cl_context   cl_ctx = group.ComputeContexts[i];
         cl_device_id cl_dev = group.DeviceIds[i];
         cl_command_queue cq = NULL; // compute queue
         cl_command_queue tq = NULL; // transfer queue
+        cg_handle_t  cq_hnd = CG_INVALID_HANDLE;
+        cg_handle_t  tq_hnd = CG_INVALID_HANDLE;
+        CG_QUEUE    *cq_ref = NULL;
+        CG_QUEUE    *tq_ref = NULL;
 
         if ((cq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE, &cl_err)) == NULL)
         {   // unable to create the command queue for some reason.
@@ -3147,7 +3203,19 @@ cgCreateExecutionGroup
             cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
             return CG_INVALID_HANDLE;
         }
-        else group.ComputeQueue[i] = cq;
+        else
+        {   // create the CG_QUEUE, add it to the table, save the reference.
+            CG_QUEUE queue;
+            queue.QueueType       = CG_QUEUE_TYPE_COMPUTE;
+            queue.ComputeContext  = cl_ctx;
+            queue.CommandQueue    = cq;
+            queue.DisplayDC       = NULL;
+            queue.DisplayRC       = NULL;
+            cq_hnd = cgObjectTableAdd(&ctx->QueueTable, queue);
+            cq_ref = cgObjectTableGet(&ctx->QueueTable, cq_hnd);
+            group.ComputeQueues[i]         = cq_ref;
+            group.QueueList[queue_index++] = cq_ref;
+        }
 
         // create the command queue used for submitting data transfer operations.
         if (group.DeviceList[i]->Capabilities.UnifiedMemory == CL_FALSE)
@@ -3168,12 +3236,47 @@ cgCreateExecutionGroup
                 cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
                 return CG_INVALID_HANDLE;
             }
-            else group.TransferQueue[i] = tq;
+            else
+            {   // create the CG_QUEUE, add it to the table, save the reference.
+                CG_QUEUE queue;
+                queue.QueueType       = CG_QUEUE_TYPE_TRANSFER;
+                queue.ComputeContext  = cl_ctx;
+                queue.CommandQueue    = tq;
+                queue.DisplayDC       = NULL;
+                queue.DisplayRC       = NULL;
+                tq_hnd = cgObjectTableAdd(&ctx->QueueTable, queue);
+                tq_ref = cgObjectTableGet(&ctx->QueueTable, tq_hnd);
+                group.TransferQueues[i]        = tq_ref;
+                group.QueueList[queue_index++] = tq_ref;
+            }
         }
         else
         {   // use the existing compute queue for transfers.
-            group.TransferQueue[i] = cq;
-            clRetainCommandQueue(cq);
+            group.TransferQueues[i] = cq_ref;
+        }
+    }
+
+    // create (logical) graphics queues for each attached display.
+    for (size_t i = 0; i < group.DisplayCount; ++i)
+    {
+        if (group.AttachedDisplays[i]->DisplayRC != NULL)
+        {
+            CG_QUEUE    queue;
+            CG_QUEUE   *queue_ref = NULL;
+            cg_handle_t handle    = CG_INVALID_HANDLE;
+            queue.QueueType       = CG_QUEUE_TYPE_GRAPHICS;
+            queue.ComputeContext  = NULL;
+            queue.CommandQueue    = NULL;
+            queue.DisplayDC       = group.AttachedDisplays[i]->DisplayDC;
+            queue.DisplayRC       = group.AttachedDisplays[i]->DisplayRC;
+            handle    = cgObjectTableAdd(&ctx->QueueTable, queue);
+            queue_ref = cgObjectTableGet(&ctx->QueueTable, handle);
+            group.GraphicsQueues[i]        = queue_ref;
+            group.QueueList[queue_index++] = queue_ref;
+        }
+        else
+        {   // there's no OpenGL available on this display, so no presentation queue.
+            group.GraphicsQueues[i] = NULL;
         }
     }
 
@@ -3199,3 +3302,435 @@ error_invalid_value:
     result = CG_INVALID_VALUE;
     return CG_INVALID_HANDLE;
 }
+
+/// @summary Query execution group information.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param group_handle The handle of the execution group to query.
+/// @param param One of cg_execution_group_info_param_e specifying the data to return.
+/// @param buffer A caller-managed buffer to receive the data.
+/// @param buffer_size The maximum number of bytes that can be written to @a buffer.
+/// @param bytes_needed On return, stores the number of bytes copied to the buffer, or the number of bytes required to store the data.
+/// @return CG_SUCCESS, CG_BUFFER_TOO_SMALL, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+library_function int
+cgGetExecutionGroupInfo
+(
+    uintptr_t   context, 
+    cg_handle_t group_handle, 
+    int         param,
+    void       *buffer, 
+    size_t      buffer_size, 
+    size_t     *bytes_needed
+)
+{
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  NULL;
+
+    if ((group = cgObjectTableGet(&ctx->ExecGroupTable, group_handle)) == NULL)
+    {
+        if (bytes_needed != NULL) *bytes_needed = 0;
+        return CG_INVALID_HANDLE;
+    }
+
+    // reduce the amount of boilerplate code using these macros.
+#define BUFFER_CHECK_TYPE(type) \
+    if (buffer == NULL || buffer_size < sizeof(type)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = sizeof(type); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = sizeof(type); \
+    }
+#define BUFFER_CHECK_SIZE(size) \
+    if (buffer == NULL || buffer_size < (size)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = (size); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = (size); \
+    }
+#define BUFFER_SET_SCALAR(type, value) \
+    *((type*)buffer) = (value)
+    // ==========================================================
+    // ==========================================================
+
+    // retrieve parameter data:
+    switch (param)
+    {
+    case CG_EXEC_GROUP_DEVICE_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, group->DeviceCount);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_DEVICES:
+        {   BUFFER_CHECK_SIZE(group->DeviceCount * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*)  buffer;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                handles[i] = cgMakeHandle(group->DeviceList[i]->ObjectId, CG_OBJECT_DEVICE, CG_DEVICE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_CPU_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t num_devices = 0;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_CPU)
+                    num_devices++;
+            }
+            BUFFER_SET_SCALAR(size_t, num_devices);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_CPU_DEVICES:
+        {   size_t num_devices = 0;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_CPU)
+                    num_devices++;
+            }
+            BUFFER_CHECK_SIZE(num_devices * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*)  buffer;
+            for (size_t i = 0, n = group->DeviceCount, o = 0; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_CPU)
+                    handles[o++] = cgMakeHandle(group->DeviceList[i]->ObjectId, CG_OBJECT_DEVICE, CG_DEVICE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_GPU_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t num_devices = 0;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_GPU)
+                    num_devices++;
+            }
+            BUFFER_SET_SCALAR(size_t, num_devices);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_GPU_DEVICES:
+        {   size_t num_devices = 0;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_GPU)
+                    num_devices++;
+            }
+            BUFFER_CHECK_SIZE(num_devices * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*)  buffer;
+            for (size_t i = 0, n = group->DeviceCount, o = 0; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_GPU)
+                    handles[o++] = cgMakeHandle(group->DeviceList[i]->ObjectId, CG_OBJECT_DEVICE, CG_DEVICE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_ACCELERATOR_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t num_devices = 0;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_ACCELERATOR)
+                    num_devices++;
+            }
+            BUFFER_SET_SCALAR(size_t, num_devices);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_ACCELERATOR_DEVICES:
+        {   size_t num_devices = 0;
+            for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_ACCELERATOR)
+                    num_devices++;
+            }
+            BUFFER_CHECK_SIZE(num_devices * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*)  buffer;
+            for (size_t i = 0, n = group->DeviceCount, o = 0; i < n; ++i)
+            {
+                if (group->DeviceList[i]->Type == CL_DEVICE_TYPE_ACCELERATOR)
+                    handles[o++] = cgMakeHandle(group->DeviceList[i]->ObjectId, CG_OBJECT_DEVICE, CG_DEVICE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_DISPLAY_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, group->DisplayCount);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_ATTACHED_DISPLAYS:
+        {   BUFFER_CHECK_SIZE(group->DisplayCount * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*) buffer;
+            for (size_t i = 0, n = group->DisplayCount; i < n; ++i)
+            {
+                handles[i] = cgMakeHandle(group->AttachedDisplays[i]->ObjectId, CG_OBJECT_DISPLAY, CG_DISPLAY_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_QUEUE_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, group->QueueCount);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_QUEUES:
+        {   BUFFER_CHECK_SIZE(group->QueueCount * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*) buffer;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                handles[i] = cgMakeHandle(group->QueueList[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_COMPUTE_QUEUE_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t num_queues = 0;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_COMPUTE)
+                    num_queues++;
+            }
+            BUFFER_SET_SCALAR(size_t, num_queues);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_COMPUTE_QUEUES:
+        {   size_t num_queues = 0;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_COMPUTE)
+                    num_queues++;
+            }
+            BUFFER_CHECK_SIZE(num_queues * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*) buffer;
+            for (size_t i = 0, n = group->QueueCount, o = 0; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_COMPUTE)
+                    handles[o++] = cgMakeHandle(group->QueueList[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_TRANSFER_QUEUE_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t num_queues = 0;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_TRANSFER)
+                    num_queues++;
+            }
+            BUFFER_SET_SCALAR(size_t, num_queues);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_TRANSFER_QUEUES:
+        {   size_t num_queues = 0;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_TRANSFER)
+                    num_queues++;
+            }
+            BUFFER_CHECK_SIZE(num_queues * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*) buffer;
+            for (size_t i = 0, n = group->QueueCount, o = 0; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_TRANSFER)
+                    handles[o++] = cgMakeHandle(group->QueueList[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t num_queues = 0;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_GRAPHICS)
+                    num_queues++;
+            }
+            BUFFER_SET_SCALAR(size_t, num_queues);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_GRAPHICS_QUEUES:
+        {   size_t num_queues = 0;
+            for (size_t i = 0, n = group->QueueCount; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_GRAPHICS)
+                    num_queues++;
+            }
+            BUFFER_CHECK_SIZE(num_queues * sizeof(cg_handle_t));
+            cg_handle_t *handles = (cg_handle_t*) buffer;
+            for (size_t i = 0, n = group->QueueCount, o = 0; i < n; ++i)
+            {
+                if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_GRAPHICS)
+                    handles[o++] = cgMakeHandle(group->QueueList[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+        return CG_SUCCESS;
+
+    default:
+        {
+            if (bytes_needed != NULL) *bytes_needed = 0;
+            return CG_INVALID_VALUE;
+        }
+    }
+
+#undef  BUFFER_SET_SCALAR
+#undef  BUFFER_CHECK_SIZE
+#undef  BUFFER_CHECK_TYPE
+}
+
+/// @summary Retrieve a command queue associated with a device.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param device_handle The handle of the device to query.
+/// @param queue_type One of cg_queue_type_e identifying the queue to retrieve.
+/// @param result On return, set to CG_SUCCESS or another result code.
+/// @return The handle of the queue, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgGetQueueForDevice
+(
+    uintptr_t   context, 
+    cg_handle_t device_handle, 
+    int         queue_type, 
+    int        &result
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    CG_DEVICE  *dev =  cgObjectTableGet(&ctx->DeviceTable, device_handle);
+    if (dev == NULL)
+    {   // an invalid device handle was supplied.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    CG_EXEC_GROUP *grp = cgObjectTableGet(&ctx->ExecGroupTable, dev->ExecutionGroup);
+    if (grp == NULL)
+    {   // there's no execution group associated with this device.
+        result = CG_UNKNOWN_GROUP;
+        return CG_INVALID_HANDLE;
+    }
+    if (queue_type == CG_QUEUE_TYPE_COMPUTE) 
+    {   // search the device list to retrieve the queue.
+        for (size_t i = 0, n = grp->DeviceCount; i < n; ++i)
+        {
+            if (grp->DeviceList[i] == dev)
+            {   result = CG_SUCCESS;
+                return cgMakeHandle(grp->ComputeQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+    }
+    else if (queue_type == CG_QUEUE_TYPE_TRANSFER)
+    {   // search the device list to retrieve the queue.
+        for (size_t i = 0, n = grp->DeviceCount; i < n; ++i)
+        {
+            if (grp->DeviceList[i] == dev)
+            {   result = CG_SUCCESS;
+                return cgMakeHandle(grp->TransferQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+    }
+    else if (queue_type == CG_QUEUE_TYPE_GRAPHICS)
+    {   // search the display list for the device.
+        for (size_t i = 0, n = grp->DisplayCount; i < n; ++i)
+        {
+            if (grp->AttachedDisplays[i]->DisplayDevice == dev)
+            {   
+                if (grp->GraphicsQueues[i] != NULL)
+                {   result = CG_SUCCESS;
+                    return cgMakeHandle(grp->GraphicsQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+                }
+                else break; // no presentation queue because required OpenGL is not available.
+            }
+        }
+    }
+    result = CG_NO_QUEUE_OF_TYPE;
+    return CG_INVALID_HANDLE;
+}
+
+/// @summary Retrieve a command queue associated with a display.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param display_handle The handle of the display to query.
+/// @param queue_type One of cg_queue_type_e identifying the queue to retrieve.
+/// @param result On return, set to CG_SUCCESS or another result code.
+/// @return The handle of the queue, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgGetQueueForDisplay
+(
+    uintptr_t   context,
+    cg_handle_t display_handle, 
+    int         queue_type, 
+    int        &result
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    CG_DISPLAY *dsp =  cgObjectTableGet(&ctx->DisplayTable, display_handle);
+    if (dsp == NULL)
+    {   // an invalid display handle was supplied.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    CG_DEVICE     *dev = dsp->DisplayDevice;
+    CG_EXEC_GROUP *grp = cgObjectTableGet(&ctx->ExecGroupTable, dev->ExecutionGroup);
+    if (grp == NULL)
+    {   // there's no execution group associated with this device.
+        result = CG_UNKNOWN_GROUP;
+        return CG_INVALID_HANDLE;
+    }
+    if (queue_type == CG_QUEUE_TYPE_COMPUTE) 
+    {   // search the device list to retrieve the queue.
+        for (size_t i = 0, n = grp->DeviceCount; i < n; ++i)
+        {
+            if (grp->DeviceList[i] == dev)
+            {   result = CG_SUCCESS;
+                return cgMakeHandle(grp->ComputeQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+    }
+    else if (queue_type == CG_QUEUE_TYPE_TRANSFER)
+    {   // search the device list to retrieve the queue.
+        for (size_t i = 0, n = grp->DeviceCount; i < n; ++i)
+        {
+            if (grp->DeviceList[i] == dev)
+            {   result = CG_SUCCESS;
+                return cgMakeHandle(grp->TransferQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+            }
+        }
+    }
+    else if (queue_type == CG_QUEUE_TYPE_GRAPHICS)
+    {   // search the display list for the device.
+        for (size_t i = 0, n = grp->DisplayCount; i < n; ++i)
+        {
+            if (grp->AttachedDisplays[i] == dsp)
+            {   
+                if (grp->GraphicsQueues[i] != NULL)
+                {   result = CG_SUCCESS;
+                    return cgMakeHandle(grp->GraphicsQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
+                }
+                else break; // no presentation queue because required OpenGL is not available.
+            }
+        }
+    }
+    result = CG_NO_QUEUE_OF_TYPE;
+    return CG_INVALID_HANDLE;
+}
+
+// A headless configuration is going to find CPUs first, including any GPUs in the share group.
+// It would then create additional execution groups containing any discrete GPU devices.
+// Headless is CPU-driven, with *optional* GPUs for accelerators.
+//
+// A display configuration is going to create an execution group based on a display first, including any CPUs in the share group.
+// It would then create additional execution groups containing any CPUs or discrete GPU devices.
+// Display is GPU-driven; a presentation queue/OpenGL support is *required*.

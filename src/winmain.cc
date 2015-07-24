@@ -342,7 +342,22 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
         return 0;
     }
 
+    cg_handle_t display_gfx_queue = cgGetQueueForDisplay(context, display, CG_QUEUE_TYPE_GRAPHICS, cgres);
+    cg_handle_t device_gfx_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_GRAPHICS, cgres);
+    assert(display_gfx_queue == device_gfx_queue);
+    assert(display_gfx_queue != CG_INVALID_HANDLE);
+    cg_handle_t display_cpu_queue = cgGetQueueForDisplay(context, display, CG_QUEUE_TYPE_COMPUTE, cgres);
+    cg_handle_t device_cpu_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_COMPUTE, cgres);
+    assert(display_cpu_queue == device_cpu_queue);
+    assert(display_cpu_queue != CG_INVALID_HANDLE);
+    cg_handle_t display_dma_queue = cgGetQueueForDisplay(context, display, CG_QUEUE_TYPE_TRANSFER, cgres);
+    cg_handle_t device_dma_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_TRANSFER, cgres);
+    assert(display_dma_queue == device_dma_queue);
+    assert(display_dma_queue != CG_INVALID_HANDLE);
+
     cgDestroyContext(context);
+
+    return 0;
 
     // create the main application window on the primary display.
     HWND main_window = NULL;

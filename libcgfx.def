@@ -17,3 +17,6 @@ EXPORTS
     cgGetCPUDevicesInShareGroup    @15
     cgGetGPUDevicesInShareGroup    @16
     cgCreateExecutionGroup         @17
+    cgGetExecutionGroupInfo        @18
+    cgGetQueueForDevice            @19
+    cgGetQueueForDisplay           @20
