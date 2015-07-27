@@ -643,6 +643,24 @@ cgDeleteQueue
     memset(queue, 0, sizeof(CG_QUEUE));
 }
 
+/// @summary Frees all resources associated with a command buffer object.
+/// @param ctx The CGFX context that owns the command buffer object.
+/// @param cmdbuf The command buffer object to delete.
+internal_function void
+cgDeleteCmdBuffer
+(
+    CG_CONTEXT    *ctx, 
+    CG_CMD_BUFFER *cmdbuf
+)
+{   UNREFERENCED_PARAMETER(ctx);
+    if (cmdbuf->CommandData != NULL)
+        VirtualFree(cmdbuf->CommandData, 0, MEM_RELEASE);
+    cmdbuf->BytesTotal   = 0;
+    cmdbuf->BytesUsed    = 0;
+    cmdbuf->CommandCount = 0;
+    cmdbuf->CommandData  = NULL;
+}
+
 /// @summary Allocate memory for an execution group and initialize the device and display lists.
 /// @param ctx The CGFX context that owns the execution group.
 /// @param group The execution group to initialize.
@@ -817,6 +835,7 @@ cgCreateContext
     cgObjectTableInit(&ctx->DeviceTable   , CG_OBJECT_DEVICE         , CG_DEVICE_TABLE_ID);
     cgObjectTableInit(&ctx->DisplayTable  , CG_OBJECT_DISPLAY        , CG_DISPLAY_TABLE_ID);
     cgObjectTableInit(&ctx->QueueTable    , CG_OBJECT_QUEUE          , CG_QUEUE_TABLE_ID);
+    cgObjectTableInit(&ctx->CmdBufferTable, CG_OBJECT_COMMAND_BUFFER , CG_CMD_BUFFER_TABLE_ID);
     cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
 
     // the context has been fully initialized.
@@ -834,6 +853,12 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all command buffer objects:
+    for (size_t i = 0, n = ctx->CmdBufferTable.ObjectCount; i < n; ++i)
+    {
+        CG_CMD_BUFFER *obj = &ctx->CmdBufferTable.Objects[i];
+        cgDeleteCmdBuffer(ctx, obj);
+    }
     // free all command queue objects:
     for (size_t i = 0, n = ctx->QueueTable.ObjectCount; i < n; ++i)
     {
@@ -2128,6 +2153,61 @@ cgFreeExecutionGroupDeviceList
     cgFreeHostMemory(&ctx->HostAllocator, devices, num_devices * sizeof(cg_handle_t), 0, CG_ALLOCATION_TYPE_TEMP);
 }
 
+/// @summary Retrieves the current state of a command buffer.
+/// @param cmdbuf The command buffer to query.
+/// @return One of CG_CMD_BUFFER::state_e.
+internal_function inline uint32_t
+cgCmdBufferGetState
+(
+    CG_CMD_BUFFER *cmdbuf
+)
+{
+    return ((cmdbuf->TypeAndState & CG_CMD_BUFFER::STATE_MASK_P) >> CG_CMD_BUFFER::STATE_SHIFT);
+}
+
+/// @summary Updates the current state of a command buffer.
+/// @param cmdbuf The command buffer to update.
+/// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
+internal_function inline void 
+cgCmdBufferSetState
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    uint32_t       state
+)
+{
+    cmdbuf->TypeAndState &= ~CG_CMD_BUFFER::STATE_MASK_P;
+    cmdbuf->TypeAndState |= (state << CG_CMD_BUFFER::STATE_SHIFT);
+}
+
+/// @summary Retrieves the target queue type of a command buffer.
+/// @param cmdbuf The command buffer to query.
+/// @return One of cg_queue_type_e.
+internal_function inline int
+cgCmdBufferGetQueueType
+(
+    CG_CMD_BUFFER *cmdbuf
+)
+{
+    return int((cmdbuf->TypeAndState & CG_CMD_BUFFER::TYPE_MASK_P) >> CG_CMD_BUFFER::TYPE_SHIFT);
+}
+
+/// @summary Updates the current state and target queue type of a command buffer.
+/// @param cmdbuf The command buffer to update.
+/// @param queue_type One of cg_queue_type_e specifying the target queue type.
+/// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
+internal_function inline void
+cgCmdBufferSetTypeAndState
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    int            queue_type, 
+    uint32_t       state
+)
+{
+    cmdbuf->TypeAndState = 
+        ((uint32_t(queue_type) & CG_CMD_BUFFER::TYPE_MASK_U ) << CG_CMD_BUFFER::TYPE_SHIFT) | 
+        ((uint32_t(state     ) & CG_CMD_BUFFER::STATE_MASK_U) << CG_CMD_BUFFER::STATE_SHIFT);
+}
+
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
@@ -2153,6 +2233,7 @@ cgResultString
     case CG_BAD_CLCONTEXT:     return "The OpenCL resource context is invalid (CG_BAD_CLCONTEXT)";
     case CG_OUT_OF_OBJECTS:    return "The maximum number of objects has been exceeded (CG_OUT_OF_OBJECTS)";
     case CG_UNKNOWN_GROUP:     return "The object is not associated with an execution group (CG_UNKNOWN_GROUP)";
+    case CG_INVALID_STATE:     return "The object is in an invalid state for the operation (CG_INVALID_OBJECT)";
     case CG_SUCCESS:           return "Success (CG_SUCCESS)";
     case CG_UNSUPPORTED:       return "Unsupported operation (CG_UNSUPPORTED)";
     case CG_NOT_READY:         return "Result not ready (CG_NOT_READY)";
@@ -2163,6 +2244,7 @@ cgResultString
     case CG_NO_OPENGL:         return "No compatible OpenGL devices are available (CG_NO_OPENGL)";
     case CG_NO_GLSHARING:      return "OpenGL rendering context created but OpenCL interop unavailable (CG_NO_GLSHARING)";
     case CG_NO_QUEUE_OF_TYPE:  return "The object does not have a command queue of the specified type (CG_NO_QUEUE_OF_TYPE)";
+    case CG_END_OF_BUFFER:     return "The end of the buffer has been reached (CG_END_OF_BUFFER)";
     default:                   break;
     }
     if (result <= CG_RESULT_FAILURE_EXT || result >= CG_RESULT_NON_FAILURE_EXT)
@@ -3568,6 +3650,355 @@ cgGetQueueForDisplay
     }
     result = CG_NO_QUEUE_OF_TYPE;
     return CG_INVALID_HANDLE;
+}
+
+/// @summary Deletes an object and invalidates its handle.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param object The handle of the object to delete.
+/// @return CG_SUCCESS or CG_INVALID_VALUE.
+library_function int
+cgDeleteObject
+(
+    uintptr_t   context,
+    cg_handle_t object
+)
+{
+    CG_CONTEXT *ctx =(CG_CONTEXT*) context;
+    switch (cgGetObjectType(object))
+    {
+    case CG_OBJECT_COMMAND_BUFFER:
+        {
+            CG_CMD_BUFFER buf;
+            if (cgObjectTableRemove(&ctx->CmdBufferTable, object, buf))
+            {
+                cgDeleteCmdBuffer(ctx, &buf);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
+    default:
+        break;
+    }
+    return CG_INVALID_VALUE;
+}
+
+/// @summary Allocates and initializes a new command buffer.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param queue_type One of cg_queue_type_e specifying the destination queue type.
+/// @param result On return, set to CG_SUCCESS, CG_OUT_OF_MEMORY or CG_OUT_OF_OBJECTS.
+library_function cg_handle_t
+cgCreateCommandBuffer
+(
+    uintptr_t  context,
+    int        queue_type, 
+    int       &result
+)
+{
+    CG_CONTEXT   *ctx = (CG_CONTEXT*) context;
+    CG_CMD_BUFFER buf;
+
+    cgCmdBufferSetTypeAndState(&buf, queue_type, CG_CMD_BUFFER::UNINITIALIZED);
+    buf.BytesTotal    = 0;
+    buf.BytesUsed     = 0;
+    buf.CommandCount  = 0;
+    if ((buf.CommandData = (uint8_t*) VirtualAlloc(NULL, CG_CMD_BUFFER::MAX_SIZE, MEM_RESERVE, PAGE_READWRITE)) == NULL)
+    {   // unable to reserve the required virtual address space.
+        result = CG_OUT_OF_MEMORY;
+        return CG_INVALID_HANDLE;
+    }
+    cg_handle_t cmdbuf = cgObjectTableAdd(&ctx->CmdBufferTable, buf);
+    if (cmdbuf == CG_INVALID_HANDLE)
+    {   // the object table is full. free resources.
+        VirtualFree(buf.CommandData, 0, MEM_RELEASE);
+        result = CG_OUT_OF_OBJECTS;
+        return CG_INVALID_HANDLE;
+    }
+    result = CG_SUCCESS;
+    return cmdbuf;
+}
+
+/// @summary Prepares a command buffer for writing.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer.
+/// @param flags Flags used to optimize command buffer submission.
+/// @return CG_SUCCESS, CG_INVALID_VALUE or CG_INVALID_STATE.
+library_function int
+cgBeginCommandBuffer
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    uint32_t    flags
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        return CG_INVALID_VALUE;
+    }
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::UNINITIALIZED && 
+        state != CG_CMD_BUFFER::SUBMIT_READY)
+    {   // the command buffer is in an invalid state for this call.
+        return CG_INVALID_STATE;
+    }
+    cmdbuf->BytesUsed    = 0;
+    cmdbuf->CommandCount = 0;
+    cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::BUILDING);
+    return CG_SUCCESS;
+}
+
+/// @summary Resets a command buffer regardless of its current state.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer to reset.
+/// @return CG_SUCCESS or CG_INVALID_VALUE.
+library_function int
+cgResetCommandBuffer
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        return CG_INVALID_VALUE;
+    }
+    cmdbuf->BytesUsed    = 0;
+    cmdbuf->CommandCount = 0;
+    cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::UNINITIALIZED);
+    return CG_SUCCESS;
+}
+
+/// @summary Appends a fixed-length command to a command buffer.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer to write.
+/// @param cmd_type The command identifier.
+/// @param data_size The size of the command data, in bytes. The maximum size is 64KB.
+/// @param cmd_data The command data to copy to the command buffer.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCommandBufferAppend
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    uint16_t    cmd_type, 
+    size_t      data_size, 
+    void const *cmd_data
+)
+{
+    if (data_size > CG_CMD_BUFFER::MAX_CMD_SIZE)
+    {   // this command is too large.
+        return CG_INVALID_VALUE;
+    }
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        return CG_INVALID_VALUE;
+    }
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::BUILDING)
+    {   // the command buffer is in an invalid state for this call.
+        return CG_INVALID_STATE;
+    }
+    size_t total_size = CG_CMD_BUFFER::CMD_HEADER_SIZE + data_size;
+    if (cmdbuf->BytesUsed + total_size > CG_CMD_BUFFER::MAX_SIZE)
+    {   // the command buffer is too large.
+        cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::INCOMPLETE);
+        return CG_BUFFER_TOO_SMALL;
+    }
+    if (cmdbuf->BytesUsed + total_size > cmdbuf->BytesTotal)
+    {   // commit additional address space.
+        size_t cs  = align_up(cmdbuf->BytesUsed + total_size, CG_CMD_BUFFER::ALLOCATION_GRANULARITY);
+        void *buf  = VirtualAlloc(cmdbuf->CommandData, cmdbuf->BytesUsed+total_size, MEM_COMMIT, PAGE_READWRITE);
+        if   (buf == NULL)
+        {   // unable to commit the additional address space.
+            cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::INCOMPLETE);
+            return CG_OUT_OF_MEMORY;
+        }
+        cmdbuf->BytesTotal  =  cs;
+        cmdbuf->CommandData = (uint8_t*) buf;
+    }
+    cg_command_t *cmd  = (cg_command_t*) (cmdbuf->CommandData + cmdbuf->BytesUsed);
+    cmd->CommandId     =  cmd_type;
+    cmd->DataSize      = (uint16_t) data_size;
+    memcpy(cmd->Data, cmd_data, data_size);
+    cmdbuf->BytesUsed +=  total_size;
+    cmdbuf->CommandCount++;
+    return CG_SUCCESS;
+}
+
+/// @summary Begins writing a variable-length command.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer to modify.
+/// @param reserve_size The maximum number of data bytes that will be written for the command.
+/// @param command On return, points to the command structure to populate.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCommandBufferMapAppend
+(
+    uintptr_t      context, 
+    cg_handle_t    cmd_buffer, 
+    size_t         reserve_size, 
+    cg_command_t **command
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        return CG_INVALID_VALUE;
+    }
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::BUILDING)
+    {   // the command buffer is in an invalid state for this call.
+        return CG_INVALID_STATE;
+    }
+    size_t total_size = CG_CMD_BUFFER::CMD_HEADER_SIZE + reserve_size;
+    if (cmdbuf->BytesUsed + total_size > CG_CMD_BUFFER::MAX_SIZE)
+    {   // the command is too large.
+        cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::INCOMPLETE);
+        return CG_BUFFER_TOO_SMALL;
+    }
+    if (cmdbuf->BytesUsed + total_size > cmdbuf->BytesTotal)
+    {   // commit additional address space.
+        size_t cs  = align_up(cmdbuf->BytesUsed + total_size, CG_CMD_BUFFER::ALLOCATION_GRANULARITY);
+        void *buf  = VirtualAlloc(cmdbuf->CommandData, cmdbuf->BytesUsed+total_size, MEM_COMMIT, PAGE_READWRITE);
+        if   (buf == NULL)
+        {   // unable to commit the additional address space.
+            cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::INCOMPLETE);
+            return CG_OUT_OF_MEMORY;
+        }
+        cmdbuf->BytesTotal  =  cs;
+        cmdbuf->CommandData = (uint8_t*) buf;
+    }
+    cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::MAP_APPEND);
+    *command = (cg_command_t*) (cmdbuf->CommandData + cmdbuf->BytesUsed);
+    return CG_SUCCESS;
+}
+
+/// @summary Finishes writing a variable-length command.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer.
+/// @param data_written The number of data bytes written for the command.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE or CG_BUFFER_TOO_SMALL.
+library_function int
+cgCommandBufferUnmapAppend
+(
+    uintptr_t      context, 
+    cg_handle_t    cmd_buffer, 
+    size_t         data_written
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        return CG_INVALID_VALUE;
+    }
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::MAP_APPEND)
+    {   // the command buffer is in an invalid state for this call.
+        return CG_INVALID_STATE;
+    }
+    size_t total_size = CG_CMD_BUFFER::CMD_HEADER_SIZE + data_written;
+    if (cmdbuf->BytesUsed + total_size > cmdbuf->BytesTotal)
+    {   // something seriously wrong; the user wrote past the end of the buffer.
+        // user must use cgCommandBufferReset to fix.
+        cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::INCOMPLETE);
+        return CG_BUFFER_TOO_SMALL;
+    }
+    cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::BUILDING);
+    cmdbuf->BytesUsed += total_size;
+    cmdbuf->CommandCount++;
+    return CG_SUCCESS;
+}
+
+/// @summary Indicates completion of command buffer construction.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer.
+/// @return CG_SUCCESS, CG_INVALID_VALUE or CG_INVALID_STATE.
+library_function int
+cgEndCommandBuffer
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        return CG_INVALID_VALUE;
+    }
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::BUILDING)
+    {   // the command buffer is in an invalid state for this call.
+        return CG_INVALID_STATE;
+    }
+    cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::SUBMIT_READY);
+    return CG_SUCCESS;
+}
+
+/// @summary Determine whether a command buffer is in a readable state.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer to query.
+/// @param bytes_total On return, set to the number of bytes used in the command buffer.
+/// @return CG_SUCCESS, CG_INVALID_VALUE or CG_INVALID_STATE.
+library_function int
+cgCommandBufferCanRead
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    size_t     &bytes_total
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmdbuf == NULL)
+    {   // an invalid handle was supplied.
+        bytes_total = 0;
+        return CG_INVALID_VALUE;
+    }
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::SUBMIT_READY)
+    {   // the command buffer is in an invalid state for this call.
+        bytes_total = 0;
+        return CG_INVALID_STATE;
+    }
+    bytes_total = cmdbuf->BytesUsed;
+    return CG_SUCCESS;
+}
+
+/// @summary Retrieve the command located at a specified byte offset.
+/// @param context A CGFX context returned from cgEnumerateDevices.
+/// @param cmd_buffer The handle of the command buffer to read.
+/// @param cmd_offset The byte offset of the command to read. On return, this is set to the byte offset of the next command.
+/// @param result On return, set to CG_SUCCESS or CG_END_OF_BUFFER.
+/// @return A pointer to the command, or NULL.
+library_function cg_command_t*
+cgCommandBufferCommandAt
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    size_t     &cmd_offset, 
+    int        &result
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    if (cmd_offset >= cmdbuf->BytesUsed)
+    {   // the offset is invalid.
+        result = CG_END_OF_BUFFER;
+        return NULL;
+    }
+    cg_command_t *cmd = (cg_command_t*) (cmdbuf->CommandData + cmd_offset);
+    cmd_offset += cmd->DataSize;
+    result = CG_SUCCESS;
+    return cmd;
 }
 
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.

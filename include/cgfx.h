@@ -64,37 +64,48 @@ struct cg_application_info_t;
 struct cg_allocation_callbacks_t;
 struct cg_execution_group_t;
 struct cg_cpu_counts_t;
+struct cg_command_t;
 
 /*/////////////////
 //   Constants   //
 /////////////////*/
 /// @summary A special value representing an invalid handle.
-#define CG_INVALID_HANDLE  ((cg_handle_t)0)
+#define CG_INVALID_HANDLE   ((cg_handle_t)0)
 
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
-typedef void*       (CG_API *cgMemoryAlloc_fn               )(size_t, size_t, int, uintptr_t);
-typedef void        (CG_API *cgMemoryFree_fn                )(void *, size_t, size_t, int, uintptr_t);
-typedef char const* (CG_API *cgResultString_fn              )(int);
-typedef int         (CG_API *cgEnumerateDevices_fn          )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
-typedef int         (CG_API *cgGetContextInfo_fn            )(uintptr_t, int, void *, size_t, size_t *);
-typedef size_t      (CG_API *cgGetDeviceCount_fn            )(uintptr_t);
-typedef int         (CG_API *cgGetDeviceInfo_fn             )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef size_t      (CG_API *cgGetDisplayCount_fn           )(uintptr_t);
-typedef cg_handle_t (CG_API *cgGetPrimaryDisplay_fn         )(uintptr_t);
-typedef cg_handle_t (CG_API *cgGetDisplayByOrdinal_fn       )(uintptr_t);
-typedef int         (CG_API *cgGetDisplayInfo_fn            )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef cg_handle_t (CG_API *cgGetDisplayDevice_fn          )(uintptr_t, cg_handle_t);
-typedef int         (CG_API *cgGetCPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetGPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetAcceleratorDevices_fn     )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetCPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
-typedef int         (CG_API *cgGetGPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
-typedef cg_handle_t (CG_API *cgCreateExecutionGroup_fn      )(uintptr_t, cg_execution_group_t const *, int &);
-typedef int         (CG_API *cgGetExecutionGroupInfo_fn     )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef cg_handle_t (CG_API *cgGetQueueForDevice_fn         )(uintptr_t, cg_handle_t, int, int &);
-typedef cg_handle_t (CG_API *cgGetQueueForDisplay_fn        )(uintptr_t, cg_handle_t, int, int &);
+typedef void*        (CG_API *cgMemoryAlloc_fn               )(size_t, size_t, int, uintptr_t);
+typedef void         (CG_API *cgMemoryFree_fn                )(void *, size_t, size_t, int, uintptr_t);
+typedef char const*  (CG_API *cgResultString_fn              )(int);
+typedef int          (CG_API *cgEnumerateDevices_fn          )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
+typedef int          (CG_API *cgGetContextInfo_fn            )(uintptr_t, int, void *, size_t, size_t *);
+typedef size_t       (CG_API *cgGetDeviceCount_fn            )(uintptr_t);
+typedef int          (CG_API *cgGetDeviceInfo_fn             )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef size_t       (CG_API *cgGetDisplayCount_fn           )(uintptr_t);
+typedef cg_handle_t  (CG_API *cgGetPrimaryDisplay_fn         )(uintptr_t);
+typedef cg_handle_t  (CG_API *cgGetDisplayByOrdinal_fn       )(uintptr_t);
+typedef int          (CG_API *cgGetDisplayInfo_fn            )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef cg_handle_t  (CG_API *cgGetDisplayDevice_fn          )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgGetCPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetGPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetAcceleratorDevices_fn     )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetCPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetGPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef cg_handle_t  (CG_API *cgCreateExecutionGroup_fn      )(uintptr_t, cg_execution_group_t const *, int &);
+typedef int          (CG_API *cgGetExecutionGroupInfo_fn     )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef cg_handle_t  (CG_API *cgGetQueueForDevice_fn         )(uintptr_t, cg_handle_t, int, int &);
+typedef cg_handle_t  (CG_API *cgGetQueueForDisplay_fn        )(uintptr_t, cg_handle_t, int, int &);
+typedef int          (CG_API *cgDeleteObject_fn              )(uintptr_t, cg_handle_t);
+typedef cg_handle_t  (CG_API *cgCreateCommandBuffer_fn       )(uintptr_t, int, int &);
+typedef int          (CG_API *cgBeginCommandBuffer_fn        )(uintptr_t, cg_handle_t, uint32_t);
+typedef int          (CG_API *cgResetCommandBuffer_fn        )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgCommandBufferAppend_fn       )(uintptr_t, cg_handle_t, uint16_t, size_t, void const*);
+typedef int          (CG_API *cgCommandBufferMapAppend_fn    )(uintptr_t, cg_handle_t, size_t, cg_command_t **);
+typedef int          (CG_API *cgCommandBufferUnmapAppend_fn  )(uintptr_t, cg_handle_t, size_t);
+typedef int          (CG_API *cgEndCommandBuffer_fn          )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgCommandBufferCanRead_fn      )(uintptr_t, cg_handle_t, size_t &);
+typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn    )(uintptr_t, cg_handle_t, size_t &, int &);
 
 /*//////////////////
 //   Data Types   //
@@ -114,6 +125,7 @@ enum cg_result_e : int
     CG_BAD_CLCONTEXT                   = -9,        /// The OpenCL context is invalid.
     CG_OUT_OF_OBJECTS                  = -10,       /// There are no more available objects of the requested type.
     CG_UNKNOWN_GROUP                   = -11,       /// The object has no associated execution group.
+    CG_INVALID_STATE                   = -12,       /// The object is in an invalid state for the operation.
 
     // EXTENSION API RESULT CODES - FAILURE
     CG_RESULT_FAILURE_EXT              = -100000,   /// The first valid failure result code for extensions.
@@ -129,6 +141,7 @@ enum cg_result_e : int
     CG_NO_OPENGL                       =  7,        /// The display does not support the required version of OpenGL.
     CG_NO_GLSHARING                    =  8,        /// Rendering context created, but no sharing between OpenGL and OpenCL is available.
     CG_NO_QUEUE_OF_TYPE                =  9,        /// The device or display does not have a queue of the specified type.
+    CG_END_OF_BUFFER                   =  10,       /// The end of the buffer has been reached.
 
     // EXTENSION API RESULT CODES - NON-FAILURE
     CG_RESULT_NON_FAILURE_EXT          =  100000,   /// The first valid non-failure result code for extensions.
@@ -312,6 +325,14 @@ struct cg_cpu_counts_t
     size_t                        HardwareThreads;  /// The number of hardware threads in the system.
 };
 
+/// @summary Define the basic in-memory format of a single command in a command buffer.
+struct cg_command_t
+{
+    uint16_t                      CommandId;        /// The unique identifier of the command.
+    uint16_t                      DataSize;         /// The size of the buffer pointed to by Data.
+    uint8_t                       Data[1];          /// Variable-length data, up to 64KB in size.
+};
+
 /*/////////////////
 //   Functions   //
 /////////////////*/
@@ -487,6 +508,87 @@ cgGetQueueForDisplay                                /// Retrieve the queue assoc
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   display,          /// The handle of the display to query.
     int                           queue_type,       /// The type of queue to retrieve, one of cg_queue_type_e.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgDeleteObject                                      /// Frees resources for an object and invalidates the object handle.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   object            /// The handle of the object to delete.
+);
+
+cg_handle_t
+cgCreateCommandBuffer                               /// Create a new command buffer object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    int                           queue_type,       /// The type of queue the command buffer will be submitted to.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgBeginCommandBuffer                                /// Begins command buffer construction and places the command buffer into the building state.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The command buffer handle.
+    uint32_t                      flags             /// Flags used to optimize command buffer submission.
+);
+
+int
+cgResetCommandBuffer                                /// Explicitly resets a command buffer and releases any resources associated with it.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer        /// The command buffer handle.
+);
+
+int
+cgCommandBufferAppend                               /// Append a fixed-length command to a command buffer.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The command buffer handle.
+    uint16_t                      cmd_type,         /// The type identifier of the command being written.
+    size_t                        data_size,        /// The size of the command data, in bytes. 64KB maximum.
+    void const                   *cmd_data          /// The command data to be copied to the command buffer.
+);
+
+int
+cgCommandBufferMapAppend                            /// Begin appending a variable-length command to a command buffer.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The command buffer handle.
+    size_t                        reserve_size,     /// The maximum number of data bytes that will be written to the command buffer.
+    cg_command_t                **command           /// On return, points to the command descriptor to populate.
+);
+
+int
+cgCommandBufferUnmapAppend                          /// Finish appending variable-length data to a command buffer.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The command buffer handle.
+    size_t                        data_written      /// The number of data bytes actually written.
+);
+
+int
+cgEndCommandBuffer                                  /// Completes recording of a command buffer in the building state.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer        /// The command buffer handle.
+);
+
+int
+cgCommandBufferCanRead                              /// Determine whether a command buffer can be read from.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The command buffer handle.
+    size_t                       &bytes_total       /// The number of bytes of data in the command buffer.
+);
+
+cg_command_t*
+cgCommandBufferCommandAt                            /// Read a command buffer at a given byte offset. Only use this function is cgCommandBufferCanRead returns CG_SUCCESS.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The command buffer handle.
+    size_t                       &cmd_offset,       /// The byte offset of the command to map for reading. On return, updated to point to the start of the next command.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
 );
 

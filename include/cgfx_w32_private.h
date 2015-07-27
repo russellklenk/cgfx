@@ -88,6 +88,7 @@ struct CG_QUEUE;
 struct CG_DEVICE;
 struct CG_DISPLAY;
 struct CG_CONTEXT;
+struct CG_CMD_BUFFER;
 struct CG_EXEC_GROUP;
 
 /*/////////////////
@@ -117,13 +118,15 @@ struct CG_EXEC_GROUP;
 #define CG_DEVICE_TABLE_ID                       (0)
 #define CG_DISPLAY_TABLE_ID                      (1)
 #define CG_QUEUE_TABLE_ID                        (2)
-#define CG_EXEC_GROUP_TABLE_ID                   (3)
+#define CG_CMD_BUFFER_TABLE_ID                   (3)
+#define CG_EXEC_GROUP_TABLE_ID                   (4)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
 #define CG_MAX_DEVICES                           (4096)
 #define CG_MAX_DISPLAYS                          (32)
 #define CG_MAX_QUEUES                            (CG_MAX_DEVICES * 4)
+#define CG_MAX_CMD_BUFFERS                       (8192)
 #define CG_MAX_EXEC_GROUPS                       (CG_MAX_DEVICES)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
@@ -372,6 +375,38 @@ struct CG_QUEUE
     HGLRC                        DisplayRC;            /// The Windows OpenGL rendering context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
 };
 
+/// @summary Define the data representing a command buffer, which is a set of commands and associated data that can be submitted to a queue.
+/// Command buffers can be cached and re-used or re-submitted.
+struct CG_CMD_BUFFER
+{
+    static size_t   const        ALLOCATION_GRANULARITY  = 64 * 1024;        // 64KB
+    static size_t   const        CMD_HEADER_SIZE         = sizeof(uint32_t); // 4 bytes
+    static size_t   const        MAX_CMD_SIZE            = 64 * 1024;        // 64KB
+    static size_t   const        MAX_SIZE                = 16 * 1024 * 1024; // 16MB
+    static uint32_t const        STATE_MASK_P            = 0x00FFFFFF;
+    static uint32_t const        STATE_MASK_U            = 0x00FFFFFF;
+    static uint32_t const        STATE_SHIFT             = 0;
+    static uint32_t const        TYPE_MASK_P             = 0xFF000000;
+    static uint32_t const        TYPE_MASK_U             = 0xFF;
+    static uint32_t const        TYPE_SHIFT              = 24;
+
+    enum state_e : uint32_t
+    {
+        UNINITIALIZED            = 0,                  /// The command buffer has not been initialized.
+        BUILDING                 = 1,                  /// The command buffer is being constructed.
+        MAP_APPEND               = 2,                  /// The command buffer is currently mapped for write.
+        SUBMIT_READY             = 3,                  /// The command buffer is ready for submission.
+        INCOMPLETE               = 4,                  /// The command buffer is incomplete (an error occurred during construction.)
+    };
+
+    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
+    uint32_t                     TypeAndState;         /// The type of commands contained in the buffer.
+    size_t                       BytesTotal;           /// The number of bytes reserved for the command list.
+    size_t                       BytesUsed;            /// The number of bytes actually used for command data.
+    size_t                       CommandCount;         /// The number of buffered commands.
+    uint8_t                     *CommandData;          /// The start of the command data buffer.
+};
+
 /// @summary Define the state associated with a device execution group.
 struct CG_EXEC_GROUP
 {
@@ -394,6 +429,7 @@ struct CG_EXEC_GROUP
 typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
 typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
 typedef CG_OBJECT_TABLE<CG_QUEUE     , CG_MAX_QUEUES     > CG_QUEUE_TABLE;
+typedef CG_OBJECT_TABLE<CG_CMD_BUFFER, CG_MAX_CMD_BUFFERS> CG_CMD_BUFFER_TABLE;
 typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
@@ -405,7 +441,8 @@ struct CG_CONTEXT
 
     CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
     CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
-    CG_QUEUE_TABLE               QueueTable;           /// The object table of all 
+    CG_QUEUE_TABLE               QueueTable;           /// The object table of all active command queues.
+    CG_CMD_BUFFER_TABLE          CmdBufferTable;       /// The object table of all active command buffers.
     CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
 };
 

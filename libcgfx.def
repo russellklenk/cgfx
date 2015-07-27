@@ -20,9 +20,19 @@ EXPORTS
     cgGetExecutionGroupInfo        @18
     cgGetQueueForDevice            @19
     cgGetQueueForDisplay           @20
-    cgDisplayForWindowEXT          @21
-    cgMakeWindowOnDisplayEXT       @22
-    cgAttachWindowToDisplayEXT     @23
-    cgSetDisplayDrawableEXT        @24
-    cgSetActiveDrawableEXT         @25
-    cgPresentDrawableEXT           @26
+    cgDeleteObject                 @21
+    cgCreateCommandBuffer          @22
+    cgBeginCommandBuffer           @23
+    cgResetCommandBuffer           @24
+    cgCommandBufferAppend          @25
+    cgCommandBufferMapAppend       @26
+    cgCommandBufferUnmapAppend     @27
+    cgEndCommandBuffer             @28
+    cgCommandBufferCanRead         @29
+    cgCommandBufferCommandAt       @30
+    cgDisplayForWindowEXT          @31
+    cgMakeWindowOnDisplayEXT       @32
+    cgAttachWindowToDisplayEXT     @33
+    cgSetDisplayDrawableEXT        @34
+    cgSetActiveDrawableEXT         @35
+    cgPresentDrawableEXT           @36
