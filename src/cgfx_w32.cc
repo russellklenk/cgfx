@@ -661,12 +661,61 @@ cgDeleteCmdBuffer
     cmdbuf->CommandData  = NULL;
 }
 
+/// @summary Frees all resources and releases all references associated with a kernel object.
+/// @param ctx The CGFX context that owns the kernel object.
+/// @param kernel The kernel object to delete.
+internal_function void
+cgDeleteKernel
+(
+    CG_CONTEXT *ctx,
+    CG_KERNEL  *kernel
+)
+{
+    switch (kernel->KernelType)
+    {
+    case CG_KERNEL_TYPE_GRAPHICS_VERTEX:
+    case CG_KERNEL_TYPE_GRAPHICS_FRAGMENT:
+    case CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE:
+        {
+            for (size_t i = 0, n = kernel->Graphics.DisplayCount; i < n; ++i)
+            {
+                CG_DISPLAY *display = kernel->Graphics.DisplayList[i];
+                if (kernel->Graphics.Shader[i] != 0)
+                {   // the same shader handle may be shared and appear several
+                    // times in the shader handle list. wipe out all records.
+                    // if only OpenGL had object retain functionality like CL...
+                    GLuint shader = kernel->Graphics.Shader[i];
+                    for (size_t j = 0; j < n; ++j)
+                    {
+                        if (kernel->Graphics.Shader[j] == shader)
+                            kernel->Graphics.Shader[j]  = 0;
+                    }
+                    glDeleteShader(shader);
+                }
+            }
+            cgFreeHostMemory(&ctx->HostAllocator, kernel->Graphics.Shader, kernel->Graphics.DisplayCount * sizeof(GLuint), 0, CG_ALLOCATION_TYPE_OBJECT);
+        }
+        break;
+    case CG_KERNEL_TYPE_COMPUTE:
+        {
+            for (size_t i = 0, n = kernel->Compute.ContextCount; i < n; ++i)
+                clReleaseProgram(kernel->Compute.Program[i]);
+            cgFreeHostMemory(&ctx->HostAllocator, kernel->Compute.Program, kernel->Compute.ContextCount * sizeof(cl_program), 0, CG_ALLOCATION_TYPE_OBJECT);
+        }
+        break;
+    default:
+        break;
+    }
+    memset(kernel, 0, sizeof(CG_KERNEL));
+}
+
 /// @summary Allocate memory for an execution group and initialize the device and display lists.
 /// @param ctx The CGFX context that owns the execution group.
 /// @param group The execution group to initialize.
 /// @param root_device The handle of the device that defines the share group.
 /// @param device_list The list of handles of the devices in the execution group.
 /// @param device_count The number of devices in the execution group.
+/// @param context_count The number of OpenCL contexts in the execution group.
 /// @return CG_SUCCESS or CG_OUT_OF_MEMORY.
 internal_function int
 cgAllocExecutionGroup
@@ -675,7 +724,8 @@ cgAllocExecutionGroup
     CG_EXEC_GROUP *group,
     cg_handle_t    root_device, 
     cg_handle_t   *device_list, 
-    size_t         device_count
+    size_t         device_count, 
+    size_t         context_count
 )
 {
     CG_DEVICE        *root             = cgObjectTableGet(&ctx->DeviceTable, root_device);
@@ -687,6 +737,7 @@ cgAllocExecutionGroup
     CG_DISPLAY      **display_refs     = NULL;
     CG_QUEUE        **graphics_queues  = NULL;
     CG_QUEUE        **queue_refs       = NULL;
+    cl_context       *context_refs     = NULL;
     size_t            display_count    = 0;
     size_t            queue_count      = 0;
 
@@ -750,6 +801,14 @@ cgAllocExecutionGroup
         // NULL out all of the queue references.
         memset(queue_refs, 0, queue_count * sizeof(CG_QUEUE*));
     }
+    if (context_count > 0)
+    {   // allocate all of the context ref storage.
+        context_refs  = (cl_context*) cgAllocateHostMemory(&ctx->HostAllocator, context_count * sizeof(cl_context), 0, CG_ALLOCATION_TYPE_OBJECT);
+        if (context_refs == NULL)
+            goto error_cleanup;
+        // NULL out all of the context references.
+        memset(context_refs, 0, context_count * sizeof(cl_context));
+    }
 
     // initialization was successful, save all of the references.
     group->PlatformId       = root->PlatformId;
@@ -764,9 +823,12 @@ cgAllocExecutionGroup
     group->GraphicsQueues   = graphics_queues;
     group->QueueCount       = queue_count;
     group->QueueList        = queue_refs;
+    group->ContextCount     = context_count;
+    group->ContextList      = context_refs;
     return CG_SUCCESS;
 
 error_cleanup:
+    cgFreeHostMemory(&ctx->HostAllocator, context_refs    , context_count * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, queue_refs      , queue_count   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, graphics_queues , display_count * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, display_refs    , display_count * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_OBJECT);
@@ -795,14 +857,19 @@ cgDeleteExecutionGroup
         clReleaseContext(group->ComputeContexts[i]);
         group->DeviceList[i]->ExecutionGroup = CG_INVALID_HANDLE;
     }
-    cgFreeHostMemory(host_alloc, group->QueueList       , group->QueueCount   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->GraphicsQueues  , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->AttachedDisplays, group->DisplayCount * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->TransferQueues  , group->DeviceCount  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->ComputeQueues   , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->ComputeContexts , group->DeviceCount  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->DeviceIds       , group->DeviceCount  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_INTERNAL);
-    cgFreeHostMemory(host_alloc, group->DeviceList      , group->DeviceCount  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_INTERNAL);
+    for (size_t i = 0, n = group->ContextCount; i < n; ++i)
+    {
+        clReleaseContext(group->ContextList[i]);
+    }
+    cgFreeHostMemory(host_alloc, group->ContextList     , group->ContextCount * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->QueueList       , group->QueueCount   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->GraphicsQueues  , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->AttachedDisplays, group->DisplayCount * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->TransferQueues  , group->DeviceCount  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->ComputeQueues   , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->ComputeContexts , group->DeviceCount  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->DeviceIds       , group->DeviceCount  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(host_alloc, group->DeviceList      , group->DeviceCount  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     memset(group, 0, sizeof(CG_EXEC_GROUP));
 }
 
@@ -837,6 +904,7 @@ cgCreateContext
     cgObjectTableInit(&ctx->QueueTable    , CG_OBJECT_QUEUE          , CG_QUEUE_TABLE_ID);
     cgObjectTableInit(&ctx->CmdBufferTable, CG_OBJECT_COMMAND_BUFFER , CG_CMD_BUFFER_TABLE_ID);
     cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
+    cgObjectTableInit(&ctx->KernelTable   , CG_OBJECT_KERNEL         , CG_KERNEL_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -853,6 +921,12 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all kernel objects:
+    for (size_t i = 0, n = ctx->KernelTable.ObjectCount; i < n; ++i)
+    {
+        CG_KERNEL *obj = &ctx->KernelTable.Objects[i];
+        cgDeleteKernel(ctx, obj);
+    }
     // free all command buffer objects:
     for (size_t i = 0, n = ctx->CmdBufferTable.ObjectCount; i < n; ++i)
     {
@@ -2035,6 +2109,7 @@ cgCreateExecutionGroupDeviceList
     cg_handle_t *device_list, 
     size_t       device_count,
     size_t      &num_devices, 
+    size_t      &num_contexts, 
     int         &result
 )
 {
@@ -2047,7 +2122,8 @@ cgCreateExecutionGroupDeviceList
     size_t         num_explicit = 0;
 
     // initialize output parameters:
-    num_devices = 0;
+    num_contexts = 0;
+    num_devices  = 0;
     result = CG_SUCCESS;
 
     // count the number of devices to be included in the list.
@@ -2109,6 +2185,8 @@ cgCreateExecutionGroupDeviceList
                 {   // partition evenly into one device per NUMA node.
                     if ((result = cgConfigureCPUHighThroughput(ctx, check, out_count, &devices[num_devices])) != CG_SUCCESS)
                         goto error_cleanup;
+                    // a separate OpenCL context is created for each device.
+                    num_contexts += out_count;
                 }
                 else if (create_flags & CG_EXECUTION_GROUP_TASK_PARALLEL)
                 {   // partition evenly into one device per physical CPU core.
@@ -2127,6 +2205,10 @@ cgCreateExecutionGroupDeviceList
                 devices[num_devices++] = hand;
             }
         }
+    }
+    if (num_contexts < num_devices)
+    {   // there's one shared context for the remaining devices.
+        num_contexts++;
     }
     return devices;
 
@@ -3007,20 +3089,21 @@ cgCreateExecutionGroup
 
     // construct the complete list of devices in the execution group.
     // this also creates any logical devices for CPU partitions.
-    if ((devices = cgCreateExecutionGroupDeviceList(ctx, config->RootDevice, flags, config->ThreadCounts, config->PartitionCount, config->DeviceList, config->DeviceCount, device_count, result)) == NULL)
+    if ((devices = cgCreateExecutionGroupDeviceList(ctx, config->RootDevice, flags, config->ThreadCounts, config->PartitionCount, config->DeviceList, config->DeviceCount, device_count, context_count, result)) == NULL)
     {   // result has been set to the reason for the failure.
         return CG_INVALID_HANDLE;
     }
 
     // initialize the execution group object.
     CG_EXEC_GROUP group;
-    if ((result = cgAllocExecutionGroup(ctx, &group, config->RootDevice, devices, device_count)) != CG_SUCCESS)
+    if ((result = cgAllocExecutionGroup(ctx, &group, config->RootDevice, devices, device_count, context_count)) != CG_SUCCESS)
     {   // result has been set to the reason for the failure.
         cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
         return CG_INVALID_HANDLE;
     }
 
     // create OpenCL contexts for resource sharing.
+    context_count = 0; // reset count; updated below.
     if (flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT)
     {   // high throughput devices have one context per CPU device with no sharing.
         for (size_t i = 0; i < device_count; ++i)
@@ -3047,8 +3130,9 @@ cgCreateExecutionGroup
                     }
                     return CG_INVALID_HANDLE;
                 }
+                clRetainContext(cl_ctx);
+                group.ContextList[context_count++] = cl_ctx;
                 group.ComputeContexts[i] = cl_ctx;
-                context_count++;
             }
         }
     }
@@ -3082,6 +3166,8 @@ cgCreateExecutionGroup
             }
             return CG_INVALID_HANDLE;
         }
+        // save the global context reference:
+        group.ContextList[context_count++] = cl_ctx;
         // save references to the shared context for each device.
         // also, restore the group's device ID list to a valid state.
         for (size_t i = 0; i < device_count; ++i)
@@ -3093,8 +3179,6 @@ cgCreateExecutionGroup
                 group.ComputeContexts[i]  = cl_ctx;
             }
         }
-        // release the 'global' reference to the context.
-        clReleaseContext(cl_ctx);
     }
 
     // create compute and transfer queues. each device gets its own unique 
@@ -3677,6 +3761,17 @@ cgDeleteObject
         }
         break;
 
+    case CG_OBJECT_KERNEL:
+        {
+            CG_KERNEL kernel;
+            if (cgObjectTableRemove(&ctx->KernelTable, object, kernel))
+            {
+                cgDeleteKernel(ctx, &kernel);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
     default:
         break;
     }
@@ -4001,6 +4096,177 @@ cgCommandBufferCommandAt
     return cmd;
 }
 
+/// @summary Create a kernel object and load graphics or compute shader code into it.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The handle of the execution group that owns the kernel object.
+/// @param code A description of the code to load into the kernel object.
+/// @param result On return, set to CG_SUCCESS, CG_INVALID_VALUE, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_BAD_GLCONTEXT, CG_BAD_CLCONTEXT, CG_COMPILE_FAILED, CG_ERROR or CG_OUT_OF_OBJECTS.
+library_function cg_handle_t
+cgCreateKernel
+(
+    uintptr_t               context, 
+    cg_handle_t             exec_group,
+    cg_kernel_code_t const *code, 
+    int                    &result
+)
+{
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // an invalid execution group was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    // proceed with kernel creation.
+    CG_KERNEL kernel;
+    switch (code->Type)
+    {
+    case CG_KERNEL_TYPE_GRAPHICS_VERTEX:
+    case CG_KERNEL_TYPE_GRAPHICS_FRAGMENT:
+    case CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE:
+        {   // only compilation from source code is supported.
+            if ((code->Flags & CG_KERNEL_FLAGS_SOURCE) == 0)
+            {
+                result = CG_UNSUPPORTED;
+                return CG_INVALID_HANDLE;
+            }
+            // allocate storage for the shader object handles.
+            kernel.KernelType = code->Type;
+            kernel.Graphics.DisplayCount = group->DisplayCount;
+            kernel.Graphics.DisplayList  = group->AttachedDisplays;
+            kernel.Graphics.Shader = (GLuint*) cgAllocateHostMemory(&ctx->HostAllocator, group->DisplayCount * sizeof(GLuint), 0, CG_ALLOCATION_TYPE_OBJECT);
+            if (kernel.Graphics.Shader == NULL)
+            {   // unable to allocate the required memory.
+                result = CG_OUT_OF_MEMORY;
+                return CG_INVALID_HANDLE;
+            }
+            // zero out all of the shader object handles.
+            memset(kernel.Graphics.Shader, 0, group->DisplayCount * sizeof(GLuint));
+
+            // convert from CG_KERNEL_GRAPHICS_xxx => OpenGL shader type.
+            GLenum shader_type   = 0;
+                 if (code->Type == CG_KERNEL_TYPE_GRAPHICS_VERTEX   ) shader_type = GL_VERTEX_SHADER;
+            else if (code->Type == CG_KERNEL_TYPE_GRAPHICS_FRAGMENT ) shader_type = GL_FRAGMENT_SHADER;
+            else if (code->Type == CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE) shader_type = GL_GEOMETRY_SHADER;
+
+            // compile the kernel for each OpenGL rendering context.
+            for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
+            {
+                CG_DEVICE *dev = group->DeviceList[device_index];
+                if (dev->DisplayRC != NULL && dev->DisplayCount > 0)
+                {   // GL entry points are the same for all attached displays.
+                    CG_DISPLAY *display  = dev->AttachedDisplays[0];
+                    GLuint      shader   = glCreateShader(shader_type);
+                    GLint       clres    = GL_FALSE;
+                    GLsizei     log_size = 0;
+
+                    // compile the shader source code.
+                    if (shader == 0)
+                    {   // unable to create the shader object.
+                        cgDeleteKernel(ctx, &kernel);
+                        result = CG_BAD_GLCONTEXT;
+                        return CG_INVALID_HANDLE;
+                    }
+                    glShaderSource (shader, 1, (GLchar const* const*) &code->Code, (GLint const*) &code->CodeSize);
+                    glCompileShader(shader);
+                    glGetShaderiv  (shader, GL_COMPILE_STATUS , &clres);
+                    glGetShaderiv  (shader, GL_INFO_LOG_LENGTH, &log_size);
+                    glGetError();
+                    if (clres != GL_TRUE)
+                    {
+#ifdef _DEBUG
+                        GLsizei len = 0;
+                        GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                        glGetShaderInfoLog(shader, log_size+1, &len, buf);
+                        buf[len] = '\0';
+                        OutputDebugString(_T("OpenGL shader compilation failed: \n"));
+                        OutputDebugString(_T("**** Source Code: \n"));
+                        OutputDebugStringA((char const*) code->Code);
+                        OutputDebugString(_T("**** Compile Log: \n"));
+                        OutputDebugStringA(buf);
+                        OutputDebugString(_T("\n\n"));
+                        cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+#endif
+                        glDeleteShader(shader);
+                        cgDeleteKernel(ctx, &kernel);
+                        result = CG_COMPILE_FAILED;
+                        return CG_INVALID_HANDLE;
+                    }
+
+                    // set the shader object handles for each attached display.
+                    for (size_t display_index = 0, display_count = group->DisplayCount; display_index < display_count; ++display_index)
+                    {
+                        if (group->AttachedDisplays[display_index]->DisplayDevice == dev)
+                            kernel.Graphics.Shader[display_index] = shader;
+                    }
+                }
+            }
+        }
+        break;
+
+    case CG_KERNEL_TYPE_COMPUTE:
+        {   // allocate storage for the program object handles.
+            kernel.KernelType = code->Type;
+            kernel.Compute.ContextCount = group->ContextCount;
+            kernel.Compute.ContextList  = group->ContextList;
+            kernel.Compute.Program = (cl_program*) cgAllocateHostMemory(&ctx->HostAllocator, group->ContextCount * sizeof(cl_program), 0, CG_ALLOCATION_TYPE_OBJECT);
+            if (kernel.Compute.Program == NULL)
+            {   // unable to allocate the required memory.
+                result = CG_OUT_OF_MEMORY;
+                return CG_INVALID_HANDLE;
+            }
+            // zero out all of the program object handles.
+            memset(kernel.Compute.Program, 0, group->ContextCount * sizeof(cl_program));
+
+            // OpenCL drivers support kernel program loading from source or binary.
+            if (code->Flags & CG_KERNEL_FLAGS_SOURCE)
+            {   // compile the program for each OpenCL context.
+                for (size_t context_index = 0, context_count = group->ContextCount; context_index < context_count; ++context_index)
+                {
+                    cl_int clres = CL_SUCCESS;
+                    cl_program p = clCreateProgramWithSource(group->ContextList[context_index], 1, (char const**) &code->Code, &code->CodeSize, &clres);
+                    if (p == NULL)
+                    {
+                        switch (clres)
+                        {
+                        case CL_INVALID_CONTEXT   : result = CG_BAD_CLCONTEXT; break;
+                        case CL_INVALID_VALUE     : result = CG_INVALID_VALUE; break;
+                        case CL_OUT_OF_RESOURCES  : result = CG_OUT_OF_MEMORY; break;
+                        case CL_OUT_OF_HOST_MEMORY: result = CG_OUT_OF_MEMORY; break;
+                        default: result = CG_ERROR; break;
+                        }
+                        cgDeleteKernel(ctx, &kernel);
+                        return CG_INVALID_HANDLE;
+                    }
+                    else kernel.Compute.Program[context_index] = p;
+                }
+            }
+            else
+            {   // TODO(rlk): support loading of binaries. 
+                // this requires having a list of devices per-context.
+                cgDeleteKernel(ctx, &kernel);
+                result = CG_UNSUPPORTED;
+                return CG_INVALID_HANDLE;
+            }
+        }
+        break;
+
+    default:
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    cg_handle_t handle = cgObjectTableAdd(&ctx->KernelTable, kernel);
+    if (handle == CG_INVALID_HANDLE)
+    {
+        cgDeleteKernel(ctx, &kernel);
+        result = CG_OUT_OF_OBJECTS;
+        return CG_INVALID_HANDLE;
+    }
+    return handle;
+}
+
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.
 // It would then create additional execution groups containing any discrete GPU devices.
 // Headless is CPU-driven, with *optional* GPUs for accelerators.
@@ -4008,3 +4274,5 @@ cgCommandBufferCommandAt
 // A display configuration is going to create an execution group based on a display first, including any CPUs in the share group.
 // It would then create additional execution groups containing any CPUs or discrete GPU devices.
 // Display is GPU-driven; a presentation queue/OpenGL support is *required*.
+//
+// There are only two types of resources that allocate memory - images and buffers.

@@ -86,6 +86,7 @@
 ////////////////////////////*/
 struct CG_QUEUE;
 struct CG_DEVICE;
+struct CG_KERNEL;
 struct CG_DISPLAY;
 struct CG_CONTEXT;
 struct CG_CMD_BUFFER;
@@ -120,6 +121,7 @@ struct CG_EXEC_GROUP;
 #define CG_QUEUE_TABLE_ID                        (2)
 #define CG_CMD_BUFFER_TABLE_ID                   (3)
 #define CG_EXEC_GROUP_TABLE_ID                   (4)
+#define CG_KERNEL_TABLE_ID                       (5)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -128,6 +130,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_QUEUES                            (CG_MAX_DEVICES * 4)
 #define CG_MAX_CMD_BUFFERS                       (8192)
 #define CG_MAX_EXEC_GROUPS                       (CG_MAX_DEVICES)
+#define CG_MAX_KERNELS                           (8192)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -423,6 +426,30 @@ struct CG_EXEC_GROUP
     CG_QUEUE                   **GraphicsQueues;       /// The command queue used to submit graphics dispatch operations for each display in the group. 
     size_t                       QueueCount;           /// The number of unique queue objects associated with the group.
     CG_QUEUE                   **QueueList;            /// The set of references to queue objects owned by this execution group.
+    size_t                       ContextCount;         /// The number of unique OpenCL context objects associated with the group.
+    cl_context                  *ContextList;          /// The set of unique OpenCL context objects owned by this execution group.
+};
+
+/// @summary Define state associated with a graphics shader or compute kernel.
+struct CG_KERNEL
+{
+    uint32_t                     ObjectId;             /// The internal CGFX object identifier.
+    int                          KernelType;           /// One of cg_kernel_type_e specifying the shader stage.
+    union
+    {
+        struct
+        {
+            size_t               DisplayCount;         /// The number of displays the kernel is compiled for.
+            CG_DISPLAY         **DisplayList;          /// The set of OpenGL displays the kernel is compiled for.
+            GLuint              *Shader;               /// The OpenGL shader object for each OpenGL display.
+        }                        Graphics;             /// State valid if KernelType is CG_KERNEL_TYPE_GRAPHICS_*.
+        struct
+        {
+            size_t               ContextCount;         /// The number of OpenCL contexts the kernel is compiled for.
+            cl_context          *ContextList;          /// The set of OpenCL contexts the kernel is compiled for.
+            cl_program          *Program;              /// The OpenCL program object for each OpenCL context.
+        }                        Compute;              /// State valid if KernelType is CG_KERNEL_TYPE_COMPUTE.
+    };
 };
 
 /// @summary Typedef the object tables held by a context object.
@@ -431,6 +458,7 @@ typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
 typedef CG_OBJECT_TABLE<CG_QUEUE     , CG_MAX_QUEUES     > CG_QUEUE_TABLE;
 typedef CG_OBJECT_TABLE<CG_CMD_BUFFER, CG_MAX_CMD_BUFFERS> CG_CMD_BUFFER_TABLE;
 typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
+typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -444,6 +472,7 @@ struct CG_CONTEXT
     CG_QUEUE_TABLE               QueueTable;           /// The object table of all active command queues.
     CG_CMD_BUFFER_TABLE          CmdBufferTable;       /// The object table of all active command buffers.
     CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
+    CG_KERNEL_TABLE              KernelTable;          /// The object table of all compiled kernels.
 };
 
 /*/////////////////
@@ -679,7 +708,7 @@ cgObjectTableAdd
     T const               &data
 )
 {
-    if (table->ObjectCount < CG_OBJECT_TABLE<T,N>::MAX_OBJECTS)
+    if (table->ObjectCount < CG_OBJECT_TABLE<T,N>::MAX_OBJECTS-1)
     {
         uint32_t const    type = table->ObjectType;
         size_t   const    tidx = table->TableIndex;

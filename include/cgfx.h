@@ -65,6 +65,7 @@ struct cg_allocation_callbacks_t;
 struct cg_execution_group_t;
 struct cg_cpu_counts_t;
 struct cg_command_t;
+struct cg_kernel_code_t;
 
 /*/////////////////
 //   Constants   //
@@ -106,6 +107,7 @@ typedef int          (CG_API *cgCommandBufferUnmapAppend_fn  )(uintptr_t, cg_han
 typedef int          (CG_API *cgEndCommandBuffer_fn          )(uintptr_t, cg_handle_t);
 typedef int          (CG_API *cgCommandBufferCanRead_fn      )(uintptr_t, cg_handle_t, size_t &);
 typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn    )(uintptr_t, cg_handle_t, size_t &, int &);
+typedef cg_handle_t  (CG_API *cgCreateKernel_fn              )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
 
 /*//////////////////
 //   Data Types   //
@@ -126,6 +128,8 @@ enum cg_result_e : int
     CG_OUT_OF_OBJECTS                  = -10,       /// There are no more available objects of the requested type.
     CG_UNKNOWN_GROUP                   = -11,       /// The object has no associated execution group.
     CG_INVALID_STATE                   = -12,       /// The object is in an invalid state for the operation.
+    CG_COMPILE_FAILED                  = -13,       /// The kernel source code compilation failed.
+    CG_LINK_FAILED                     = -14,       /// The pipeline linking phase failed.
 
     // EXTENSION API RESULT CODES - FAILURE
     CG_RESULT_FAILURE_EXT              = -100000,   /// The first valid failure result code for extensions.
@@ -174,12 +178,6 @@ enum cg_object_e : uint32_t
     CG_OBJECT_KERNEL                   = (1 << 10), /// The object type identifier for a compute or shader kernel.
     CG_OBJECT_PIPELINE                 = (1 << 11), /// The object type identifier for a compute or display pipeline.
     CG_OBJECT_SAMPLER                  = (1 << 12), /// The object type identifier for an image sampler.
-    CG_OBJECT_DESCRIPTOR_SET           = (1 << 13), /// The object type identifier for a descriptor set.
-    CG_OBJECT_RASTER_STATE             = (1 << 14), /// The object type identifier for a rasterizer state description.
-    CG_OBJECT_VIEWPORT_STATE           = (1 << 15), /// The object type identifier for a viewport state description.
-    CG_OBJECT_BLEND_STATE              = (1 << 16), /// The object type identifier for a blend state description.
-    CG_OBJECT_DEPTH_STENCIL_STATE      = (1 << 17), /// The object type identifier for a depth/stencil state description.
-    CG_OBJECT_MULTISAMPLE_STATE        = (1 << 18), /// The object type identifier for a multisample antialiasing state description.
 };
 
 /// @summary Define the queryable or settable data on a CGFX context.
@@ -255,6 +253,23 @@ enum cg_queue_type_e : int
     CG_QUEUE_TYPE_TRANSFER             =  2,        /// The queue is used for submitting data transfer commands using a DMA engine.
 };
 
+/// @summary Define the supported types of kernel fragments.
+enum cg_kernel_type_e : int
+{
+    CG_KERNEL_TYPE_GRAPHICS_VERTEX     =  0,        /// The kernel corresponds to the vertex shader stage.
+    CG_KERNEL_TYPE_GRAPHICS_FRAGMENT   =  1,        /// The kernel corresponds to the fragment shader stage.
+    CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE  =  2,        /// The kernel corresponds to the geometry shader stage.
+    CG_KERNEL_TYPE_COMPUTE             =  3,        /// The kernel is a compute shader.
+};
+
+/// @summary Define the supported types of memory heaps.
+enum cg_heap_type_e : int
+{
+    CG_HEAP_TYPE_LOCAL                 =  0,        /// The heap is in device-local memory.
+    CG_HEAP_TYPE_REMOTE                =  1,        /// The heap is in non-local device memory.
+    CG_HEAP_TYPE_EMBEDDED              =  2,        /// The heap is in embedded (on-chip) memory.
+};
+
 /// @summary Define flags that can be specified when creating an execution group.
 enum cg_execution_group_flags_e : uint32_t
 {
@@ -265,6 +280,23 @@ enum cg_execution_group_flags_e : uint32_t
     CG_EXECUTION_GROUP_CPUS            = (1 << 3),  /// Include all CPUs in the sharegroup of the master device.
     CG_EXECUTION_GROUP_GPUS            = (1 << 4),  /// Include all GPUs in the sharegroup of the master device.
     CG_EXECUTION_GROUP_ACCELERATORS    = (1 << 5),  /// Include all accelerators in the sharegroup of the master device.
+};
+
+/// @summary Define flags that can be specified with kernel code.
+enum cg_kernel_flags_e : uint32_t
+{
+    CG_KERNEL_FLAGS_NONE               = (0 << 0),  /// No flag bits are set.
+    CG_KERNEL_FLAGS_SOURCE             = (1 << 0),  /// Code is supplied as text source code.
+    CG_KERNEL_FLAGS_BINARY             = (1 << 1),  /// Code is supplied as a shader IL blob.
+};
+
+/// @summary Define flags specifying attributes of memory heaps.
+enum cg_heap_flags_e : uint32_t
+{
+    CG_HEAP_CPU_ACCESSIBLE             = (1 << 0),  /// The CPU can directly access allocations from the heap.
+    CG_HEAP_GPU_ACCESSIBLE             = (1 << 1),  /// The GPU can directly access allocations from the heap.
+    CG_HEAP_HOLDS_PINNED               = (1 << 2),  /// The heap allocates from the non-paged pool accessible to both CPU and GPU.
+    CG_HEAP_SHAREABLE                  = (1 << 3),  /// Memory objects can be shared between GPUs.
 };
 
 /// @summary Define the flags that can be specified with a memory object reference for command buffer submission.
@@ -331,6 +363,16 @@ struct cg_command_t
     uint16_t                      CommandId;        /// The unique identifier of the command.
     uint16_t                      DataSize;         /// The size of the buffer pointed to by Data.
     uint8_t                       Data[1];          /// Variable-length data, up to 64KB in size.
+};
+
+/// @summary Describes a bit of kernel (device-executable) code. 
+struct cg_kernel_code_t
+{
+    int                           Type;             /// One of cg_kernel_type_e specifying the type of kernel.
+    uint32_t                      Flags;            /// A combination of cg_kernel_flags_e.
+    void const                   *Code;             /// The buffer specifying the kernel code.
+    size_t                        CodeSize;         /// The size of the code buffer, in bytes.
+    char const                   *Options;          /// A NULL-terminated string specifying compilation options and constants, or NULL.
 };
 
 /*/////////////////
@@ -589,6 +631,15 @@ cgCommandBufferCommandAt                            /// Read a command buffer at
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   cmd_buffer,       /// The command buffer handle.
     size_t                       &cmd_offset,       /// The byte offset of the command to map for reading. On return, updated to point to the start of the next command.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+cg_handle_t
+cgCreateKernel                                      /// Create a new kernel object from some device-executable code.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group for which the kernel will be compiled.
+    cg_kernel_code_t const       *create_info,      /// An object specifying source code and behavior.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
 );
 

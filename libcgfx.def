@@ -30,9 +30,10 @@ EXPORTS
     cgEndCommandBuffer             @28
     cgCommandBufferCanRead         @29
     cgCommandBufferCommandAt       @30
-    cgDisplayForWindowEXT          @31
-    cgMakeWindowOnDisplayEXT       @32
-    cgAttachWindowToDisplayEXT     @33
-    cgSetDisplayDrawableEXT        @34
-    cgSetActiveDrawableEXT         @35
-    cgPresentDrawableEXT           @36
+    cgCreateKernel                 @31
+    cgDisplayForWindowEXT          @32
+    cgMakeWindowOnDisplayEXT       @33
+    cgAttachWindowToDisplayEXT     @34
+    cgSetDisplayDrawableEXT        @35
+    cgSetActiveDrawableEXT         @36
+    cgPresentDrawableEXT           @37
