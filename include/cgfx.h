@@ -524,6 +524,13 @@ struct cg_depth_stencil_state_t
     uint8_t                      StencilReference;     /// The stencil reference value.
 };
 
+/// @summary Describes a binding of a named vertex attribute or fragment output to a register index.
+struct cg_shader_binding_t
+{
+    char const                  *Name;                 /// A NULL-terminated ASCII string specifying the vertex attribute or fragment output name as it appears in the shader.
+    unsigned int                 Location;             /// The unique zero-based register index to bind to the named vertex attribute or fragment output.
+};
+
 /// @summary Defines the configuration for a graphics pipeline.
 struct cg_graphics_pipeline_t
 {
@@ -534,6 +541,10 @@ struct cg_graphics_pipeline_t
     cg_handle_t                  VertexShader;         /// The handle of the vertex shader kernel.
     cg_handle_t                  GeometryShader;       /// The handle of the geometry shader kernel, or CG_INVALID_HANDLE.
     cg_handle_t                  FragmentShader;       /// The handle of the fragment shader kernel.
+    size_t                       AttributeCount;       /// The number of vertex attribute locations to set explicitly.
+    cg_shader_binding_t const   *AttributeBindings;    /// An array of AttributeCount vertex attribute bindings.
+    size_t                       OutputCount;          /// The number of fragment output locations to set explicitly.
+    cg_shader_binding_t const   *OutputBindings;       /// An array of OutputCount fragment output bindings.
 };
 
 /// @summary Defines the configuration for a compute pipeline.

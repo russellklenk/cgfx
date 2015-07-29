@@ -6060,6 +6060,7 @@ cgCreateComputePipeline
         result = CG_OUT_OF_MEMORY;
         return CG_INVALID_HANDLE;
     }
+    memset(cp.KernelList, 0, group->ContextCount * sizeof(cl_kernel));
 
     cp.DeviceCount         = group->DeviceCount;
     cp.DeviceList          = group->DeviceList;
@@ -6072,7 +6073,6 @@ cgCreateComputePipeline
         result = CG_OUT_OF_MEMORY;
         goto error_cleanup;
     }
-    memset(cp.KernelList      , 0, group->ContextCount * sizeof(cl_kernel));
     memset(cp.DeviceKernels   , 0, group->DeviceCount  * sizeof(cl_kernel));
     memset(cp.DeviceKernelInfo, 0, group->DeviceCount  * sizeof(CG_CL_WORKGROUP_INFO));
 
@@ -6145,6 +6145,294 @@ error_cleanup:
     return CG_INVALID_HANDLE;
 }
 
+internal_function void
+cgDeleteGraphicsPipeline
+(
+    CG_CONTEXT           *ctx, 
+    CG_GRAPHICS_PIPELINE *pipeline
+)
+{
+    for (size_t i = 0, n = pipeline->DeviceCount; i < n; ++i)
+    {
+        CG_GLSL_PROGRAM *glsl = &pipeline->DevicePrograms[i];
+        if (glsl->Program)
+        {   // the OpenGL entry points are the same for all displays attached to the device.
+            CG_DISPLAY *display = pipeline->DeviceList[i]->AttachedDisplays[0];
+            glDeleteProgram(glsl->Program);
+        }
+        // free related metadata allocated in host memory.
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->Samplers      , glsl->SamplerCount   * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->SamplerNames  , glsl->SamplerCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->Attributes    , glsl->AttributeCount * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->AttributeNames, glsl->AttributeCount * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->Uniforms      , glsl->UniformCount   * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->UniformNames  , glsl->UniformCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+        memset(glsl, 0, sizeof(CG_GLSL_PROGRAM));
+    }
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DevicePrograms , pipeline->DeviceCount   * sizeof(CG_GLSL_PROGRAM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DisplayPrograms, pipeline->DisplayCount  * sizeof(CG_GLSL_PROGRAM*) , 0, CG_ALLOCATION_TYPE_OBJECT);
+    memset(pipeline, 0, sizeof(CG_GRAPHICS_PIPELINE));
+}
+
+internal_function GLuint
+cgResolveGraphicsShader
+(
+    CG_KERNEL *kernel, 
+    CG_DEVICE *device
+)
+{
+    if (kernel != NULL)
+    {
+        for (size_t i = 0, n = kernel->Graphics.DisplayCount; i < n; ++i)
+        {
+            if (kernel->Graphics.DisplayList[i]->DisplayDevice == device)
+            {   // found the shader object corresponding to this device.
+                // note that the shader object may not actually be valid.
+                return kernel->Graphics.Shader[i];
+            }
+        }
+    }
+    return GLuint(0);
+}
+
+/// @summary Counts the number of active vertex attribues, texture samplers and uniform values defined in a shader program.
+/// @param display The display managing the rendering context.
+/// @param program The OpenGL program object to query.
+/// @param buffer A temporary buffer used to hold attribute and uniform names.
+/// @param buffer_size The maximum number of bytes that can be written to the temporary name buffer.
+/// @param include_builtins Specify true to include GLSL builtin values in the returned vertex attribute count.
+/// @param out_num_attribs On return, this address is updated with the number of active vertex attribute values.
+/// @param out_num_samplers On return, this address is updated with the number of active texture sampler values.
+/// @param out_num_uniforms On return, this address is updated with the number of active uniform values.
+internal_function void
+cgGlslReflectProgramCounts
+(
+    CG_DISPLAY *display,
+    GLuint      program, 
+    char       *buffer, 
+    size_t      buffer_size, 
+    bool        include_builtins,
+    size_t     &out_num_attribs, 
+    size_t     &out_num_samplers, 
+    size_t     &out_num_uniforms
+)
+{
+    size_t  num_attribs  = 0;
+    GLint   attrib_count = 0;
+    GLsizei buf_size     = (GLsizei) buffer_size;
+
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attrib_count);
+    for (GLint i = 0; i < attrib_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  sz   = 0;
+        glGetActiveAttrib(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn(buffer) && !include_builtins)
+            continue;
+        num_attribs++;
+    }
+
+    size_t num_samplers  = 0;
+    size_t num_uniforms  = 0;
+    GLint  uniform_count = 0;
+
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
+    for (GLint i = 0; i < uniform_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  sz   = 0;
+        glGetActiveUniform(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn (buffer) && !include_builtins)
+            continue;
+
+        switch (type)
+        {
+            case GL_SAMPLER_1D:
+            case GL_INT_SAMPLER_1D:
+            case GL_UNSIGNED_INT_SAMPLER_1D:
+            case GL_SAMPLER_1D_SHADOW:
+            case GL_SAMPLER_2D:
+            case GL_INT_SAMPLER_2D:
+            case GL_UNSIGNED_INT_SAMPLER_2D:
+            case GL_SAMPLER_2D_SHADOW:
+            case GL_SAMPLER_3D:
+            case GL_INT_SAMPLER_3D:
+            case GL_UNSIGNED_INT_SAMPLER_3D:
+            case GL_SAMPLER_CUBE:
+            case GL_INT_SAMPLER_CUBE:
+            case GL_UNSIGNED_INT_SAMPLER_CUBE:
+            case GL_SAMPLER_CUBE_SHADOW:
+            case GL_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_1D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_1D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_2D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_BUFFER:
+            case GL_INT_SAMPLER_BUFFER:
+            case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+            case GL_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_RECT_SHADOW:
+            case GL_INT_SAMPLER_2D_RECT:
+            case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_MULTISAMPLE:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+                num_samplers++;
+                break;
+
+            default:
+                num_uniforms++;
+                break;
+        }
+    }
+
+    // set the output values for the caller.
+    out_num_attribs  = num_attribs;
+    out_num_samplers = num_samplers;
+    out_num_uniforms = num_uniforms;
+}
+
+internal_function void
+cgGlslReflectProgramMetadata
+(
+    CG_DISPLAY      *display, 
+    GLuint           program,
+    char            *buffer, 
+    size_t           buffer_size, 
+    bool             include_builtins,
+    CG_GLSL_PROGRAM *glsl
+)
+{
+    uint32_t          *attrib_names  = glsl->AttributeNames;
+    uint32_t          *sampler_names = glsl->SamplerNames;
+    uint32_t          *uniform_names = glsl->UniformNames;
+    CG_GLSL_ATTRIBUTE *attrib_info   = glsl->Attributes;
+    CG_GLSL_SAMPLER   *sampler_info  = glsl->Samplers;
+    CG_GLSL_UNIFORM   *uniform_info  = glsl->Uniforms;
+    size_t             num_attribs   = 0;
+    GLint              attrib_count  = 0;
+    GLsizei            buf_size      =(GLsizei) buffer_size;
+
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attrib_count);
+    for (GLint i = 0; i < attrib_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  loc  = 0;
+        GLint  sz   = 0;
+        glGetActiveAttrib(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn(buffer) && !include_builtins)
+            continue;
+
+        CG_GLSL_ATTRIBUTE va;
+        loc             = glGetAttribLocation(program, buffer);
+        va.DataType     =(GLenum)   type;
+        va.Location     =(GLint)    loc;
+        va.DataSize     =(size_t)   cgGlDataSize(type) * sz;
+        va.DataOffset   =(size_t)   0; // for application use only
+        va.Dimension    =(size_t)   sz;
+        attrib_names[num_attribs] = cgHashName(buffer);
+        attrib_info [num_attribs] = va;
+        num_attribs++;
+    }
+
+    size_t num_samplers  = 0;
+    size_t num_uniforms  = 0;
+    GLint  uniform_count = 0;
+    GLint  texture_unit  = 0;
+
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
+    for (GLint i = 0; i < uniform_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  loc  = 0;
+        GLint  sz   = 0;
+        glGetActiveUniform(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn (buffer) && !include_builtins)
+            continue;
+
+        switch (type)
+        {
+            case GL_SAMPLER_1D:
+            case GL_INT_SAMPLER_1D:
+            case GL_UNSIGNED_INT_SAMPLER_1D:
+            case GL_SAMPLER_1D_SHADOW:
+            case GL_SAMPLER_2D:
+            case GL_INT_SAMPLER_2D:
+            case GL_UNSIGNED_INT_SAMPLER_2D:
+            case GL_SAMPLER_2D_SHADOW:
+            case GL_SAMPLER_3D:
+            case GL_INT_SAMPLER_3D:
+            case GL_UNSIGNED_INT_SAMPLER_3D:
+            case GL_SAMPLER_CUBE:
+            case GL_INT_SAMPLER_CUBE:
+            case GL_UNSIGNED_INT_SAMPLER_CUBE:
+            case GL_SAMPLER_CUBE_SHADOW:
+            case GL_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_1D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_1D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_2D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_BUFFER:
+            case GL_INT_SAMPLER_BUFFER:
+            case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+            case GL_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_RECT_SHADOW:
+            case GL_INT_SAMPLER_2D_RECT:
+            case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_MULTISAMPLE:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+                {
+                    CG_GLSL_SAMPLER  ts;
+                    loc            = glGetUniformLocation(program, buffer);
+                    ts.SamplerType =(GLenum)      type;
+                    ts.BindTarget  =(GLenum)      cgGlTextureTarget(type);
+                    ts.Location    =(GLint)       loc;
+                    ts.ImageUnit   =(GLint)       texture_unit++;
+                    sampler_names[num_samplers] = cgHashName(buffer);
+                    sampler_info [num_samplers] = ts;
+                    num_samplers++;
+                }
+                break;
+
+            default:
+                {
+                    CG_GLSL_UNIFORM  uv;
+                    loc            = glGetUniformLocation(program, buffer);
+                    uv.DataType    =(GLenum)      type;
+                    uv.Location    =(GLint)       loc;
+                    uv.DataSize    =(size_t)      cgGlDataSize(type) * sz;
+                    uv.DataOffset  =(size_t)      0; // for application use only
+                    uv.Dimension   =(size_t)      sz;
+                    uniform_names[num_uniforms] = cgHashName(buffer);
+                    uniform_info [num_uniforms] = uv;
+                    num_uniforms++;
+                }
+                break;
+        }
+    }
+}
+
 /// @summary Create a new graphics pipeline object to execute an OpenGL shader program.
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group defining the rendering contexts.
@@ -6160,6 +6448,197 @@ cgCreateGraphicsPipeline
     int                          &result
 )
 {
+    cg_handle_t   handle =  CG_INVALID_HANDLE;
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // an invalid execution group was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    // resolve references to kernel objects and link them into an OpenGL program.
+    CG_KERNEL *vs_kernel = cgObjectTableGet(&ctx->KernelTable, create->VertexShader);
+    if (vs_kernel == NULL || vs_kernel->KernelType != CG_KERNEL_TYPE_GRAPHICS_VERTEX)
+    {   // an invalid kernel program handle was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    CG_KERNEL *fs_kernel = cgObjectTableGet(&ctx->KernelTable, create->FragmentShader);
+    if (fs_kernel == NULL || fs_kernel->KernelType != CG_KERNEL_TYPE_GRAPHICS_FRAGMENT)
+    {   // an invalid kernel program handle was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    CG_KERNEL *gs_kernel = cgObjectTableGet(&ctx->KernelTable, create->GeometryShader);
+    if (gs_kernel == NULL && create->GeometryShader != CG_INVALID_HANDLE)
+    {   // an invalid kernel program handle was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if (gs_kernel != NULL && gs_kernel->KernelType != CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE)
+    {   // an invalid kernel program handle was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    // allocate resources for the graphics pipeline description:
+    CG_PIPELINE           pipe;
+    CG_GRAPHICS_PIPELINE &gp= pipe.Graphics;
+    memset(&pipe.Graphics, 0, sizeof(CG_GRAPHICS_PIPELINE));
+    pipe.PipelineType = CG_PIPELINE_TYPE_GRAPHICS;
+
+    gp.DeviceCount    = group->DeviceCount;
+    gp.DeviceList     = group->DeviceList;
+    gp.DevicePrograms =(CG_GLSL_PROGRAM*) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(CG_GLSL_PROGRAM), 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (gp.DevicePrograms == NULL)
+    {   // unable to allocate the requested memory.
+        result = CG_OUT_OF_MEMORY;
+        return CG_INVALID_HANDLE;
+    }
+    memset(gp.DevicePrograms, 0, group->DeviceCount * sizeof(CG_GLSL_PROGRAM));
+
+    gp.DisplayCount     = group->DisplayCount;
+    gp.AttachedDisplays = group->AttachedDisplays;
+    gp.GraphicsQueues   = group->GraphicsQueues;
+    gp.DisplayPrograms  =(CG_GLSL_PROGRAM**) cgAllocateHostMemory(&ctx->HostAllocator, group->DisplayCount * sizeof(CG_GLSL_PROGRAM*), 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (gp.DisplayPrograms == NULL)
+    {   // unable to allocate the requested memory.
+        result = CG_OUT_OF_MEMORY;
+        goto error_cleanup;
+    }
+    memset(gp.DisplayPrograms, 0, group->DisplayCount * sizeof(CG_GLSL_PROGRAM*));
+
+    // for each device, link all of the shaders into a program object.
+    for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
+    {
+        CG_GLSL_PROGRAM &glsl = gp.DevicePrograms[device_index];
+        CG_DEVICE *dev = group->DeviceList[device_index];
+        if (dev->DisplayRC != NULL && dev->DisplayCount > 0)
+        {   // GL entry points are the same for all attached displays.
+            CG_DISPLAY *display  = dev->AttachedDisplays[0];
+            GLuint      program  = glCreateProgram();
+            GLuint      vs       = cgResolveGraphicsShader(vs_kernel, dev); // vertex shader object
+            GLuint      fs       = cgResolveGraphicsShader(fs_kernel, dev); // fragment shader object
+            GLuint      gs       = cgResolveGraphicsShader(gs_kernel, dev); // geometry shader object
+            GLint       linkres  = GL_FALSE;
+            GLsizei     log_size = 0;
+            GLint       a_max    = 0; // length of longest active vertex attribute name
+            GLint       u_max    = 0; // length of longest active uniform name
+            size_t      name_max = 0; // length of longest string name
+            size_t  num_attribs  = 0;
+            size_t  num_samplers = 0;
+            size_t  num_uniforms = 0;
+            char       *name_buf = NULL;
+
+            if (program == 0)
+            {   // unable to create the program object.
+                result = CG_BAD_GLCONTEXT;
+                goto error_cleanup;
+            }
+            if (vs == 0 || fs == 0) // gs is optional.
+            {   // required shaders are missing.
+                glDeleteProgram(program);
+                result = CG_LINK_FAILED;
+                goto error_cleanup;
+            }
+
+            // attach the shader objects to the program object.
+            if (vs) glAttachShader(program, vs);
+            if (gs) glAttachShader(program, gs);
+            if (fs) glAttachShader(program, fs);
+
+            // set vertex attribute locations pre-link.
+            for (size_t i = 0, n = create->AttributeCount; i < n; ++i)
+            {
+                cg_shader_binding_t const &binding = create->AttributeBindings[i];
+                glBindAttribLocation(program, (GLuint) binding.Location, (GLchar const*) binding.Name);
+            }
+            // set fragment output locations pre-link.
+            for (size_t i = 0, n = create->OutputCount; i < n; ++i)
+            {
+                cg_shader_binding_t const &binding = create->OutputBindings[i];
+                glBindFragDataLocation(program, (GLuint) binding.Location, (GLchar const*) binding.Name);
+            }
+
+            // link the shaders into an executable program.
+            glLinkProgram (program);
+            glGetProgramiv(program, GL_LINK_STATUS , &linkres);
+            glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_size);
+            if (linkres != GL_TRUE)
+            {
+#ifdef _DEBUG
+                GLsizei len = 0;
+                GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                glGetProgramInfoLog(program, log_size+1, &len, buf);
+                buf[len] = '\0';
+                OutputDebugString(_T("OpenGL shader linking failed: \n"));
+                OutputDebugString(_T("**** Linker Log: \n"));
+                OutputDebugStringA(buf);
+                OutputDebugString(_T("\n\n"));
+                cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+#endif
+                glDeleteProgram(program);
+                result = CG_LINK_FAILED;
+                goto error_cleanup;
+            }
+
+            // grab the length of the longest attribute and uniform name.
+            // we'll use these values to allocate a single temp buffer for strings.
+            glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH  , &u_max);
+            glGetProgramiv(program, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &a_max);
+            name_max = (size_t) (u_max > a_max ? u_max + 1 : a_max + 1);
+            name_buf = (char *)  cgAllocateHostMemory(&ctx->HostAllocator, name_max, 0, CG_ALLOCATION_TYPE_TEMP);
+            if (name_buf == NULL)
+            {   // unable to allocate the required memory.
+                glDeleteProgram(program);
+                result = CG_OUT_OF_MEMORY;
+                goto error_cleanup;
+            }
+            cgGlslReflectProgramCounts(display, program, name_buf, name_max, false, num_attribs, num_samplers, num_uniforms);
+            
+            // allocate storage for the attribute, sampler and uniform metadata.
+            glsl.AttributeCount = num_attribs;
+            glsl.AttributeNames =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+            glsl.Attributes     =(CG_GLSL_ATTRIBUTE*) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+            glsl.SamplerCount   = num_samplers;
+            glsl.SamplerNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_samplers * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+            glsl.Samplers       =(CG_GLSL_SAMPLER  *) cgAllocateHostMemory(&ctx->HostAllocator, num_samplers * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+            glsl.UniformCount   = num_uniforms;
+            glsl.UniformNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+            glsl.Uniforms       =(CG_GLSL_UNIFORM  *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+            if (glsl.AttributeNames == NULL || glsl.Attributes == NULL || 
+                glsl.SamplerNames   == NULL || glsl.Samplers   == NULL || 
+                glsl.UniformNames   == NULL || glsl.Uniforms   == NULL)
+            {   // unable to allocate the required memory.
+                glDeleteProgram(program);
+                result = CG_OUT_OF_MEMORY;
+                goto error_cleanup;
+            }
+            cgGlslReflectProgramMetadata(display, program, name_buf, name_max, false, &glsl);
+
+            // all data has been retrieved, so store the program reference.
+            glsl.Program = program;
+
+            // set the program references for each attached display.
+            for (size_t display_index = 0, display_count = group->DisplayCount; display_index < display_count; ++display_index)
+            {
+                if (group->AttachedDisplays[display_index]->DisplayDevice == dev)
+                    gp.DisplayPrograms[display_index] = &gp.DevicePrograms[device_index];
+            }
+        }
+    }
+
+    // insert the pipeline into the object table.
+    if ((handle = cgObjectTableAdd(&ctx->PipelineTable, pipe)) == CG_INVALID_HANDLE)
+    {   // the object table is full.
+        result = CG_OUT_OF_OBJECTS;
+        goto error_cleanup;
+    }
+    return handle;
+
+error_cleanup:
+    cgDeleteGraphicsPipeline(ctx, &pipe.Graphics);
     return CG_INVALID_HANDLE;
 }
 
