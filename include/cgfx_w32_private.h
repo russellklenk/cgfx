@@ -122,6 +122,7 @@ struct CG_EXEC_GROUP;
 #define CG_CMD_BUFFER_TABLE_ID                   (3)
 #define CG_EXEC_GROUP_TABLE_ID                   (4)
 #define CG_KERNEL_TABLE_ID                       (5)
+#define CG_PIPELINE_TABLE_ID                     (6)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -131,6 +132,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_CMD_BUFFERS                       (8192)
 #define CG_MAX_EXEC_GROUPS                       (CG_MAX_DEVICES)
 #define CG_MAX_KERNELS                           (8192)
+#define CG_MAX_PIPELINES                         (4096)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -452,6 +454,161 @@ struct CG_KERNEL
     };
 };
 
+/// @summary Describes fixed-function state configuration for the blending unit.
+struct CG_BLEND_STATE
+{
+    GLboolean                    BlendEnabled;         /// GL_TRUE if alpha blending is enabled.
+    GLenum                       SrcBlendColor;        /// The source component of the blending equation for color channels.
+    GLenum                       DstBlendColor;        /// The destination component of the blending equation for color channels.
+    GLenum                       ColorBlendFunction;   /// The blending function to use for the color channels.
+    GLenum                       SrcBlendAlpha;        /// The source component of the blending equation for alpha.
+    GLenum                       DstBlendAlpha;        /// The destination component of the blending equation for alpha.
+    GLenum                       AlphaBlendFunction;   /// The blending function to use for the alpha channel.
+    GLfloat                      ConstantRGBA[4];      /// RGBA values in [0, 1] specifying a constant blend color.
+};
+
+/// @summary Describes fixed-function state configuration for the rasterizer.
+struct CG_RASTER_STATE
+{
+    GLenum                       FillMode;             /// The primitive fill mode.
+    GLenum                       CullMode;             /// The primitive culling mode.
+    GLenum                       FrontFace;            /// The winding order used to determine front-facing primitives.
+    GLint                        DepthBias;            /// The depth bias value added to fragment depth.
+    GLfloat                      SlopeScaledDepthBias; /// The scale of the slope-based value added to fragment depth.
+};
+
+/// @summary Describes fixed-function state configuration for depth and stencil testing.
+struct CG_DEPTH_STENCIL_STATE
+{
+    GLboolean                    DepthTestEnable;      /// GL_TRUE if depth testing is enabled.
+    GLboolean                    DepthWriteEnable;     /// GL_TRUE if depth buffer writes are enabled.
+    GLboolean                    DepthBoundsEnable;    /// GL_TRUE if the depth buffer range is enabled.
+    GLenum                       DepthTestFunction;    /// The depth value comparison function.
+    GLfloat                      DepthMin;             /// The minimum depth buffer value.
+    GLfloat                      DepthMax;             /// The maximum depth buffer value.
+    GLboolean                    StencilTestEnable;    /// GL_TRUE if stencil testing is enabled.
+    GLenum                       StencilTestFunction;  /// The stencil value comparison function.
+    GLenum                       StencilFailOp;        /// The stencil operation to apply when the stencil test fails.
+    GLenum                       StencilPassZPassOp;   /// The stencil operation to apply when both the stencil and depth tests pass.
+    GLenum                       StencilPassZFailOp;   /// The stencil operation to apply when the stencil test passes and the depth test fails.
+    GLubyte                      StencilReadMask;      /// The bitmask to apply to stencil reads.
+    GLubyte                      StencilWriteMask;     /// The bitmask to apply to stencil writes.
+    GLubyte                      StencilReference;     /// The stencil reference value.
+};
+
+/// @summary Describes a GLSL vertex attribute value within a pipeline.
+struct CG_GLSL_ATTRIBUTE
+{
+    GLenum                       DataType;             /// The data type, for example, GL_FLOAT.
+    GLenum                       Location;             /// The assigned location within the program.
+    size_t                       DataSize;             /// The size of the attribute data, in bytes.
+    size_t                       DataOffset;           /// The byte offset of the attribute data.
+    GLsizei                      Dimension;            /// The data dimension for array types.
+};
+
+/// @summary Describes a GLSL sampler value within a pipeline.
+struct CG_GLSL_SAMPLER
+{
+    GLenum                       SamplerType;          /// The sampler type, for example, GL_SAMPLER_2D.
+    GLenum                       BindTarget;           /// The texture bind target, for example, GL_TEXTURE_2D.
+    GLint                        Location;             /// The assigned location within the program.
+    GLint                        ImageUnit;            /// The assigned texture image unit.
+};
+
+/// @summary Describes a GLSL uniform value within a pipeline.
+struct CG_GLSL_UNIFORM
+{
+    GLenum                       DataType;             /// The data type, for example, GL_FLOAT.
+    GLenum                       Location;             /// The assigned location within the program.
+    size_t                       DataSize;             /// The size of the attribute data, in bytes.
+    size_t                       DataOffset;           /// The byte offset of the attribute data.
+    GLsizei                      Dimension;            /// The data dimension for array types.
+};
+
+/// @summary Represents a GLSL program object post-linking, including reflection data.
+struct CG_GLSL_PROGRAM
+{
+    size_t                       UniformCount;         /// The number of active GLSL uniforms.
+    uint32_t                    *UniformNames;         /// Hashed names of the active GLSL uniforms.
+    CG_GLSL_UNIFORM             *Uniforms;             /// Information about active GLSL uniforms.
+    size_t                       AttributeCount;       /// The number of active vertex attributes.
+    uint32_t                    *AttributeNames;       /// Hashed names of the active vertex attributes.
+    CG_GLSL_ATTRIBUTE           *Attributes;           /// Information about active vertex attributes.
+    size_t                       SamplerCount;         /// The number of active image samplers.
+    uint32_t                    *SamplerNames;         /// Hashed names of the active GLSL samplers.
+    CG_GLSL_SAMPLER             *Samplers;             /// Information about active GLSL samplers.
+    GLuint                       Program;              /// The OpenGL program object generated by linking the kernels.
+};
+
+/// @summary Describes an OpenCL kernel argument within a pipeline.
+struct CG_CL_KERNEL_ARG
+{
+    cl_uint                      Index;                /// The zero-based index of the argument.
+    cl_uint                      MemoryType;           /// One of cl_kernel_arg_address_qualifier (GLOBAL, LOCAL, CONSTANT, PRIVATE.)
+    cl_uint                      ImageAccess;          /// One of cl_kernel_arg_access_qualifier (READ_ONLY, WRITE_ONLY, READ_WRITE, NONE.)
+    cl_bitfield                  TypeQualifier;        /// A combination of cl_kernel_arg_type_qualifier (CONST, RESTRICT, VOLATILE, NONE.)
+};
+
+/// @summary Describes OpenCL kernel work group information for a specific device.
+struct CG_CL_WORKGROUP_INFO
+{
+    size_t                       WorkGroupSize;        /// The preferred work group size on the device.
+    size_t                       FixedGroupSize[3];    /// The compile-time fixed work group size, or 0, 0, 0.
+    cl_ulong                     LocalMemory;          /// The amount of local memory the kernel uses on the device, in bytes.
+};
+
+/// @summary Defines the data associated with an execution-ready compute pipeline.
+struct CG_COMPUTE_PIPELINE
+{
+    size_t                       ContextCount;         /// The number of OpenCL contexts the kernel is compiled for.
+    cl_context                  *ContextList;          /// The set of OpenCL contexts the kernel is compiled for. Reference to CG_EXEC_GROUP.
+    cl_kernel                   *KernelList;           /// The set of OpenCL kernel objects, one per-context. Local.
+
+    size_t                       DeviceCount;          /// The number of OpenCL devices the kernel can execute on.
+    CG_DEVICE                  **DeviceList;           /// The set of OpenCL devices the kernel can execute on. Reference to CG_EXEC_GROUP.
+    cl_device_id                *DeviceIds;            /// The set of OpenCL device IDs the kernel can execute on. Reference to CG_EXEC_GROUP.
+    CG_QUEUE                   **ComputeQueues;        /// The handle of the command queue for each device the kernel can execute on. Reference to CG_EXEC_GROUP.
+    cl_kernel                   *DeviceKernels;        /// The handle of the kernel program for each device the kernel can execute on. Local.
+    CG_CL_WORKGROUP_INFO        *DeviceKernelInfo;     /// The work group and memory usage information for the kernel program on each device. Local.
+
+    size_t                       ArgumentCount;        /// The number of kernel arguments.
+    uint32_t                    *ArgumentNames;        /// Hashed names of kernel arguments. Local.
+    CG_CL_KERNEL_ARG            *Arguments;            /// Information about kernel arguments. Local.
+};
+
+/// @summary Defines the data associated with an execution-read graphics pipeline.
+struct CG_GRAPHICS_PIPELINE
+{
+    #define STAGES               CG_OPENGL_MAX_SHADER_STAGES
+    CG_DEPTH_STENCIL_STATE       DepthStencilState;    /// The fixed-function depth and stencil testing state to apply.
+    CG_RASTER_STATE              RasterizerState;      /// The fixed-function rasterizer state to apply.
+    CG_BLEND_STATE               BlendState;           /// The fixed-function blending unit state to apply.
+    GLenum                       Topology;             /// The primitive topology, for example, GL_TRIANGLES.
+    size_t                       KernelCount;          /// The number of valid entries in the Kernels array.
+    cg_handle_t                  Kernels[STAGES];      /// References to kernels making up the shader program.
+
+    size_t                       DeviceCount;          /// The number of devices the pipeline can execute on.
+    CG_DEVICE                  **DeviceList;           /// The set of devices the pipeline can execute on. Reference to CG_EXEC_GROUP.
+    CG_GLSL_PROGRAM             *DevicePrograms;       /// The OpenGL program handle and reflection data for each device. Local.
+
+    size_t                       DisplayCount;         /// The number of displays the pipeline can execute on.
+    CG_DISPLAY                 **AttachedDisplays;     /// The set of displays the pipeline can execute on. Reference to CG_EXEC_GROUP.
+    CG_QUEUE                   **GraphicsQueues;       /// The set of queues the pipeline can be bound on. Reference to CG_EXEC_GROUP.
+    CG_GLSL_PROGRAM            **DisplayPrograms;      /// The set of program handle and reflection data for each display. Local.
+};
+
+/// @summary Defines the data associated with a pipeline object, which combines fixed-function and programmable state.
+struct CG_PIPELINE
+{
+    uint32_t                     ObjectId;             /// The CGFX internal object identifier.
+    int                          PipelineType;         /// One of cg_pipeline_type_e specifying the type of pipeline data.
+    union
+    {
+        CG_COMPUTE_PIPELINE      Compute;              /// The state for a compute pipeline.
+        CG_GRAPHICS_PIPELINE     Graphics;             /// The state for a graphics pipeline.
+    };
+};
+
 /// @summary Typedef the object tables held by a context object.
 typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
 typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
@@ -459,6 +616,7 @@ typedef CG_OBJECT_TABLE<CG_QUEUE     , CG_MAX_QUEUES     > CG_QUEUE_TABLE;
 typedef CG_OBJECT_TABLE<CG_CMD_BUFFER, CG_MAX_CMD_BUFFERS> CG_CMD_BUFFER_TABLE;
 typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
+typedef CG_OBJECT_TABLE<CG_PIPELINE  , CG_MAX_PIPELINES  > CG_PIPELINE_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -473,6 +631,7 @@ struct CG_CONTEXT
     CG_CMD_BUFFER_TABLE          CmdBufferTable;       /// The object table of all active command buffers.
     CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
     CG_KERNEL_TABLE              KernelTable;          /// The object table of all compiled kernels.
+    CG_PIPELINE_TABLE            PipelineTable;        /// The object table of all compiled pipelines.
 };
 
 /*/////////////////

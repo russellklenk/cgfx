@@ -353,6 +353,31 @@ cgClDeviceString
     return buffer;
 }
 
+/// @summary Retrieve the length of the OpenCL kernel argument name, allocate a buffer and store a copy of the value.
+/// @param ctx The CGFX context requesting the string data.
+/// @param kernel The OpenCL kernel object handle being queried.
+/// @param index The zero-based index of the kernel argument being queried.
+/// @param type The CGFX allocation type, one of cg_allocation_type_e.
+/// @return A pointer to the NULL-terminated ASCII string, or NULL.
+internal_function char*
+cgClKernelArgName
+(
+    CG_CONTEXT *ctx, 
+    cl_kernel   kernel, 
+    cl_uint     index, 
+    int         type
+)
+{
+    size_t nbytes = 0;
+    char  *buffer = NULL;
+    clGetKernelArgInfo(kernel, index, CL_KERNEL_ARG_NAME, 0, NULL, &nbytes);
+    if ((buffer = (char*) cgAllocateHostMemory(&ctx->HostAllocator, nbytes, 0, type)) != NULL)
+    {   clGetKernelArgInfo(kernel, index, CL_KERNEL_ARG_NAME, nbytes, buffer, NULL);
+        buffer[nbytes - 1] = '\0';
+    }
+    return buffer;
+}
+
 /// @summary Frees memory allocated for an OpenCL string buffer.
 /// @param ctx The CGFX context requesting the string data.
 /// @param str The string buffer to free.
@@ -3159,11 +3184,11 @@ cgGlPixelTransferHostToDevice
         glPixelStorei(GL_UNPACK_SKIP_IMAGES,  0);
 }*/
 
-/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms and samplers, allowing for more efficient look-up by name.
+/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms, samplers and compute kernel arguments, allowing for more efficient look-up by name.
 /// @param name A NULL-terminated ASCII string identifier.
 /// @return A 32-bit unsigned integer hash of the name.
 internal_function uint32_t 
-cgGlslName
+cgHashName
 (
     char const *name
 )
@@ -5966,6 +5991,176 @@ cgDepthStencilStateInitDefault
     state.StencilWriteMask    = 0xFF;
     state.StencilReference    = 0x00;
     return CG_SUCCESS;
+}
+
+internal_function void
+cgDeleteComputePipeline
+(
+    CG_CONTEXT          *ctx, 
+    CG_COMPUTE_PIPELINE *pipeline
+)
+{
+    for (size_t i = 0, n = pipeline->ContextCount; i < n; ++i)
+    {
+        if (pipeline->KernelList[i] != NULL)
+        {
+            clReleaseKernel(pipeline->KernelList[i]);
+        }
+    }
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->Arguments       , pipeline->ArgumentCount * sizeof(CG_CL_KERNEL_ARG)    , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->ArgumentNames   , pipeline->ArgumentCount * sizeof(uint32_t)            , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernelInfo, pipeline->DeviceCount   * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernels   , pipeline->DeviceCount   * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->KernelList      , pipeline->ContextCount  * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
+    memset(pipeline, 0, sizeof(CG_COMPUTE_PIPELINE));
+}
+
+/// @summary Create a new compute pipeline object to execute an OpenCL compute kernel.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The handle of the execution group defining the devices the kernel may execute on.
+/// @param create Information about the pipeline configuration.
+/// @param result On return, set to CG_SUCCESS, ...
+/// @return The handle of the compute pipeline, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgCreateComputePipeline
+(
+    uintptr_t                    context, 
+    cg_handle_t                  exec_group, 
+    cg_compute_pipeline_t const *create, 
+    int                         &result
+)
+{
+    cl_uint    arg_count =  0;
+    cg_handle_t   handle =  CG_INVALID_HANDLE;
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // an invalid execution group was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    CG_KERNEL *kernel = cgObjectTableGet(&ctx->KernelTable, create->KernelProgram);
+    if (kernel == NULL || kernel->KernelType != CG_KERNEL_TYPE_COMPUTE)
+    {   // an invalid kernel program handle was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    // allocate resources for the compute pipeline description:
+    CG_PIPELINE          pipe;
+    CG_COMPUTE_PIPELINE &cp= pipe.Compute;
+    memset(&pipe.Compute, 0, sizeof(CG_COMPUTE_PIPELINE));
+    pipe.PipelineType = CG_PIPELINE_TYPE_COMPUTE;
+    cp.ContextCount   = group->ContextCount;
+    cp.ContextList    = group->ContextList;
+    cp.KernelList     =(cl_kernel*) cgAllocateHostMemory(&ctx->HostAllocator, group->ContextCount * sizeof(cl_kernel), 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (cp.KernelList == NULL)
+    {   // unable to allocate required memory.
+        result = CG_OUT_OF_MEMORY;
+        return CG_INVALID_HANDLE;
+    }
+
+    cp.DeviceCount         = group->DeviceCount;
+    cp.DeviceList          = group->DeviceList;
+    cp.DeviceIds           = group->DeviceIds;
+    cp.ComputeQueues       = group->ComputeQueues;
+    cp.DeviceKernels       =(cl_kernel           *) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(cl_kernel), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cp.DeviceKernelInfo    =(CG_CL_WORKGROUP_INFO*) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (cp.DeviceKernels  == NULL || cp.DeviceKernelInfo == NULL)
+    {   // unable to allocate required memory.
+        result = CG_OUT_OF_MEMORY;
+        goto error_cleanup;
+    }
+    memset(cp.KernelList      , 0, group->ContextCount * sizeof(cl_kernel));
+    memset(cp.DeviceKernels   , 0, group->DeviceCount  * sizeof(cl_kernel));
+    memset(cp.DeviceKernelInfo, 0, group->DeviceCount  * sizeof(CG_CL_WORKGROUP_INFO));
+
+    // create the cl_kernel object for each context:
+    for (size_t i = 0, n = kernel->Compute.ContextCount; i < n; ++i)
+    {
+        cl_int clres = 0;
+        cl_kernel  k = clCreateKernel(kernel->Compute.Program[i], create->KernelName, &clres);
+        if (k == NULL)
+        {   // the kernel couldn't be created.
+            switch (clres)
+            {
+            case CL_INVALID_PROGRAM           : result = CG_ERROR; break;
+            case CL_INVALID_PROGRAM_EXECUTABLE: result = CG_ERROR; break;
+            case CL_INVALID_KERNEL_NAME       : result = CG_ERROR; break;
+            case CL_INVALID_KERNEL_DEFINITION : result = CG_ERROR; break;
+            case CL_INVALID_VALUE             : result = CG_ERROR; break;
+            case CL_OUT_OF_HOST_MEMORY        : result = CG_OUT_OF_MEMORY; break;
+            default: result = CG_ERROR;  break;
+            }
+            goto error_cleanup;
+        }
+        else
+        {   // link the kernel to all devices that share the context.
+            for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
+            {
+                if (kernel->Compute.ContextList[i] == group->ComputeContexts[device_index])
+                {   // store the kernel reference and retrieve workgroup information.
+                    clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_WORK_GROUP_SIZE        , sizeof(size_t) * 1, &cp.DeviceKernelInfo[device_index].WorkGroupSize , NULL);
+                    clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(size_t) * 3,  cp.DeviceKernelInfo[device_index].FixedGroupSize, NULL);
+                    clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_LOCAL_MEM_SIZE         , sizeof(cl_ulong)  , &cp.DeviceKernelInfo[device_index].LocalMemory   , NULL);
+                    cp.DeviceKernels[device_index] = k;
+                }
+            }
+            cp.KernelList[i] = k;
+        }
+    }
+
+    // retrieve argument information. this is consistent across kernels.
+    clGetKernelInfo(cp.KernelList[0], CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &arg_count, NULL);
+    cp.ArgumentCount = size_t(arg_count);
+    cp.ArgumentNames =(uint32_t        *) cgAllocateHostMemory(&ctx->HostAllocator, arg_count * sizeof(uint32_t)        , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cp.Arguments     =(CG_CL_KERNEL_ARG*) cgAllocateHostMemory(&ctx->HostAllocator, arg_count * sizeof(CG_CL_KERNEL_ARG), 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (cp.ArgumentNames == NULL || cp.Arguments == NULL)
+    {   // unable to allocate the required memory.
+        result = CG_OUT_OF_MEMORY;
+        goto error_cleanup;
+    }
+    for (size_t i = 0; i < size_t(arg_count); ++i)
+    {
+        char          *name = cgClKernelArgName(ctx, cp.KernelList[0], cl_uint(i), CG_ALLOCATION_TYPE_TEMP);
+        cp.ArgumentNames[i] = cgHashName(name);
+        cp.Arguments[i].Index  = cl_uint(i);
+        clGetKernelArgInfo(cp.KernelList[0], cl_uint(i), CL_KERNEL_ARG_ACCESS_QUALIFIER , sizeof(cl_kernel_arg_access_qualifier) , &cp.Arguments[i].ImageAccess  , NULL);
+        clGetKernelArgInfo(cp.KernelList[0], cl_uint(i), CL_KERNEL_ARG_ADDRESS_QUALIFIER, sizeof(cl_kernel_arg_address_qualifier), &cp.Arguments[i].MemoryType   , NULL);
+        clGetKernelArgInfo(cp.KernelList[0], cl_uint(i), CL_KERNEL_ARG_TYPE_QUALIFIER   , sizeof(cl_kernel_arg_type_qualifier)   , &cp.Arguments[i].TypeQualifier, NULL);
+        cgClFreeString(ctx, name, CG_ALLOCATION_TYPE_TEMP);
+    }
+
+    // insert the pipeline into the object table.
+    if ((handle = cgObjectTableAdd(&ctx->PipelineTable, pipe)) == CG_INVALID_HANDLE)
+    {   // the object table is full.
+        result = CG_OUT_OF_OBJECTS;
+        goto error_cleanup;
+    }
+    return handle;
+
+error_cleanup:
+    cgDeleteComputePipeline(ctx, &pipe.Compute);
+    return CG_INVALID_HANDLE;
+}
+
+/// @summary Create a new graphics pipeline object to execute an OpenGL shader program.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The handle of the execution group defining the rendering contexts.
+/// @param create Information about the pipeline configuration.
+/// @param result On return, set to CG_SUCCESS, CG_UNSUPPORTED, ...
+/// @return The handle of the graphics pipeline, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgCreateGraphicsPipeline
+(
+    uintptr_t                     context, 
+    cg_handle_t                   exec_group, 
+    cg_graphics_pipeline_t const *create, 
+    int                          &result
+)
+{
+    return CG_INVALID_HANDLE;
 }
 
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.
