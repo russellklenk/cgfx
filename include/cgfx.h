@@ -66,6 +66,11 @@ struct cg_execution_group_t;
 struct cg_cpu_counts_t;
 struct cg_command_t;
 struct cg_kernel_code_t;
+struct cg_blend_state_t;
+struct cg_raster_state_t;
+struct cg_depth_stencil_state_t;
+struct cg_graphics_pipeline_t;
+struct cg_compute_pipeline_t;
 
 /*/////////////////
 //   Constants   //
@@ -76,38 +81,44 @@ struct cg_kernel_code_t;
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
-typedef void*        (CG_API *cgMemoryAlloc_fn               )(size_t, size_t, int, uintptr_t);
-typedef void         (CG_API *cgMemoryFree_fn                )(void *, size_t, size_t, int, uintptr_t);
-typedef char const*  (CG_API *cgResultString_fn              )(int);
-typedef int          (CG_API *cgEnumerateDevices_fn          )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
-typedef int          (CG_API *cgGetContextInfo_fn            )(uintptr_t, int, void *, size_t, size_t *);
-typedef size_t       (CG_API *cgGetDeviceCount_fn            )(uintptr_t);
-typedef int          (CG_API *cgGetDeviceInfo_fn             )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef size_t       (CG_API *cgGetDisplayCount_fn           )(uintptr_t);
-typedef cg_handle_t  (CG_API *cgGetPrimaryDisplay_fn         )(uintptr_t);
-typedef cg_handle_t  (CG_API *cgGetDisplayByOrdinal_fn       )(uintptr_t);
-typedef int          (CG_API *cgGetDisplayInfo_fn            )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef cg_handle_t  (CG_API *cgGetDisplayDevice_fn          )(uintptr_t, cg_handle_t);
-typedef int          (CG_API *cgGetCPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int          (CG_API *cgGetGPUDevices_fn             )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int          (CG_API *cgGetAcceleratorDevices_fn     )(uintptr_t, size_t &, size_t const, cg_handle_t *);
-typedef int          (CG_API *cgGetCPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
-typedef int          (CG_API *cgGetGPUDevicesInShareGroup_fn )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
-typedef cg_handle_t  (CG_API *cgCreateExecutionGroup_fn      )(uintptr_t, cg_execution_group_t const *, int &);
-typedef int          (CG_API *cgGetExecutionGroupInfo_fn     )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef cg_handle_t  (CG_API *cgGetQueueForDevice_fn         )(uintptr_t, cg_handle_t, int, int &);
-typedef cg_handle_t  (CG_API *cgGetQueueForDisplay_fn        )(uintptr_t, cg_handle_t, int, int &);
-typedef int          (CG_API *cgDeleteObject_fn              )(uintptr_t, cg_handle_t);
-typedef cg_handle_t  (CG_API *cgCreateCommandBuffer_fn       )(uintptr_t, int, int &);
-typedef int          (CG_API *cgBeginCommandBuffer_fn        )(uintptr_t, cg_handle_t, uint32_t);
-typedef int          (CG_API *cgResetCommandBuffer_fn        )(uintptr_t, cg_handle_t);
-typedef int          (CG_API *cgCommandBufferAppend_fn       )(uintptr_t, cg_handle_t, uint16_t, size_t, void const*);
-typedef int          (CG_API *cgCommandBufferMapAppend_fn    )(uintptr_t, cg_handle_t, size_t, cg_command_t **);
-typedef int          (CG_API *cgCommandBufferUnmapAppend_fn  )(uintptr_t, cg_handle_t, size_t);
-typedef int          (CG_API *cgEndCommandBuffer_fn          )(uintptr_t, cg_handle_t);
-typedef int          (CG_API *cgCommandBufferCanRead_fn      )(uintptr_t, cg_handle_t, size_t &);
-typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn    )(uintptr_t, cg_handle_t, size_t &, int &);
-typedef cg_handle_t  (CG_API *cgCreateKernel_fn              )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
+typedef void*        (CG_API *cgMemoryAlloc_fn                 )(size_t, size_t, int, uintptr_t);
+typedef void         (CG_API *cgMemoryFree_fn                  )(void *, size_t, size_t, int, uintptr_t);
+typedef char const*  (CG_API *cgResultString_fn                )(int);
+typedef int          (CG_API *cgEnumerateDevices_fn            )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
+typedef int          (CG_API *cgGetContextInfo_fn              )(uintptr_t, int, void *, size_t, size_t *);
+typedef size_t       (CG_API *cgGetDeviceCount_fn              )(uintptr_t);
+typedef int          (CG_API *cgGetDeviceInfo_fn               )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef size_t       (CG_API *cgGetDisplayCount_fn             )(uintptr_t);
+typedef cg_handle_t  (CG_API *cgGetPrimaryDisplay_fn           )(uintptr_t);
+typedef cg_handle_t  (CG_API *cgGetDisplayByOrdinal_fn         )(uintptr_t);
+typedef int          (CG_API *cgGetDisplayInfo_fn              )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef cg_handle_t  (CG_API *cgGetDisplayDevice_fn            )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgGetCPUDevices_fn               )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetGPUDevices_fn               )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetAcceleratorDevices_fn       )(uintptr_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetCPUDevicesInShareGroup_fn   )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef int          (CG_API *cgGetGPUDevicesInShareGroup_fn   )(uintptr_t, cg_handle_t, size_t &, size_t const, cg_handle_t *);
+typedef cg_handle_t  (CG_API *cgCreateExecutionGroup_fn        )(uintptr_t, cg_execution_group_t const *, int &);
+typedef int          (CG_API *cgGetExecutionGroupInfo_fn       )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef cg_handle_t  (CG_API *cgGetQueueForDevice_fn           )(uintptr_t, cg_handle_t, int, int &);
+typedef cg_handle_t  (CG_API *cgGetQueueForDisplay_fn          )(uintptr_t, cg_handle_t, int, int &);
+typedef int          (CG_API *cgDeleteObject_fn                )(uintptr_t, cg_handle_t);
+typedef cg_handle_t  (CG_API *cgCreateCommandBuffer_fn         )(uintptr_t, int, int &);
+typedef int          (CG_API *cgBeginCommandBuffer_fn          )(uintptr_t, cg_handle_t, uint32_t);
+typedef int          (CG_API *cgResetCommandBuffer_fn          )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgCommandBufferAppend_fn         )(uintptr_t, cg_handle_t, uint16_t, size_t, void const*);
+typedef int          (CG_API *cgCommandBufferMapAppend_fn      )(uintptr_t, cg_handle_t, size_t, cg_command_t **);
+typedef int          (CG_API *cgCommandBufferUnmapAppend_fn    )(uintptr_t, cg_handle_t, size_t);
+typedef int          (CG_API *cgEndCommandBuffer_fn            )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgCommandBufferCanRead_fn        )(uintptr_t, cg_handle_t, size_t &);
+typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn      )(uintptr_t, cg_handle_t, size_t &, int &);
+typedef cg_handle_t  (CG_API *cgCreateKernel_fn                )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
+typedef int          (CG_API *cgBlendStateInitNone_fn          )(cg_blend_state_t &);
+typedef int          (CG_API *cgBlendStateInitAlpha_fn         )(cg_blend_state_t &);
+typedef int          (CG_API *cgBlendStateInitAdditive_fn      )(cg_blend_state_t &);
+typedef int          (CG_API *cgBlendStateInitPremultiplied_fn )(cg_blend_state_t &);
+typedef int          (CG_API *cgRasterStateInitDefault_fn      )(cg_raster_state_t &);
+typedef int          (CG_API *cgDepthStencilStateInitDefault_fn)(cg_depth_stencil_state_t &);
 
 /*//////////////////
 //   Data Types   //
@@ -248,26 +259,121 @@ enum cg_display_orientation_e : int
 /// @summary Define the supported types of execution group queues.
 enum cg_queue_type_e : int
 {
-    CG_QUEUE_TYPE_COMPUTE              =  0,        /// The queue is used for submitting compute kernel dispatch commands.
-    CG_QUEUE_TYPE_GRAPHICS             =  1,        /// The queue is used for submitting graphics kernel dispatch commands.
-    CG_QUEUE_TYPE_TRANSFER             =  2,        /// The queue is used for submitting data transfer commands using a DMA engine.
+    CG_QUEUE_TYPE_COMPUTE              =  1,        /// The queue is used for submitting compute kernel dispatch commands.
+    CG_QUEUE_TYPE_GRAPHICS             =  2,        /// The queue is used for submitting graphics kernel dispatch commands.
+    CG_QUEUE_TYPE_TRANSFER             =  3,        /// The queue is used for submitting data transfer commands using a DMA engine.
 };
 
 /// @summary Define the supported types of kernel fragments.
 enum cg_kernel_type_e : int
 {
-    CG_KERNEL_TYPE_GRAPHICS_VERTEX     =  0,        /// The kernel corresponds to the vertex shader stage.
-    CG_KERNEL_TYPE_GRAPHICS_FRAGMENT   =  1,        /// The kernel corresponds to the fragment shader stage.
-    CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE  =  2,        /// The kernel corresponds to the geometry shader stage.
-    CG_KERNEL_TYPE_COMPUTE             =  3,        /// The kernel is a compute shader.
+    CG_KERNEL_TYPE_GRAPHICS_VERTEX     =  1,        /// The kernel corresponds to the vertex shader stage.
+    CG_KERNEL_TYPE_GRAPHICS_FRAGMENT   =  2,        /// The kernel corresponds to the fragment shader stage.
+    CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE  =  3,        /// The kernel corresponds to the geometry shader stage.
+    CG_KERNEL_TYPE_COMPUTE             =  4,        /// The kernel is a compute shader.
+};
+
+/// @summary Define the supported types of pipelines.
+enum cg_pipeline_type_e : int
+{
+    CG_PIPELINE_TYPE_GRAPHICS          =  1,        /// The pipeline definition is for graphics shaders.
+    CG_PIPELINE_TYPE_COMPUTE           =  2,        /// The pipeline definition is for compute kernels.
 };
 
 /// @summary Define the supported types of memory heaps.
 enum cg_heap_type_e : int
 {
-    CG_HEAP_TYPE_LOCAL                 =  0,        /// The heap is in device-local memory.
-    CG_HEAP_TYPE_REMOTE                =  1,        /// The heap is in non-local device memory.
-    CG_HEAP_TYPE_EMBEDDED              =  2,        /// The heap is in embedded (on-chip) memory.
+    CG_HEAP_TYPE_LOCAL                 =  1,        /// The heap is in device-local memory.
+    CG_HEAP_TYPE_REMOTE                =  2,        /// The heap is in non-local device memory.
+    CG_HEAP_TYPE_EMBEDDED              =  3,        /// The heap is in embedded (on-chip) memory.
+};
+
+/// @summary Define the fixed-function blending methods in the blending equation.
+enum cg_blend_function_e : int
+{
+    CG_BLEND_FUNCTION_ADD              =  1,        /// The source and destination components are added.
+    CG_BLEND_FUNCTION_SUBTRACT         =  2,        /// The destination component is subtracted from the source component.
+    CG_BLEND_FUNCTION_REVERSE_SUBTRACT =  3,        /// The source component is subtracted from the destination component.
+    CG_BLEND_FUNCTION_MIN              =  4,        /// The minimum of the source and destination components is selected.
+    CG_BLEND_FUNCTION_MAX              =  5,        /// The maximum of the source and destination components is selected.
+};
+
+/// @summary Define fixed-function methods for computing the source and destination components of the blending equation.
+enum cg_blend_factor_e : int
+{
+    CG_BLEND_FACTOR_ZERO               =  1,        /// The blend factor is set to transparent black.
+    CG_BLEND_FACTOR_ONE                =  2,        /// The blend factor is set to opaque white.
+    CG_BLEND_FACTOR_SRC_COLOR          =  3,        /// The blend factor is set to the RGB color coming from the fragment shader.
+    CG_BLEND_FACTOR_INV_SRC_COLOR      =  4,        /// The blend factor is set to 1.0 minus the RGB color coming from the fragment shader.
+    CG_BLEND_FACTOR_DST_COLOR          =  5,        /// The blend factor is set to the RGB color coming from the framebuffer.
+    CG_BLEND_FACTOR_INV_DST_COLOR      =  6,        /// The blend factor is set to 1.0 minus the RGB color coming from the framebuffer.
+    CG_BLEND_FACTOR_SRC_ALPHA          =  7,        /// The blend factor is set to the alpha value coming from the fragment shader.
+    CG_BLEND_FACTOR_INV_SRC_ALPHA      =  8,        /// The blend factor is set to 1.0 minus the alpha value coming from the fragment shader.
+    CG_BLEND_FACTOR_DST_ALPHA          =  9,        /// The blend factor is set to the alpha value coming from the framebuffer.
+    CG_BLEND_FACTOR_INV_DST_ALPHA      = 10,        /// The blend factor is set to 1.0 minus the alpha value coming from the framebuffer.
+    CG_BLEND_FACTOR_CONST_COLOR        = 11,        /// The blend factor is set to the constant RGB value specified in the blend state.
+    CG_BLEND_FACTOR_INV_CONST_COLOR    = 12,        /// The blend factor is set to 1.0 minus the constant RGB value specified in the blend state.
+    CG_BLEND_FACTOR_CONST_ALPHA        = 13,        /// The blend factor is set to the constant alpha value specified in the blend state.
+    CG_BLEND_FACTOR_INV_CONST_ALPHA    = 14,        /// The blend factor is set to 1.0 minus the constant alpha value specified in the blend state.
+    CG_BLEND_FACTOR_SRC_ALPHA_SAT      = 15         /// The blend factor is set to the alphva value coming from the fragment shader, clamped to 1.0 minus the alpha value coming from the framebuffer.
+};
+
+/// @summary Define fixed-function methods for depth and stencil testing.
+enum cg_compare_function_e : int
+{
+    CG_COMPARE_NEVER                   =  1,        /// The input value never passes the test.
+    CG_COMPARE_LESS                    =  2,        /// The input value passes if it is less than the existing value.
+    CG_COMPARE_EQUAL                   =  3,        /// The input value passes if it is equal to the existing value.
+    CG_COMPARE_LESS_EQUAL              =  4,        /// The input value passes if it is less than or equal to the existing value.
+    CG_COMPARE_GREATER                 =  5,        /// The input value passes if it is greater than the existing value.
+    CG_COMPARE_NOT_EQUAL               =  6,        /// The input value passes if it is not equal to the existing value.
+    CG_COMPARE_GREATER_EQUAL           =  7,        /// The input value passes if it is greater than or equal to the existing value.
+    CG_COMPARE_ALWAYS                  =  8,        /// The input value always passes the test.
+};
+
+/// @summary Define the supported primitive fill modes.
+enum cg_fill_mode_e : int
+{
+    CG_FILL_SOLID                      =  0,        /// The interior of the primitive is rasterized.
+    CG_FILL_WIREFRAME                  =  1,        /// Only the outline of the primitive is rasterized.
+};
+
+/// @summary Define which side of a primitive is removed during the culling phase.
+enum cg_cull_mode_e : int
+{
+    CG_CULL_NONE                       =  0,        /// Both front and back-facing primitives are rasterized.
+    CG_CULL_FRONT                      =  1,        /// Front-facing primitives are rasterized, back-facing primitives are discarded.
+    CG_CULL_BACK                       =  2,        /// Back-facing primitives are rasterized, front-facing primitives are discarded.
+};
+
+/// @summary Define the winding order used to identify front-facing primitives.
+enum cg_winding_e : int
+{
+    CG_WINDING_CCW                     =  0,        /// Vertices ordered counter-clockwise define the front face of a primitive.
+    CG_WINDING_CW                      =  1,        /// Vertices ordered clockwise define the front face of a primitive.
+};
+
+/// @summary Define the supported types of primitives used for rendering geometry.
+enum cg_primitive_topology_e : int
+{
+    CG_PRIMITIVE_POINT_LIST            =  1,        /// Vertices identify individual points.
+    CG_PRIMITIVE_LINE_LIST             =  2,        /// Every two vertices defines a discrete line segment.
+    CG_PRIMITIVE_LINE_STRIP            =  3,        /// Vertex N+1 defines a line segment linked to vertex N.
+    CG_PRIMITIVE_TRIANGLE_LIST         =  4,        /// Every three vertices defines a discrete triangle.
+    CG_PRIMITIVE_TRIANGLE_STRIP        =  5,        /// Vertices define a strip of N-2 triangles.
+};
+
+/// @summary Define the fixed-function operations to perform when the stencil test passes.
+enum cg_stencil_operation_e : int
+{
+    CG_STENCIL_OP_KEEP                 =  1,        /// Keep the existing stencil value unchanged.
+    CG_STENCIL_OP_ZERO                 =  2,        /// Set the stencil value to zero.
+    CG_STENCIL_OP_REPLACE              =  3,        /// Set the stencil value to the stencil reference value.
+    CG_STENCIL_OP_INC_CLAMP            =  4,        /// Increment the existing stencil value by one and clamp to the maximum.
+    CG_STENCIL_OP_DEC_CLAMP            =  5,        /// Decrement the existing stencil value by one and clamp to the minimum.
+    CG_STENCIL_OP_INVERT               =  6,        /// Invert the existing stencil value.
+    CG_STENCIL_OP_INC_WRAP             =  7,        /// Increment the existing stencil value by one, wrapping to minimum if the result exceeds the maximum value.
+    CG_STENCIL_OP_DEC_WRAP             =  8,        /// Decrement the existing stencil value by one, wrapping to maximum if the result exceeds the minimum value.
 };
 
 /// @summary Define flags that can be specified when creating an execution group.
@@ -372,7 +478,68 @@ struct cg_kernel_code_t
     uint32_t                      Flags;            /// A combination of cg_kernel_flags_e.
     void const                   *Code;             /// The buffer specifying the kernel code.
     size_t                        CodeSize;         /// The size of the code buffer, in bytes.
-    char const                   *Options;          /// A NULL-terminated string specifying compilation options and constants, or NULL.
+};
+
+/// @summary Describes fixed-function state configuration for the blending unit.
+struct cg_blend_state_t
+{
+    bool                         BlendEnabled;         /// Specify true if alpha blending is enabled.
+    int                          SrcBlendColor;        /// The source component of the blending equation for color channels, one of cg_blend_factor_e.
+    int                          DstBlendColor;        /// The destination component of the blending equation for color channels, one of cg_blend_factor_e.
+    int                          ColorBlendFunction;   /// The blending function to use for the color channels, one of cg_blend_function_e.
+    int                          SrcBlendAlpha;        /// The source component of the blending equation for alpha, one of cg_blend_factor_e.
+    int                          DstBlendAlpha;        /// The destination component of the blending equation for alpha, one of cg_blend_factor_e.
+    int                          AlphaBlendFunction;   /// The blending function to use for the alpha channel, one of cg_blend_function_e.
+    float                        ConstantRGBA[4];      /// RGBA values in [0, 1] specifying a constant blend color.
+};
+
+/// @summary Describes fixed-function state configuration for the rasterizer.
+struct cg_raster_state_t
+{
+    int                          FillMode;             /// The primitive fill mode, one of cg_fill_mode_e.
+    int                          CullMode;             /// The primitive culling mode, one of cg_cull_mode_e.
+    int                          FrontFace;            /// The winding order used to determine front-facing primitives, one of cg_winding_t.
+    int                          DepthBias;            /// The depth bias value added to fragment depth.
+    float                        SlopeScaledDepthBias; /// The scale of the slope-based value added to fragment depth.
+};
+
+/// @summary Describes fixed-function state configuration for depth and stencil testing.
+struct cg_depth_stencil_state_t
+{
+    bool                         DepthTestEnable;      /// Specify true if depth testing is enabled.
+    bool                         DepthWriteEnable;     /// Specify true if depth buffer writes are enabled.
+    bool                         DepthBoundsEnable;    /// Specify true if the depth buffer range is enabled.
+    int                          DepthTestFunction;    /// The depth value comparison function, one of cg_compare_function_e.
+    float                        DepthMin;             /// The minimum depth buffer value.
+    float                        DepthMax;             /// The maximum depth buffer value.
+    bool                         StencilTestEnable;    /// Specify true if stencil testing is enabled.
+    int                          StencilTestFunction;  /// The stencil value comparison function, one of cg_compare_function_e.
+    int                          StencilFailOp;        /// The stencil operation to apply when the stencil test fails, one of cg_stencil_operation_e.
+    int                          StencilPassZPassOp;   /// The stencil operation to apply when both the stencil and depth tests pass, one of cg_stencil_operation_e.
+    int                          StencilPassZFailOp;   /// The stencil operation to apply when the stencil test passes and the depth test fails, one of cg_stencil_operation_e.
+    uint8_t                      StencilReadMask;      /// The bitmask to apply to stencil reads.
+    uint8_t                      StencilWriteMask;     /// The bitmask to apply to stencil writes.
+    uint8_t                      StencilReference;     /// The stencil reference value.
+};
+
+/// @summary Defines the configuration for a graphics pipeline.
+struct cg_graphics_pipeline_t
+{
+    cg_depth_stencil_state_t     DepthStencilState;    /// The fixed-function configuration for depth and stencil testing.
+    cg_raster_state_t            RasterizerState;      /// The fixed-function configuration for primitive rasterization.
+    cg_blend_state_t             BlendState;           /// The fixed-function configuration for the blending unit.
+    int                          PrimitiveType;        /// The type of geometry submitted for draw calls against the pipeline.
+    cg_handle_t                  VertexShader;         /// The handle of the vertex shader kernel.
+    cg_handle_t                  GeometryShader;       /// The handle of the geometry shader kernel, or CG_INVALID_HANDLE.
+    cg_handle_t                  FragmentShader;       /// The handle of the fragment shader kernel.
+};
+
+/// @summary Defines the configuration for a compute pipeline.
+struct cg_compute_pipeline_t
+{
+    char const                  *Constants;            /// A NULL-terminated ASCII string specifying constant values.
+    char const                  *KernelName;           /// A NULL-terminated ASCII string specifying the name of the kernel function in the program code.
+    cg_handle_t                  KernelProgram;        /// The handle of the kernel code to execute.
 };
 
 /*/////////////////
@@ -641,6 +808,42 @@ cgCreateKernel                                      /// Create a new kernel obje
     cg_handle_t                   exec_group,       /// The handle of the execution group for which the kernel will be compiled.
     cg_kernel_code_t const       *create_info,      /// An object specifying source code and behavior.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgBlendStateInitNone                                /// Initialize fixed-function alpha blending configuration for no blending.
+(
+    cg_blend_state_t             &state             /// The blending state to update.
+);
+
+int
+cgBlendStateInitAlpha                               /// Initialize fixed-function alpha blending configuration for standard texture transparency.
+(
+    cg_blend_state_t             &state             /// The blending state to update.
+);
+
+int
+cgBlendStateInitAdditive                            /// Initialize fixed-function alpha blending configuration for additive blending.
+(
+    cg_blend_state_t             &state             /// The blending state to update.
+);
+
+int 
+cgBlendStateInitPremultiplied                       /// Initialize fixed-function alpha blending configuration for blending with premultiplied alpha in the source texture.
+(
+    cg_blend_state_t             &state             /// The blending state to update.
+);
+
+int
+cgRasterStateInitDefault                            /// Initialize fixed-function rasterizer configuration to the default values.
+(
+    cg_raster_state_t            &state             /// The rasterizer state to update.
+);
+
+int
+cgDepthStencilStateInitDefault                      /// Initialize fixed-function depth and stencil testing configuration to the default values.
+(
+    cg_depth_stencil_state_t     &state             /// The depth and stencil testing configuration to update.
 );
 
 #ifdef __cplusplus

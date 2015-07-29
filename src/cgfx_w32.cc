@@ -1667,6 +1667,1572 @@ cgGlEnumerateDisplays
     return CG_SUCCESS;
 }
 
+/// @summary Given an OpenGL data type value, calculates the corresponding size.
+/// @param data_type The OpenGL data type value, for example, GL_UNSIGNED_BYTE.
+/// @return The size of a single element of the specified type, in bytes.
+internal_function size_t
+cgGlDataSize
+(
+    GLenum data_type
+)
+{
+    switch (data_type)
+    {
+    case GL_UNSIGNED_BYTE:               return sizeof(GLubyte);
+    case GL_FLOAT:                       return sizeof(GLfloat);
+    case GL_FLOAT_VEC2:                  return sizeof(GLfloat) *  2;
+    case GL_FLOAT_VEC3:                  return sizeof(GLfloat) *  3;
+    case GL_FLOAT_VEC4:                  return sizeof(GLfloat) *  4;
+    case GL_INT:                         return sizeof(GLint);
+    case GL_INT_VEC2:                    return sizeof(GLint)   *  2;
+    case GL_INT_VEC3:                    return sizeof(GLint)   *  3;
+    case GL_INT_VEC4:                    return sizeof(GLint)   *  4;
+    case GL_BOOL:                        return sizeof(GLint);
+    case GL_BOOL_VEC2:                   return sizeof(GLint)   *  2;
+    case GL_BOOL_VEC3:                   return sizeof(GLint)   *  3;
+    case GL_BOOL_VEC4:                   return sizeof(GLint)   *  4;
+    case GL_FLOAT_MAT2:                  return sizeof(GLfloat) *  4;
+    case GL_FLOAT_MAT3:                  return sizeof(GLfloat) *  9;
+    case GL_FLOAT_MAT4:                  return sizeof(GLfloat) * 16;
+    case GL_FLOAT_MAT2x3:                return sizeof(GLfloat) *  6;
+    case GL_FLOAT_MAT2x4:                return sizeof(GLfloat) *  8;
+    case GL_FLOAT_MAT3x2:                return sizeof(GLfloat) *  6;
+    case GL_FLOAT_MAT3x4:                return sizeof(GLfloat) * 12;
+    case GL_FLOAT_MAT4x2:                return sizeof(GLfloat) *  8;
+    case GL_FLOAT_MAT4x3:                return sizeof(GLfloat) * 12;
+    case GL_BYTE:                        return sizeof(GLbyte);
+    case GL_UNSIGNED_SHORT:              return sizeof(GLushort);
+    case GL_SHORT:                       return sizeof(GLshort);
+    case GL_UNSIGNED_INT:                return sizeof(GLuint);
+    case GL_UNSIGNED_SHORT_5_6_5:        return sizeof(GLushort);
+    case GL_UNSIGNED_SHORT_5_6_5_REV:    return sizeof(GLushort);
+    case GL_UNSIGNED_SHORT_4_4_4_4:      return sizeof(GLushort);
+    case GL_UNSIGNED_SHORT_4_4_4_4_REV:  return sizeof(GLushort);
+    case GL_UNSIGNED_SHORT_5_5_5_1:      return sizeof(GLushort);
+    case GL_UNSIGNED_SHORT_1_5_5_5_REV:  return sizeof(GLushort);
+    case GL_UNSIGNED_INT_8_8_8_8:        return sizeof(GLubyte);
+    case GL_UNSIGNED_INT_8_8_8_8_REV:    return sizeof(GLubyte);
+    case GL_UNSIGNED_INT_10_10_10_2:     return sizeof(GLuint);
+    case GL_UNSIGNED_INT_2_10_10_10_REV: return sizeof(GLuint);
+    case GL_UNSIGNED_BYTE_3_3_2:         return sizeof(GLubyte);
+    case GL_UNSIGNED_BYTE_2_3_3_REV:     return sizeof(GLubyte);
+    default:                             break;
+    }
+    return 0;
+}
+
+/// @summary Given an OpenGL block-compressed internal format identifier, determine the size of each compressed block, in pixels. For non block-compressed formats, the block size is defined to be 1.
+/// @param internal_format The OpenGL internal format value.
+/// @return The dimension of a block, in pixels.
+internal_function size_t
+cgGlBlockDimension
+(
+    GLenum internal_format
+)
+{
+    switch (internal_format)
+    {
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:        return 4;
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:       return 4;
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:       return 4;
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:       return 4;
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:       return 4;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT: return 4;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT: return 4;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT: return 4;
+        default:
+            break;
+    }
+    return 1;
+}
+
+/// @summary Given an OpenGL block-compressed internal format identifier, determine the size of each compressed block of pixels.
+/// @param internal_format The OpenGL internal format value. RGB/RGBA/SRGB and SRGBA S3TC/DXT format identifiers are the only values currently accepted.
+/// @return The number of bytes per compressed block of pixels, or zero.
+internal_function size_t
+cgGlBytesPerBlock
+(
+    GLenum internal_format
+)
+{
+    switch (internal_format)
+    {
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:        return 8;
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:       return 8;
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:       return 16;
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:       return 16;
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:       return 8;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT: return 8;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT: return 16;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT: return 16;
+        default:
+            break;
+    }
+    return 0;
+}
+
+/// @summary Given an OpenGL internal format value, calculates the number of
+/// bytes per-element (or per-block, for block-compressed formats).
+/// @param internal_format The OpenGL internal format, for example, GL_RGBA.
+/// @param data_type The OpenGL data type, for example, GL_UNSIGNED_BYTE.
+/// @return The number of bytes per element (pixel or block), or zero.
+internal_function size_t
+cgGlBytesPerElement
+(
+    GLenum internal_format, 
+    GLenum data_type
+)
+{
+    switch (internal_format)
+    {
+        case GL_DEPTH_COMPONENT:
+        case GL_DEPTH_STENCIL:
+        case GL_RED:
+        case GL_R8:
+        case GL_R8_SNORM:
+        case GL_R16:
+        case GL_R16_SNORM:
+        case GL_R16F:
+        case GL_R32F:
+        case GL_R8I:
+        case GL_R8UI:
+        case GL_R16I:
+        case GL_R16UI:
+        case GL_R32I:
+        case GL_R32UI:
+        case GL_R3_G3_B2:
+        case GL_RGB4:
+        case GL_RGB5:
+        case GL_RGB10:
+        case GL_RGB12:
+        case GL_RGBA2:
+        case GL_RGBA4:
+        case GL_RGB9_E5:
+        case GL_R11F_G11F_B10F:
+        case GL_RGB5_A1:
+        case GL_RGB10_A2:
+        case GL_RGB10_A2UI:
+            return (cgGlDataSize(data_type) * 1);
+
+        case GL_RG:
+        case GL_RG8:
+        case GL_RG8_SNORM:
+        case GL_RG16:
+        case GL_RG16_SNORM:
+        case GL_RG16F:
+        case GL_RG32F:
+        case GL_RG8I:
+        case GL_RG8UI:
+        case GL_RG16I:
+        case GL_RG16UI:
+        case GL_RG32I:
+        case GL_RG32UI:
+            return (cgGlDataSize(data_type) * 2);
+
+        case GL_RGB:
+        case GL_RGB8:
+        case GL_RGB8_SNORM:
+        case GL_RGB16_SNORM:
+        case GL_SRGB8:
+        case GL_RGB16F:
+        case GL_RGB32F:
+        case GL_RGB8I:
+        case GL_RGB8UI:
+        case GL_RGB16I:
+        case GL_RGB16UI:
+        case GL_RGB32I:
+        case GL_RGB32UI:
+            return (cgGlDataSize(data_type) * 3);
+
+        case GL_RGBA:
+        case GL_RGBA8:
+        case GL_RGBA8_SNORM:
+        case GL_SRGB8_ALPHA8:
+        case GL_RGBA16F:
+        case GL_RGBA32F:
+        case GL_RGBA8I:
+        case GL_RGBA8UI:
+        case GL_RGBA16I:
+        case GL_RGBA16UI:
+        case GL_RGBA32I:
+        case GL_RGBA32UI:
+            return (cgGlDataSize(data_type) * 4);
+
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+            return cgGlBytesPerBlock(internal_format);
+
+        default:
+            break;
+    }
+    return 0;
+}
+
+/// @summary Given an OpenGL internal_format value and a width, calculates the number of bytes between rows in a 2D image slice.
+/// @param internal_format The OpenGL internal format, for example, GL_RGBA.
+/// @param data_type The OpenGL data type, for example, GL_UNSIGNED_BYTE.
+/// @param width The row width, in pixels.
+/// @param alignment The alignment requirement of the OpenGL implementation, corresponding to the pname of GL_PACK_ALIGNMENT or GL_UNPACK_ALIGNMENT for the glPixelStorei function. The specification default is 4.
+/// @return The number of bytes per-row, or zero.
+internal_function size_t
+cgGlBytesPerRow
+(
+    GLenum internal_format, 
+    GLenum data_type, 
+    size_t width, 
+    size_t alignment
+)
+{
+    if (width == 0)  width = 1;
+    switch (internal_format)
+    {
+        case GL_DEPTH_COMPONENT:
+        case GL_DEPTH_STENCIL:
+        case GL_RED:
+        case GL_R8:
+        case GL_R8_SNORM:
+        case GL_R16:
+        case GL_R16_SNORM:
+        case GL_R16F:
+        case GL_R32F:
+        case GL_R8I:
+        case GL_R8UI:
+        case GL_R16I:
+        case GL_R16UI:
+        case GL_R32I:
+        case GL_R32UI:
+        case GL_R3_G3_B2:
+        case GL_RGB4:
+        case GL_RGB5:
+        case GL_RGB10:
+        case GL_RGB12:
+        case GL_RGBA2:
+        case GL_RGBA4:
+        case GL_RGB9_E5:
+        case GL_R11F_G11F_B10F:
+        case GL_RGB5_A1:
+        case GL_RGB10_A2:
+        case GL_RGB10_A2UI:
+            return align_up(width * cgGlDataSize(data_type), alignment);
+
+        case GL_RG:
+        case GL_RG8:
+        case GL_RG8_SNORM:
+        case GL_RG16:
+        case GL_RG16_SNORM:
+        case GL_RG16F:
+        case GL_RG32F:
+        case GL_RG8I:
+        case GL_RG8UI:
+        case GL_RG16I:
+        case GL_RG16UI:
+        case GL_RG32I:
+        case GL_RG32UI:
+            return align_up(width * cgGlDataSize(data_type) * 2, alignment);
+
+        case GL_RGB:
+        case GL_RGB8:
+        case GL_RGB8_SNORM:
+        case GL_RGB16_SNORM:
+        case GL_SRGB8:
+        case GL_RGB16F:
+        case GL_RGB32F:
+        case GL_RGB8I:
+        case GL_RGB8UI:
+        case GL_RGB16I:
+        case GL_RGB16UI:
+        case GL_RGB32I:
+        case GL_RGB32UI:
+            return align_up(width * cgGlDataSize(data_type) * 3, alignment);
+
+        case GL_RGBA:
+        case GL_RGBA8:
+        case GL_RGBA8_SNORM:
+        case GL_SRGB8_ALPHA8:
+        case GL_RGBA16F:
+        case GL_RGBA32F:
+        case GL_RGBA8I:
+        case GL_RGBA8UI:
+        case GL_RGBA16I:
+        case GL_RGBA16UI:
+        case GL_RGBA32I:
+        case GL_RGBA32UI:
+            return align_up(width * cgGlDataSize(data_type) * 4, alignment);
+
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+            return align_up(((width + 3) >> 2) * cgGlBytesPerBlock(internal_format), alignment);
+
+        default:
+            break;
+    }
+    return 0;
+}
+
+/// @summary Calculates the size of the buffer required to store an image with the specified attributes.
+/// @param internal_format The OpenGL internal format value, for example, GL_RGBA. The most common compressed formats are supported (DXT/S3TC).
+/// @param data_type The data type identifier, for example, GL_UNSIGNED_BYTE.
+/// @param width The width of the image, in pixels.
+/// @param height The height of the image, in pixels.
+/// @param alignment The alignment requirement of the OpenGL implementation, corresponding to the pname of GL_PACK_ALIGNMENT or GL_UNPACK_ALIGNMENT for the glPixelStorei function. The specification default is 4.
+/// @return The number of bytes required to store the image data.
+internal_function size_t
+cgGlBytesPerSlice
+(
+    GLenum internal_format, 
+    GLenum data_type, 
+    size_t width, 
+    size_t height, 
+    size_t alignment
+)
+{
+    if (width  == 0) width  = 1;
+    if (height == 0) height = 1;
+    switch (internal_format)
+    {
+        case GL_DEPTH_COMPONENT:
+        case GL_DEPTH_STENCIL:
+        case GL_RED:
+        case GL_R8:
+        case GL_R8_SNORM:
+        case GL_R16:
+        case GL_R16_SNORM:
+        case GL_R16F:
+        case GL_R32F:
+        case GL_R8I:
+        case GL_R8UI:
+        case GL_R16I:
+        case GL_R16UI:
+        case GL_R32I:
+        case GL_R32UI:
+        case GL_R3_G3_B2:
+        case GL_RGB4:
+        case GL_RGB5:
+        case GL_RGB10:
+        case GL_RGB12:
+        case GL_RGBA2:
+        case GL_RGBA4:
+        case GL_RGB9_E5:
+        case GL_R11F_G11F_B10F:
+        case GL_RGB5_A1:
+        case GL_RGB10_A2:
+        case GL_RGB10_A2UI:
+            return align_up(width * cgGlDataSize(data_type), alignment) * height;
+
+        case GL_RG:
+        case GL_RG8:
+        case GL_RG8_SNORM:
+        case GL_RG16:
+        case GL_RG16_SNORM:
+        case GL_RG16F:
+        case GL_RG32F:
+        case GL_RG8I:
+        case GL_RG8UI:
+        case GL_RG16I:
+        case GL_RG16UI:
+        case GL_RG32I:
+        case GL_RG32UI:
+            return align_up(width * cgGlDataSize(data_type) * 2, alignment) * height;
+
+        case GL_RGB:
+        case GL_RGB8:
+        case GL_RGB8_SNORM:
+        case GL_RGB16_SNORM:
+        case GL_SRGB8:
+        case GL_RGB16F:
+        case GL_RGB32F:
+        case GL_RGB8I:
+        case GL_RGB8UI:
+        case GL_RGB16I:
+        case GL_RGB16UI:
+        case GL_RGB32I:
+        case GL_RGB32UI:
+            return align_up(width * cgGlDataSize(data_type) * 3, alignment) * height;
+
+        case GL_RGBA:
+        case GL_RGBA8:
+        case GL_RGBA8_SNORM:
+        case GL_SRGB8_ALPHA8:
+        case GL_RGBA16F:
+        case GL_RGBA32F:
+        case GL_RGBA8I:
+        case GL_RGBA8UI:
+        case GL_RGBA16I:
+        case GL_RGBA16UI:
+        case GL_RGBA32I:
+        case GL_RGBA32UI:
+            return align_up(width * cgGlDataSize(data_type) * 4, alignment) * height;
+
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+            // these formats operate on 4x4 blocks of pixels, so if a dimension
+            // is not evenly divisible by four, it needs to be rounded up.
+            return align_up(((width + 3) >> 2) * cgGlBytesPerBlock(internal_format), alignment) * ((height + 3) >> 2);
+
+        default:
+            break;
+    }
+    return 0;
+}
+
+/// @summary Calculates the dimension of an image (width, height, etc.) rounded up to the next alignment boundary based on the internal format.
+/// @summary internal_format The OpenGL internal format value, for example, GL_RGBA. The most common compressed formats are supported (DXT/S3TC).
+/// @param dimension The dimension value (width, height, etc.), in pixels.
+/// @return The dimension value padded up to the next alignment boundary. The returned value is always specified in pixels.
+internal_function size_t
+cgGlImageDimension
+(
+    GLenum internal_format, 
+    size_t dimension
+)
+{
+    switch (internal_format)
+    {
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+            // these formats operate on 4x4 blocks of pixels, so if a dimension
+            // is not evenly divisible by four, it needs to be rounded up.
+            return (((dimension + 3) >> 2) * cgGlBlockDimension(internal_format));
+
+        default:
+            break;
+    }
+    return dimension;
+}
+
+/// @summary Given an OpenGL internal format type value, determines the corresponding pixel layout.
+/// @param internal_format The OpenGL internal format value. See the documentation for glTexImage2D(), internalFormat argument.
+/// @return The OpenGL base internal format values. See the documentation for glTexImage2D(), format argument.
+internal_function GLenum
+cgGlPixelLayout
+(
+    GLenum internal_format
+)
+{
+    switch (internal_format)
+    {
+        case GL_DEPTH_COMPONENT:                     return GL_DEPTH_COMPONENT;
+        case GL_DEPTH_STENCIL:                       return GL_DEPTH_STENCIL;
+        case GL_RED:                                 return GL_RED;
+        case GL_RG:                                  return GL_RG;
+        case GL_RGB:                                 return GL_RGB;
+        case GL_RGBA:                                return GL_BGRA;
+        case GL_R8:                                  return GL_RED;
+        case GL_R8_SNORM:                            return GL_RED;
+        case GL_R16:                                 return GL_RED;
+        case GL_R16_SNORM:                           return GL_RED;
+        case GL_RG8:                                 return GL_RG;
+        case GL_RG8_SNORM:                           return GL_RG;
+        case GL_RG16:                                return GL_RG;
+        case GL_RG16_SNORM:                          return GL_RG;
+        case GL_R3_G3_B2:                            return GL_RGB;
+        case GL_RGB4:                                return GL_RGB;
+        case GL_RGB5:                                return GL_RGB;
+        case GL_RGB8:                                return GL_RGB;
+        case GL_RGB8_SNORM:                          return GL_RGB;
+        case GL_RGB10:                               return GL_RGB;
+        case GL_RGB12:                               return GL_RGB;
+        case GL_RGB16_SNORM:                         return GL_RGB;
+        case GL_RGBA2:                               return GL_RGB;
+        case GL_RGBA4:                               return GL_RGB;
+        case GL_RGB5_A1:                             return GL_RGBA;
+        case GL_RGBA8:                               return GL_BGRA;
+        case GL_RGBA8_SNORM:                         return GL_BGRA;
+        case GL_RGB10_A2:                            return GL_RGBA;
+        case GL_RGB10_A2UI:                          return GL_RGBA;
+        case GL_RGBA12:                              return GL_RGBA;
+        case GL_RGBA16:                              return GL_BGRA;
+        case GL_SRGB8:                               return GL_RGB;
+        case GL_SRGB8_ALPHA8:                        return GL_BGRA;
+        case GL_R16F:                                return GL_RED;
+        case GL_RG16F:                               return GL_RG;
+        case GL_RGB16F:                              return GL_RGB;
+        case GL_RGBA16F:                             return GL_BGRA;
+        case GL_R32F:                                return GL_RED;
+        case GL_RG32F:                               return GL_RG;
+        case GL_RGB32F:                              return GL_RGB;
+        case GL_RGBA32F:                             return GL_BGRA;
+        case GL_R11F_G11F_B10F:                      return GL_RGB;
+        case GL_RGB9_E5:                             return GL_RGB;
+        case GL_R8I:                                 return GL_RED;
+        case GL_R8UI:                                return GL_RED;
+        case GL_R16I:                                return GL_RED;
+        case GL_R16UI:                               return GL_RED;
+        case GL_R32I:                                return GL_RED;
+        case GL_R32UI:                               return GL_RED;
+        case GL_RG8I:                                return GL_RG;
+        case GL_RG8UI:                               return GL_RG;
+        case GL_RG16I:                               return GL_RG;
+        case GL_RG16UI:                              return GL_RG;
+        case GL_RG32I:                               return GL_RG;
+        case GL_RG32UI:                              return GL_RG;
+        case GL_RGB8I:                               return GL_RGB;
+        case GL_RGB8UI:                              return GL_RGB;
+        case GL_RGB16I:                              return GL_RGB;
+        case GL_RGB16UI:                             return GL_RGB;
+        case GL_RGB32I:                              return GL_RGB;
+        case GL_RGB32UI:                             return GL_RGB;
+        case GL_RGBA8I:                              return GL_BGRA;
+        case GL_RGBA8UI:                             return GL_BGRA;
+        case GL_RGBA16I:                             return GL_BGRA;
+        case GL_RGBA16UI:                            return GL_BGRA;
+        case GL_RGBA32I:                             return GL_BGRA;
+        case GL_RGBA32UI:                            return GL_BGRA;
+        case GL_COMPRESSED_RED:                      return GL_RED;
+        case GL_COMPRESSED_RG:                       return GL_RG;
+        case GL_COMPRESSED_RGB:                      return GL_RGB;
+        case GL_COMPRESSED_RGBA:                     return GL_RGBA;
+        case GL_COMPRESSED_SRGB:                     return GL_RGB;
+        case GL_COMPRESSED_SRGB_ALPHA:               return GL_RGBA;
+        case GL_COMPRESSED_RED_RGTC1:                return GL_RED;
+        case GL_COMPRESSED_SIGNED_RED_RGTC1:         return GL_RED;
+        case GL_COMPRESSED_RG_RGTC2:                 return GL_RG;
+        case GL_COMPRESSED_SIGNED_RG_RGTC2:          return GL_RG;
+        case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:        return GL_RGB;
+        case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:       return GL_RGBA;
+        case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:       return GL_RGBA;
+        case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:       return GL_RGBA;
+        case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:       return GL_RGB;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT: return GL_RGBA;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT: return GL_RGBA;
+        case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT: return GL_RGBA;
+        default:
+            break;
+    }
+    return GL_NONE;
+}
+
+/// @summary Given an OpenGL sampler type value, determines the corresponding texture bind target identifier.
+/// @param sampler_type The OpenGL sampler type, for example, GL_SAMPLER_2D.
+/// @return The corresponding bind target, for example, GL_TEXTURE_2D.
+internal_function GLenum
+cgGlTextureTarget
+(
+    GLenum sampler_type
+)
+{
+    switch (sampler_type)
+    {
+        case GL_SAMPLER_1D:
+        case GL_INT_SAMPLER_1D:
+        case GL_UNSIGNED_INT_SAMPLER_1D:
+        case GL_SAMPLER_1D_SHADOW:
+            return GL_TEXTURE_1D;
+
+        case GL_SAMPLER_2D:
+        case GL_INT_SAMPLER_2D:
+        case GL_UNSIGNED_INT_SAMPLER_2D:
+        case GL_SAMPLER_2D_SHADOW:
+            return GL_TEXTURE_2D;
+
+        case GL_SAMPLER_3D:
+        case GL_INT_SAMPLER_3D:
+        case GL_UNSIGNED_INT_SAMPLER_3D:
+            return GL_TEXTURE_3D;
+
+        case GL_SAMPLER_CUBE:
+        case GL_INT_SAMPLER_CUBE:
+        case GL_UNSIGNED_INT_SAMPLER_CUBE:
+        case GL_SAMPLER_CUBE_SHADOW:
+            return GL_TEXTURE_CUBE_MAP;
+
+        case GL_SAMPLER_1D_ARRAY:
+        case GL_SAMPLER_1D_ARRAY_SHADOW:
+        case GL_INT_SAMPLER_1D_ARRAY:
+        case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+            return GL_TEXTURE_1D_ARRAY;
+
+        case GL_SAMPLER_2D_ARRAY:
+        case GL_SAMPLER_2D_ARRAY_SHADOW:
+        case GL_INT_SAMPLER_2D_ARRAY:
+        case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+            return GL_TEXTURE_2D_ARRAY;
+
+        case GL_SAMPLER_BUFFER:
+        case GL_INT_SAMPLER_BUFFER:
+        case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+            return GL_TEXTURE_BUFFER;
+
+        case GL_SAMPLER_2D_RECT:
+        case GL_SAMPLER_2D_RECT_SHADOW:
+        case GL_INT_SAMPLER_2D_RECT:
+        case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+            return GL_TEXTURE_RECTANGLE;
+
+        case GL_SAMPLER_2D_MULTISAMPLE:
+        case GL_INT_SAMPLER_2D_MULTISAMPLE:
+        case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+            return GL_TEXTURE_2D_MULTISAMPLE;
+
+        case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+        case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+        case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            return GL_TEXTURE_2D_MULTISAMPLE_ARRAY;
+
+        default:
+            break;
+    }
+    return GL_TEXTURE_1D;
+}
+
+/// @summary Given a value from the DXGI_FORMAT enumeration, determine the appropriate OpenGL format, base format and data type values. This is useful when loading texture data from a DDS container.
+/// @param dxgi A value of the DXGI_FORMAT enumeration (data::dxgi_format_e).
+/// @param out_internalformat On return, stores the corresponding OpenGL internal format.
+/// @param out_baseformat On return, stores the corresponding OpenGL base format (layout).
+/// @param out_datatype On return, stores the corresponding OpenGL data type.
+/// @return true if the input format could be mapped to OpenGL.
+internal_function bool
+cgGlDxgiFormatToGL
+(
+    uint32_t dxgi, 
+    GLenum  &out_internalformat, 
+    GLenum  &out_format, 
+    GLenum  &out_datatype
+)
+{
+    switch (dxgi)
+    {
+        case DXGI_FORMAT_UNKNOWN:
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R1_UNORM:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_AYUV:
+        case DXGI_FORMAT_Y410:
+        case DXGI_FORMAT_Y416:
+        case DXGI_FORMAT_NV12:
+        case DXGI_FORMAT_P010:
+        case DXGI_FORMAT_P016:
+        case DXGI_FORMAT_420_OPAQUE:
+        case DXGI_FORMAT_YUY2:
+        case DXGI_FORMAT_Y210:
+        case DXGI_FORMAT_Y216:
+        case DXGI_FORMAT_NV11:
+        case DXGI_FORMAT_AI44:
+        case DXGI_FORMAT_IA44:
+            break;
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+            out_internalformat = GL_RGBA32F;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_FLOAT;
+            return true;
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+            out_internalformat = GL_RGBA32UI;
+            out_format         = GL_BGRA_INTEGER;
+            out_datatype       = GL_UNSIGNED_INT;
+            return true;
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+            out_internalformat = GL_RGBA32I;
+            out_format         = GL_BGRA_INTEGER;
+            out_datatype       = GL_INT;
+            return true;
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+            out_internalformat = GL_RGB32F;
+            out_format         = GL_BGR;
+            out_datatype       = GL_FLOAT;
+            return true;
+        case DXGI_FORMAT_R32G32B32_UINT:
+            out_internalformat = GL_RGB32UI;
+            out_format         = GL_BGR_INTEGER;
+            out_datatype       = GL_UNSIGNED_INT;
+            return true;
+        case DXGI_FORMAT_R32G32B32_SINT:
+            out_internalformat = GL_RGB32I;
+            out_format         = GL_BGR_INTEGER;
+            out_datatype       = GL_INT;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+            out_internalformat = GL_RGBA16F;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_HALF_FLOAT;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+            out_internalformat = GL_RGBA16;
+            out_format         = GL_BGRA_INTEGER;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+            out_internalformat = GL_RGBA16UI;
+            out_format         = GL_BGRA_INTEGER;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+            out_internalformat = GL_RGBA16_SNORM;
+            out_format         = GL_BGRA_INTEGER;
+            out_datatype       = GL_SHORT;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+            out_internalformat = GL_RGBA16I;
+            out_format         = GL_BGRA_INTEGER;
+            out_datatype       = GL_SHORT;
+            return true;
+        case DXGI_FORMAT_R32G32_FLOAT:
+            out_internalformat = GL_RG32F;
+            out_format         = GL_RG;
+            out_datatype       = GL_FLOAT;
+            return true;
+        case DXGI_FORMAT_R32G32_UINT:
+            out_internalformat = GL_RG32UI;
+            out_format         = GL_RG;
+            out_datatype       = GL_UNSIGNED_INT;
+            return true;
+        case DXGI_FORMAT_R32G32_SINT:
+            out_internalformat = GL_RG32I;
+            out_format         = GL_RG;
+            out_datatype       = GL_INT;
+            return true;
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+            out_internalformat = GL_DEPTH_STENCIL;
+            out_format         = GL_DEPTH_STENCIL;
+            out_datatype       = GL_FLOAT; // ???
+            return true;
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+            out_internalformat = GL_RG32F;
+            out_format         = GL_RG;
+            out_datatype       = GL_FLOAT;
+            return true;
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+            return true;
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+            out_internalformat = GL_RGB10_A2;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_2_10_10_10_REV;
+            return true;
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+            out_internalformat = GL_RGB10_A2UI;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_2_10_10_10_REV;
+            return true;
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+            out_internalformat = GL_R11F_G11F_B10F;
+            out_format         = GL_BGR;
+            out_datatype       = GL_FLOAT; // ???
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+            out_internalformat = GL_RGBA8;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            out_internalformat = GL_SRGB8_ALPHA8;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+            out_internalformat = GL_RGBA8UI;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+            out_internalformat = GL_RGBA8_SNORM;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+            out_internalformat = GL_RGBA8I;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_BYTE;
+            return true;
+        case DXGI_FORMAT_R16G16_FLOAT:
+            out_internalformat = GL_RG16F;
+            out_format         = GL_RG;
+            out_datatype       = GL_HALF_FLOAT;
+            return true;
+        case DXGI_FORMAT_R16G16_UNORM:
+            out_internalformat = GL_RG16;
+            out_format         = GL_RG;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16G16_UINT:
+            out_internalformat = GL_RG16UI;
+            out_format         = GL_RG;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16G16_SNORM:
+            out_internalformat = GL_RG16_SNORM;
+            out_format         = GL_RG;
+            out_datatype       = GL_SHORT;
+            return true;
+        case DXGI_FORMAT_R16G16_SINT:
+            out_internalformat = GL_RG16I;
+            out_format         = GL_RG;
+            out_datatype       = GL_SHORT;
+            return true;
+        case DXGI_FORMAT_D32_FLOAT:
+            out_internalformat = GL_DEPTH_COMPONENT;
+            out_format         = GL_DEPTH_COMPONENT;
+            out_datatype       = GL_FLOAT;
+            return true;
+        case DXGI_FORMAT_R32_FLOAT:
+            out_internalformat = GL_R32F;
+            out_format         = GL_RED;
+            out_datatype       = GL_FLOAT;
+            return true;
+        case DXGI_FORMAT_R32_UINT:
+            out_internalformat = GL_R32UI;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_INT;
+            return true;
+        case DXGI_FORMAT_R32_SINT:
+            out_internalformat = GL_R32I;
+            out_format         = GL_RED;
+            out_datatype       = GL_INT;
+            return true;
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+            out_internalformat = GL_DEPTH_STENCIL;
+            out_format         = GL_DEPTH_STENCIL;
+            out_datatype       = GL_UNSIGNED_INT;
+            return true;
+        case DXGI_FORMAT_R8G8_UNORM:
+            out_internalformat = GL_RG8;
+            out_format         = GL_RG;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_R8G8_UINT:
+            out_internalformat = GL_RG8UI;
+            out_format         = GL_RG;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_R8G8_SNORM:
+            out_internalformat = GL_RG8_SNORM;
+            out_format         = GL_RG;
+            out_datatype       = GL_BYTE;
+            return true;
+        case DXGI_FORMAT_R8G8_SINT:
+            out_internalformat = GL_RG8I;
+            out_format         = GL_RG;
+            out_datatype       = GL_BYTE;
+            return true;
+        case DXGI_FORMAT_R16_FLOAT:
+            out_internalformat = GL_R16F;
+            out_format         = GL_RED;
+            out_datatype       = GL_HALF_FLOAT;
+            return true;
+        case DXGI_FORMAT_D16_UNORM:
+            out_internalformat = GL_DEPTH_COMPONENT;
+            out_format         = GL_DEPTH_COMPONENT;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16_UNORM:
+            out_internalformat = GL_R16;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16_UINT:
+            out_internalformat = GL_R16UI;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_SHORT;
+            return true;
+        case DXGI_FORMAT_R16_SNORM:
+            out_internalformat = GL_R16_SNORM;
+            out_format         = GL_RED;
+            out_datatype       = GL_SHORT;
+            return true;
+        case DXGI_FORMAT_R16_SINT:
+            out_internalformat = GL_R16I;
+            out_format         = GL_RED;
+            out_datatype       = GL_SHORT;
+            return true;
+        case DXGI_FORMAT_R8_UNORM:
+            out_internalformat = GL_R8;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_R8_UINT:
+            out_internalformat = GL_R8UI;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_R8_SNORM:
+            out_internalformat = GL_R8_SNORM;
+            out_format         = GL_RED;
+            out_datatype       = GL_BYTE;
+            return true;
+        case DXGI_FORMAT_R8_SINT:
+            out_internalformat = GL_R8I;
+            out_format         = GL_RED;
+            out_datatype       = GL_BYTE;
+            return true;
+        case DXGI_FORMAT_A8_UNORM:
+            out_internalformat = GL_R8;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+            out_internalformat = GL_RGB9_E5;
+            out_format         = GL_RGB;
+            out_datatype       = GL_UNSIGNED_INT;
+            return true;
+        case DXGI_FORMAT_BC1_UNORM:
+            out_internalformat = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+            out_internalformat = 0x8C4D;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC3_UNORM:
+            out_internalformat = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+            out_internalformat = 0x8C4E;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC5_UNORM:
+            out_internalformat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_B5G6R5_UNORM:
+            out_internalformat = GL_RGB;
+            out_format         = GL_BGR;
+            out_datatype       = GL_UNSIGNED_SHORT_5_6_5_REV;
+            return true;
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+            out_internalformat = GL_RGBA;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_SHORT_1_5_5_5_REV;
+            return true;
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            out_internalformat = GL_RGBA8;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+            out_internalformat = GL_RGBA8;
+            out_format         = GL_BGR;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+            out_internalformat = GL_RGB10_A2;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_2_10_10_10_REV;
+            return true;
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+            out_internalformat = GL_SRGB8_ALPHA8;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            out_internalformat = GL_SRGB8_ALPHA8;
+            out_format         = GL_BGR;
+            out_datatype       = GL_UNSIGNED_INT_8_8_8_8_REV;
+            return true;
+        case DXGI_FORMAT_BC6H_UF16:
+            out_internalformat = 0x8E8F;
+            out_format         = GL_RGB;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC6H_SF16:
+            out_internalformat = 0x8E8E;
+            out_format         = GL_RGB;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC7_UNORM:
+            out_internalformat = 0x8E8C;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            out_internalformat = 0x8E8D;
+            out_format         = GL_RGBA;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_P8:
+            out_internalformat = GL_R8;
+            out_format         = GL_RED;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_A8P8:
+            out_internalformat = GL_RG8;
+            out_format         = GL_RG;
+            out_datatype       = GL_UNSIGNED_BYTE;
+            return true;
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+            out_internalformat = GL_RGBA4;
+            out_format         = GL_BGRA;
+            out_datatype       = GL_UNSIGNED_SHORT_4_4_4_4_REV;
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+
+/// @summary Computes the number of levels in a mipmap chain given the dimensions of the highest resolution level.
+/// @param width The width of the highest resolution level, in pixels.
+/// @param height The height of the highest resolution level, in pixels.
+/// @param slice_count The number of slices of the highest resolution level. For everything except a 3D image, this value should be specified as 1.
+/// @param max_levels The maximum number of levels in the mipmap chain. If there is no limit, this value should be specified as 0.
+internal_function size_t
+cgGlLevelCount
+(
+    size_t width, 
+    size_t height, 
+    size_t slice_count, 
+    size_t max_levels
+)
+{
+    size_t levels = 0;
+    size_t major  = 0;
+
+    // select the largest of (width, height, slice_count):
+    major = (width > height)      ? width : height;
+    major = (major > slice_count) ? major : slice_count;
+    // calculate the number of levels down to 1 in the largest dimension.
+    while (major > 0)
+    {
+        major >>= 1;
+        levels += 1;
+    }
+    if (max_levels == 0) return levels;
+    else return (max_levels < levels) ? max_levels : levels;
+}
+
+/// @summary Computes the dimension (width, height or number of slices) of a particular level in a mipmap chain given the dimension for the highest resolution image.
+/// @param dimension The dimension in the highest resolution image.
+/// @param level_index The index of the target mip-level, with index 0 representing the highest resolution image.
+/// @return The dimension in the specified mip level.
+internal_function size_t
+cgGlLevelDimension
+(
+    size_t dimension, 
+    size_t level_index
+)
+{
+    size_t  l_dimension  = dimension >> level_index;
+    return (l_dimension == 0) ? 1 : l_dimension;
+}
+
+/// @summary Given basic image attributes, builds a complete description of the levels in a mipmap chain.
+/// @param internal_format The OpenGL internal format, for example GL_RGBA. See the documentation for glTexImage2D(), internalFormat argument.
+/// @param data_type The OpenGL data type, for example, GL_UNSIGNED_BYTE.
+/// @param width The width of the highest resolution image, in pixels.
+/// @param height The height of the highest resolution image, in pixels.
+/// @param slice_count The number of slices in the highest resolution image. For all image types other than 3D images, specify 1 for this value.
+/// @param alignment The alignment requirement of the OpenGL implementation, corresponding to the pname of GL_PACK_ALIGNMENT or GL_UNPACK_ALIGNMENT for the glPixelStorei function. The specification default is 4.
+/// @param max_levels The maximum number of levels in the mipmap chain. To describe all possible levels, specify 0 for this value.
+/// @param level_desc The array of level descriptors to populate.
+/*internal_function void
+cgGlDescribeMipmaps
+(
+    GLenum         internal_format, 
+    GLenum         data_type, 
+    size_t         width, 
+    size_t         height, 
+    size_t         slice_count, 
+    size_t         alignment, 
+    size_t         max_levels, 
+    CG_LEVEL_DESC *level_desc
+)
+{
+    size_t slices      = slice_count;
+    GLenum type        = data_type;
+    GLenum format      = internal_format;
+    GLenum layout      = cgGlPixelLayout(format);
+    size_t bytes_per_e = cgGlBytesPerElement(format, type);
+    size_t num_levels  = cgGlLevelCount(width, height, slices, max_levels);
+    for (size_t i = 0; i < num_levels; ++i)
+    {
+        size_t lw = cgGlLevelDimension(width,  i);
+        size_t lh = cgGlLevelDimension(height, i);
+        size_t ls = cgGlLevelDimension(slices, i);
+        level_desc[i].Index           = i;
+        level_desc[i].Width           = cgGlImageDimension(format, lw);
+        level_desc[i].Height          = cgGlImageDimension(format, lh);
+        level_desc[i].Slices          = ls;
+        level_desc[i].BytesPerElement = bytes_per_e;
+        level_desc[i].BytesPerRow     = cgGlBytesPerRow(format, type, level_desc[i].Width, alignment);
+        level_desc[i].BytesPerSlice   = level_desc[i].BytesPerRow * level_desc[i].Height;
+        level_desc[i].Layout          = layout;
+        level_desc[i].Format          = internal_format;
+        level_desc[i].DataType        = data_type;
+    }
+}*/
+
+/// @summary Given basic texture attributes, allocates storage for all levels of a texture, such that the texture is said to be complete. This should only be performed once per-texture. After calling this function, the texture object attributes should be considered immutable. Transfer data to the texture using the gl_transfer_pixels_h2d() function. The wrapping modes are always set to GL_CLAMP_TO_EDGE. The caller is responsible for creating and binding the texture object prior to calling this function.
+/// @param display The display managing the rendering context.
+/// @param target The OpenGL texture target, defining the texture type.
+/// @param internal_format The OpenGL internal format, for example GL_RGBA8.
+/// @param data_type The OpenGL data type, for example, GL_UNSIGNED_INT_8_8_8_8_REV.
+/// @param min_filter The minification filter to use.
+/// @param mag_filter The magnification filter to use.
+/// @param width The width of the highest resolution image, in pixels.
+/// @param height The height of the highest resolution image, in pixels.
+/// @param slice_count The number of slices in the highest resolution image. If the @a target argument specifies an array target, this represents the number of items in the texture array. For 3D textures, it represents the number of slices in the image. For all other types, this value must be 1.
+/// @param max_levels The maximum number of levels in the mipmap chain. To define all possible levels, specify 0 for this value.
+internal_function void
+cgGlTextureStorage
+(
+    CG_DISPLAY *display, 
+    GLenum      target, 
+    GLenum      internal_format, 
+    GLenum      data_type, 
+    GLenum      min_filter, 
+    GLenum      mag_filter, 
+    size_t      width, 
+    size_t      height, 
+    size_t      slice_count, 
+    size_t      max_levels
+)
+{
+    GLenum layout = cgGlPixelLayout(internal_format);
+
+    if (max_levels == 0)
+    {
+        // specify mipmaps all the way down to 1x1x1.
+        max_levels  = cgGlLevelCount(width, height, slice_count, max_levels);
+    }
+
+    // make sure that no PBO is bound as the unpack target.
+    // we don't want to copy data to the texture now.
+    glBindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
+
+    // specify the maximum number of mipmap levels.
+    if (target != GL_TEXTURE_RECTANGLE)
+    {
+        glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(target, GL_TEXTURE_MAX_LEVEL,  GLint(max_levels - 1));
+    }
+    else
+    {
+        // rectangle textures don't support mipmaps.
+        glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(target, GL_TEXTURE_MAX_LEVEL,  0);
+    }
+
+    // specify the filtering and wrapping modes.
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, mag_filter);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(target, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
+    glTexParameteri(target, GL_TEXTURE_WRAP_R,     GL_CLAMP_TO_EDGE);
+
+    // use glTexImage to allocate storage for each mip-level of the texture.
+    switch (target)
+    {
+    case GL_TEXTURE_1D:
+        {
+            for (size_t lod = 0; lod < max_levels; ++lod)
+            {
+                size_t lw = cgGlLevelDimension(width, lod);
+                glTexImage1D(target, GLint(lod), internal_format, GLsizei(lw), 0, layout, data_type, NULL);
+            }
+        }
+        break;
+
+    case GL_TEXTURE_1D_ARRAY:
+        {
+            // 1D array textures specify slice_count for height.
+            for (size_t lod = 0; lod < max_levels; ++lod)
+            {
+                size_t lw = cgGlLevelDimension(width, lod);
+                glTexImage2D(target, GLint(lod), internal_format, GLsizei(lw), GLsizei(slice_count), 0, layout, data_type, NULL);
+            }
+        }
+        break;
+
+    case GL_TEXTURE_RECTANGLE:
+        {
+            // rectangle textures don't support mipmaps.
+            glTexImage2D(target, 0, internal_format, GLsizei(width), GLsizei(height), 0, layout, data_type, NULL);
+        }
+        break;
+
+    case GL_TEXTURE_2D:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+        {
+            for (size_t lod = 0; lod < max_levels; ++lod)
+            {
+                size_t lw = cgGlLevelDimension(width,  lod);
+                size_t lh = cgGlLevelDimension(height, lod);
+                glTexImage2D(target, GLint(lod), internal_format, GLsizei(lw), GLsizei(lh), 0, layout, data_type, NULL);
+            }
+        }
+        break;
+
+    case GL_TEXTURE_2D_ARRAY:
+    case GL_TEXTURE_CUBE_MAP_ARRAY:
+        {
+            // 2D array texture specify slice_count as the number of
+            // items; the number of items is not decreased with LOD.
+            for (size_t lod = 0; lod < max_levels; ++lod)
+            {
+                size_t lw = cgGlLevelDimension(width,  lod);
+                size_t lh = cgGlLevelDimension(height, lod);
+                glTexImage3D(target, GLint(lod), internal_format, GLsizei(lw), GLsizei(lh), GLsizei(slice_count), 0, layout, data_type, NULL);
+            }
+        }
+        break;
+
+    case GL_TEXTURE_3D:
+        {
+            for (size_t lod = 0; lod < max_levels; ++lod)
+            {
+                size_t lw = cgGlLevelDimension(width,       lod);
+                size_t lh = cgGlLevelDimension(height,      lod);
+                size_t ls = cgGlLevelDimension(slice_count, lod);
+                glTexImage3D(target, GLint(lod), internal_format, GLsizei(lw), GLsizei(lh), GLsizei(ls), 0, layout, data_type, NULL);
+            }
+        }
+        break;
+    }
+}
+/*
+/// @summary Copies pixel data from the device (GPU) to the host (CPU). The pixel data consists of the framebuffer contents, or the contents of a single mip-level of a texture image.
+/// @param display The display managing the rendering context.
+/// @param transfer An object describing the transfer operation to execute.
+internal_function void
+cgGlTransferPixelsDeviceToHost
+(
+    CG_DISPLAY            *display, 
+    CG_PIXEL_TRANSFER_D2H *transfer
+)
+{
+    if (transfer->PackBuffer != 0)
+    {
+        // select the PBO as the target of the pack operation.
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, transfer->PackBuffer);
+    }
+    else
+    {
+        // select the client memory as the target of the pack operation.
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    }
+    if (transfer->TargetWidth != transfer->TransferWidth)
+    {
+        // transferring into a sub-rectangle of the image; tell GL how
+        // many pixels are in a single row of the target image.
+        glPixelStorei(GL_PACK_ROW_LENGTH,   GLint(transfer->TargetWidth));
+        glPixelStorei(GL_PACK_IMAGE_HEIGHT, GLint(transfer->TargetHeight));
+    }
+
+    // perform the setup necessary to have GL calculate any byte offsets.
+    if (transfer->TargetX != 0) glPixelStorei(GL_PACK_SKIP_PIXELS, GLint(transfer->TargetX));
+    if (transfer->TargetY != 0) glPixelStorei(GL_PACK_SKIP_ROWS,   GLint(transfer->TargetY));
+    if (transfer->TargetZ != 0) glPixelStorei(GL_PACK_SKIP_IMAGES, GLint(transfer->TargetZ));
+
+    if (cgGlBytesPerBlock(transfer->Format) > 0)
+    {
+        // the texture image is compressed; use glGetCompressedTexImage.
+        switch (transfer->Target)
+        {
+            case GL_TEXTURE_1D:
+            case GL_TEXTURE_2D:
+            case GL_TEXTURE_3D:
+            case GL_TEXTURE_CUBE_MAP_ARRAY:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+                {
+                    glGetCompressedTexImage(transfer->Target, GLint(transfer->SourceIndex), transfer->TransferBuffer);
+                }
+                break;
+        }
+    }
+    else
+    {
+        // the image is not compressed; read the framebuffer with
+        // glReadPixels or the texture image using glGetTexImage.
+        switch (transfer->Target)
+        {
+            case GL_READ_FRAMEBUFFER:
+                {
+                    // remember, x and y identify the lower-left corner.
+                    glReadPixels(GLint(transfer->TransferX), GLint(transfer->TransferY), GLint(transfer->TransferWidth), GLint(transfer->TransferHeight), transfer->Layout, transfer->DataType, transfer->TransferBuffer);
+                }
+                break;
+
+            case GL_TEXTURE_1D:
+            case GL_TEXTURE_2D:
+            case GL_TEXTURE_3D:
+            case GL_TEXTURE_1D_ARRAY:
+            case GL_TEXTURE_2D_ARRAY:
+            case GL_TEXTURE_RECTANGLE:
+            case GL_TEXTURE_CUBE_MAP_ARRAY:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+                {
+                    glGetTexImage(transfer->Target, GLint(transfer->SourceIndex), transfer->Layout, transfer->DataType, transfer->TransferBuffer);
+                }
+                break;
+        }
+    }
+
+    // restore the pack state values to their defaults.
+    if (transfer->PackBuffer  != 0)
+        glBindBuffer(GL_PIXEL_PACK_BUFFER,  0);
+    if (transfer->TargetWidth != transfer->TransferWidth)
+    {
+        glPixelStorei(GL_PACK_ROW_LENGTH,   0);
+        glPixelStorei(GL_PACK_IMAGE_HEIGHT, 0);
+    }
+    if (transfer->TargetX != 0) glPixelStorei(GL_PACK_SKIP_PIXELS,  0);
+    if (transfer->TargetY != 0) glPixelStorei(GL_PACK_SKIP_ROWS,    0);
+    if (transfer->TargetZ != 0) glPixelStorei(GL_PACK_SKIP_IMAGES,  0);
+}
+
+/// @summary Copies pixel data from the host (CPU) to the device (GPU). The pixel data is copied to a single mip-level of a texture image.
+/// @param display The display managing the rendering context.
+/// @param transfer An object describing the transfer operation to execute.
+internal_function void
+cgGlPixelTransferHostToDevice
+(
+    CG_DISPLAY            *display, 
+    CG_PIXEL_TRANSFER_H2D *transfer
+)
+{
+    if (transfer->UnpackBuffer != 0)
+    {   // select the PBO as the source of the unpack operation.
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, transfer->UnpackBuffer);
+    }
+    else
+    {   // select the client memory as the source of the unpack operation.
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    }
+    if (transfer->SourceWidth != transfer->TransferWidth)
+    {   // transferring a sub-rectangle of the image; tell GL how many
+        // pixels are in a single row of the source image.
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, GLint(transfer->SourceWidth));
+    }
+    if (transfer->TransferSlices > 1)
+    {   // transferring an image volume; tell GL how many rows per-slice
+        // in the source image, since we may only be transferring a sub-volume.
+        glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, GLint(transfer->SourceHeight));
+    }
+
+    // perform the setup necessary to have GL calculate any byte offsets.
+    if (transfer->SourceX != 0) glPixelStorei(GL_UNPACK_SKIP_PIXELS, GLint(transfer->SourceX));
+    if (transfer->SourceY != 0) glPixelStorei(GL_UNPACK_SKIP_ROWS,   GLint(transfer->SourceY));
+    if (transfer->SourceZ != 0) glPixelStorei(GL_UNPACK_SKIP_IMAGES, GLint(transfer->SourceZ));
+
+    if (cgGlBytesPerBlock(transfer->Format) > 0)
+    {
+        // the image is compressed; use glCompressedTexSubImage to transfer.
+        switch (transfer->Target)
+        {
+            case GL_TEXTURE_1D:
+                {
+                    glCompressedTexSubImage1D(transfer->Target, GLint(transfer->TargetIndex), GLint(transfer->TargetX), GLsizei(transfer->TransferWidth), transfer->Format, GLsizei(transfer->TransferSize), transfer->TransferBuffer);
+                }
+                break;
+
+            case GL_TEXTURE_2D:
+            case GL_TEXTURE_1D_ARRAY:
+            case GL_TEXTURE_RECTANGLE:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+                {
+                    glCompressedTexSubImage2D(transfer->Target, GLint(transfer->TargetIndex), GLint(transfer->TargetX), GLint(transfer->TargetY), GLsizei(transfer->TransferWidth), GLsizei(transfer->TransferHeight), transfer->Format, GLsizei(transfer->TransferSize), transfer->TransferBuffer);
+                }
+                break;
+
+            case GL_TEXTURE_3D:
+            case GL_TEXTURE_2D_ARRAY:
+            case GL_TEXTURE_CUBE_MAP_ARRAY:
+                {
+                    glCompressedTexSubImage3D(transfer->Target, GLint(transfer->TargetIndex), GLint(transfer->TargetX), GLint(transfer->TargetY), GLint(transfer->TargetZ), GLsizei(transfer->TransferWidth), GLsizei(transfer->TransferHeight), GLsizei(transfer->TransferSlices), transfer->Format, GLsizei(transfer->TransferSize), transfer->TransferBuffer);
+                }
+                break;
+        }
+    }
+    else
+    {
+        // the image is not compressed, use glTexSubImage to transfer data.
+        switch (transfer->Target)
+        {
+            case GL_TEXTURE_1D:
+                {
+                    glTexSubImage1D(transfer->Target, GLint(transfer->TargetIndex), GLint(transfer->TargetX), GLsizei(transfer->TransferWidth), transfer->Format, transfer->DataType, transfer->TransferBuffer);
+                }
+                break;
+
+            case GL_TEXTURE_2D:
+            case GL_TEXTURE_1D_ARRAY:
+            case GL_TEXTURE_RECTANGLE:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+                {
+                    glTexSubImage2D(transfer->Target, GLint(transfer->TargetIndex), GLint(transfer->TargetX), GLint(transfer->TargetY), GLsizei(transfer->TransferWidth), GLsizei(transfer->TransferHeight), transfer->Format, transfer->DataType, transfer->TransferBuffer);
+                }
+                break;
+
+            case GL_TEXTURE_3D:
+            case GL_TEXTURE_2D_ARRAY:
+            case GL_TEXTURE_CUBE_MAP_ARRAY:
+                {
+                    glTexSubImage3D(transfer->Target, GLint(transfer->TargetIndex), GLint(transfer->TargetX), GLint(transfer->TargetY), GLint(transfer->TargetZ), GLsizei(transfer->TransferWidth), GLsizei(transfer->TransferHeight), GLsizei(transfer->TransferSlices), transfer->Format, transfer->DataType, transfer->TransferBuffer);
+                }
+                break;
+        }
+    }
+
+    // restore the unpack state values to their defaults.
+    if (transfer->UnpackBuffer  != 0)
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER,  0);
+    if (transfer->SourceWidth   != transfer->TransferWidth)
+        glPixelStorei(GL_UNPACK_ROW_LENGTH,   0);
+    if (transfer->TransferSlices > 1)
+        glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+    if (transfer->SourceX != 0)
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS,  0);
+    if (transfer->SourceY != 0)
+        glPixelStorei(GL_UNPACK_SKIP_ROWS,    0);
+    if (transfer->SourceZ != 0)
+        glPixelStorei(GL_UNPACK_SKIP_IMAGES,  0);
+}*/
+
+/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms and samplers, allowing for more efficient look-up by name.
+/// @param name A NULL-terminated ASCII string identifier.
+/// @return A 32-bit unsigned integer hash of the name.
+internal_function uint32_t 
+cgGlslName
+(
+    char const *name
+)
+{
+    #define HAS_NULL_BYTE(x) (((x) - 0x01010101) & (~(x) & 0x80808080))
+    #define ROTL32(x, y)     _rotl((x), (y))
+
+    uint32_t hash = 0;
+    if (name != NULL)
+    {
+        // hash the majority of the data in 4-byte chunks.
+        while (!HAS_NULL_BYTE(*((uint32_t*)name)))
+        {
+            hash  = ROTL32(hash, 7) + name[0];
+            hash  = ROTL32(hash, 7) + name[1];
+            hash  = ROTL32(hash, 7) + name[2];
+            hash  = ROTL32(hash, 7) + name[3];
+            name += 4;
+        }
+        // hash the remaining 0-3 bytes.
+        while (*name) hash = ROTL32(hash, 7) + *name++;
+    }
+    #undef HAS_NULL_BYTE
+    #undef ROTL32
+    return hash;
+}
+
+/// @summary Determines whether an identifier would be considered a GLSL built- in value; that is, whether the identifier starts with 'gl_'.
+/// @param name A NULL-terminated ASCII string identifier.
+/// @return true if @a name starts with 'gl_'.
+internal_function bool 
+cgGlslBuiltIn
+(
+    char const *name
+)
+{
+    char prefix[4] = {'g','l','_','\0'};
+    return (strncmp(name, prefix, 3) == 0);
+}
+
+/// @summary Fills a memory buffer with a checkerboard pattern. This is useful for indicating uninitialized textures and for testing. The image internal format is expected to be GL_RGBA, data type GL_UNSIGNED_INT_8_8_8_8_REV, and the data is written using the native system byte ordering (GL_BGRA).
+/// @param width The image width, in pixels.
+/// @param height The image height, in pixels.
+/// @param alpha The value to write to the alpha channel, in [0, 1].
+/// @param buffer The buffer to which image data will be written.
+internal_function void
+cgCheckerFillRGBA
+(
+    size_t width, 
+    size_t height, 
+    float  alpha, 
+    void  *buffer
+)
+{
+    uint8_t  a = (uint8_t)((alpha - 0.5f) * 255.0f);
+    uint8_t *p = (uint8_t*) buffer;
+    for (size_t i = 0;  i < height; ++i)
+    {
+        for (size_t j = 0; j < width; ++j)
+        {
+            uint8_t v = ((((i & 0x8) == 0)) ^ ((j & 0x8) == 0)) ? 1 : 0;
+            *p++  = v * 0xFF;
+            *p++  = v ? 0x00 : 0xFF;
+            *p++  = v * 0xFF;
+            *p++  = a;
+        }
+    }
+}
+
 /// @summary Create a new logical device for each device partition and update the context device table.
 /// @param ctx The CGFX context to update.
 /// @param device The CG_DEVICE object representing the parent device.
@@ -4265,6 +5831,141 @@ cgCreateKernel
         return CG_INVALID_HANDLE;
     }
     return handle;
+}
+
+/// @summary Initialize a blend state descriptor such that alpha blending is disabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int 
+cgBlendStateInitNone
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = false;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendColor      = CG_BLEND_FACTOR_ZERO;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_ZERO;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a blend state descriptor such that standard texture transparency is enabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitAlpha
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = true;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_SRC_COLOR;
+    state.DstBlendColor      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_SRC_ALPHA;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a blend state descriptor such that additive alpha blending is enabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitAdditive
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = true;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_SRC_COLOR;
+    state.DstBlendColor      = CG_BLEND_FACTOR_ONE;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_SRC_ALPHA;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_ONE;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @sumary Initialize a blend state descriptor such that premultiplied alpha blending is enabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitPremultiplied
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = true;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendColor      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a rasterizer state descriptor to the default values.
+/// @param state The fixed-function rasterizer state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgRasterStateInitDefault
+(
+    cg_raster_state_t &state
+)
+{
+    state.FillMode  = CG_FILL_SOLID;
+    state.CullMode  = CG_CULL_BACK;
+    state.FrontFace = CG_WINDING_CCW;
+    state.DepthBias = 0;
+    state.SlopeScaledDepthBias = 0.0f;
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a depth-stencil state descriptor to the default values.
+/// @param state The fixed-function depth and stencil test state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgDepthStencilStateInitDefault
+(
+    cg_depth_stencil_state_t &state
+)
+{
+    state.DepthTestEnable     = false;
+    state.DepthWriteEnable    = false;
+    state.DepthBoundsEnable   = false;
+    state.DepthTestFunction   = CG_COMPARE_LESS;
+    state.DepthMin            = 0.0f;
+    state.DepthMax            = 1.0f;
+    state.StencilTestEnable   = false;
+    state.StencilTestFunction = CG_COMPARE_ALWAYS;
+    state.StencilFailOp       = CG_STENCIL_OP_KEEP;
+    state.StencilPassZPassOp  = CG_STENCIL_OP_KEEP;
+    state.StencilPassZFailOp  = CG_STENCIL_OP_KEEP;
+    state.StencilReadMask     = 0xFF;
+    state.StencilWriteMask    = 0xFF;
+    state.StencilReference    = 0x00;
+    return CG_SUCCESS;
 }
 
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.
