@@ -81,8 +81,8 @@ internal_function void* CG_API
 cgHostMemAllocNoOp
 (
     size_t    size,
-    size_t    alignment, 
-    int       type, 
+    size_t    alignment,
+    int       type,
     uintptr_t user_data
 )
 {
@@ -103,8 +103,8 @@ internal_function void* CG_API
 cgHostMemAllocStdC
 (
     size_t    size,
-    size_t    alignment, 
-    int       type, 
+    size_t    alignment,
+    int       type,
     uintptr_t user_data
 )
 {
@@ -123,10 +123,10 @@ cgHostMemAllocStdC
 internal_function void CG_API
 cgHostMemFreeNoOp
 (
-    void     *address, 
-    size_t    size, 
-    size_t    alignment, 
-    int       type, 
+    void     *address,
+    size_t    size,
+    size_t    alignment,
+    int       type,
     uintptr_t user_data
 )
 {
@@ -146,10 +146,10 @@ cgHostMemFreeNoOp
 internal_function void CG_API
 cgHostMemFreeStdC
 (
-    void     *address, 
-    size_t    size, 
-    size_t    alignment, 
-    int       type, 
+    void     *address,
+    size_t    size,
+    size_t    alignment,
+    int       type,
     uintptr_t user_data
 )
 {
@@ -167,7 +167,7 @@ cgHostMemFreeStdC
 internal_function int
 cgSetupUserHostAllocator
 (
-    cg_allocation_callbacks_t *alloc_cb, 
+    cg_allocation_callbacks_t *alloc_cb,
     CG_HOST_ALLOCATOR         *alloc_fn
 )
 {
@@ -179,8 +179,8 @@ cgSetupUserHostAllocator
     {   // the new values must exactly match the current values.
         if (alloc_cb == NULL)
         {   // check against the default allocator implementation.
-            if (alloc_fn->Allocate == cgHostMemAllocStdC && 
-                alloc_fn->Release  == cgHostMemFreeStdC  && 
+            if (alloc_fn->Allocate == cgHostMemAllocStdC &&
+                alloc_fn->Release  == cgHostMemFreeStdC  &&
                 alloc_fn->UserData ==(uintptr_t) 0)
             {   // the setup matches.
                 return CG_SUCCESS;
@@ -189,8 +189,8 @@ cgSetupUserHostAllocator
         }
         else
         {   // check against the current user allocator implementation.
-            if (alloc_fn->Allocate == alloc_cb->Allocate && 
-                alloc_fn->Release  == alloc_cb->Release  && 
+            if (alloc_fn->Allocate == alloc_cb->Allocate &&
+                alloc_fn->Release  == alloc_cb->Release  &&
                 alloc_fn->UserData == alloc_cb->UserData)
             {   // the setup matches.
                 return CG_SUCCESS;
@@ -235,10 +235,10 @@ cgDeleteUserHostAllocator
 /// @param search The string to search.
 /// @param find The string to locate within the search string.
 /// @return A pointer to the start of the first match, or NULL.
-internal_function char const* 
+internal_function char const*
 cgStristr
 (
-    char const *search, 
+    char const *search,
     char const *find
 )
 {
@@ -288,8 +288,8 @@ cgStristr
 internal_function char*
 cgStrdup
 (
-    CG_CONTEXT *ctx, 
-    char const *str, 
+    CG_CONTEXT *ctx,
+    char const *str,
     int         type
 )
 {
@@ -309,12 +309,12 @@ cgStrdup
 /// @param param The OpenCL parameter identifier to query.
 /// @param type The CGFX allocation type, one of cg_allocation_type_e.
 /// @return A pointer to the NULL-terminated ASCII string, or NULL.
-internal_function char* 
+internal_function char*
 cgClPlatformString
 (
     CG_CONTEXT      *ctx,
-    cl_platform_id   id, 
-    cl_platform_info param, 
+    cl_platform_id   id,
+    cl_platform_info param,
     int              type
 )
 {
@@ -334,12 +334,12 @@ cgClPlatformString
 /// @param param The OpenCL parameter identifier to query.
 /// @param type The CGFX allocation type, one of cg_allocation_type_e.
 /// @return A pointer to the NULL-terminated ASCII string, or NULL.
-internal_function char* 
+internal_function char*
 cgClDeviceString
 (
     CG_CONTEXT    *ctx,
-    cl_device_id   id, 
-    cl_device_info param, 
+    cl_device_id   id,
+    cl_device_info param,
     int            type
 )
 {
@@ -362,9 +362,9 @@ cgClDeviceString
 internal_function char*
 cgClKernelArgName
 (
-    CG_CONTEXT *ctx, 
-    cl_kernel   kernel, 
-    cl_uint     index, 
+    CG_CONTEXT *ctx,
+    cl_kernel   kernel,
+    cl_uint     index,
     int         type
 )
 {
@@ -385,7 +385,7 @@ cgClKernelArgName
 internal_function void
 cgClFreeString
 (
-    CG_CONTEXT *ctx, 
+    CG_CONTEXT *ctx,
     char       *str,
     int         type
 )
@@ -396,10 +396,10 @@ cgClFreeString
 /// @summary Determine whether an OpenCL platform or device extension is supported.
 /// @param extension_name A NULL-terminated ASCII string specifying the OpenCL extension name to query.
 /// @param extension_list A NULL-terminated ASCII string of space-delimited OpenCL extension names supported by the platform or device.
-internal_function bool 
+internal_function bool
 cgClIsExtensionSupported
 (
-    char const *extension_name, 
+    char const *extension_name,
     char const *extension_list
 )
 {
@@ -442,8 +442,8 @@ internal_function bool
 cgClDeviceVersion
 (
     CG_CONTEXT  *ctx,
-    cl_device_id device, 
-    int         &major, 
+    cl_device_id device,
+    int         &major,
     int         &minor
 )
 {
@@ -482,7 +482,7 @@ cgClDeviceVersion
 internal_function bool
 cgClIsVersionSupported
 (
-    int major, 
+    int major,
     int minor
 )
 {
@@ -525,7 +525,7 @@ cgClDeviceCapsFree
 internal_function void
 cgClDeviceCapsQuery
 (
-    CG_CONTEXT     *ctx, 
+    CG_CONTEXT     *ctx,
     CL_DEVICE_CAPS *caps,
     cl_device_id    device
 )
@@ -534,7 +534,7 @@ cgClDeviceCapsQuery
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, sizeof(mid), &mid, NULL);
     caps->MaxWorkItemDimension = mid;
     caps->MaxWorkItemSizes = (size_t*) cgAllocateHostMemory(&ctx->HostAllocator, mid * sizeof(size_t), 0, CG_ALLOCATION_TYPE_INTERNAL);
-    
+
     // some OpenCL drivers don't properly zero-terminate lists, so ensure the memory is initialized:
     memset(caps->PartitionTypes  , 0, 4 * sizeof(cl_device_partition_property));
     memset(caps->AffinityDomains , 0, 7 * sizeof(cl_device_affinity_domain));
@@ -611,7 +611,7 @@ cgClDeviceCapsQuery
 internal_function void
 cgDeleteDevice
 (
-    CG_CONTEXT     *ctx, 
+    CG_CONTEXT     *ctx,
     CG_DEVICE      *device
 )
 {
@@ -638,7 +638,7 @@ cgDeleteDevice
 internal_function void
 cgDeleteDisplay
 (
-    CG_CONTEXT    *ctx, 
+    CG_CONTEXT    *ctx,
     CG_DISPLAY    *display
 )
 {   UNREFERENCED_PARAMETER(ctx);
@@ -659,7 +659,7 @@ cgDeleteDisplay
 internal_function void
 cgDeleteQueue
 (
-    CG_CONTEXT *ctx, 
+    CG_CONTEXT *ctx,
     CG_QUEUE   *queue
 )
 {   UNREFERENCED_PARAMETER(ctx);
@@ -674,7 +674,7 @@ cgDeleteQueue
 internal_function void
 cgDeleteCmdBuffer
 (
-    CG_CONTEXT    *ctx, 
+    CG_CONTEXT    *ctx,
     CG_CMD_BUFFER *cmdbuf
 )
 {   UNREFERENCED_PARAMETER(ctx);
@@ -745,11 +745,11 @@ cgDeleteKernel
 internal_function int
 cgAllocExecutionGroup
 (
-    CG_CONTEXT    *ctx, 
+    CG_CONTEXT    *ctx,
     CG_EXEC_GROUP *group,
-    cg_handle_t    root_device, 
-    cg_handle_t   *device_list, 
-    size_t         device_count, 
+    cg_handle_t    root_device,
+    cg_handle_t   *device_list,
+    size_t         device_count,
     size_t         context_count
 )
 {
@@ -871,7 +871,7 @@ error_cleanup:
 internal_function void
 cgDeleteExecutionGroup
 (
-    CG_CONTEXT    *ctx, 
+    CG_CONTEXT    *ctx,
     CG_EXEC_GROUP *group
 )
 {
@@ -906,8 +906,8 @@ cgDeleteExecutionGroup
 internal_function CG_CONTEXT*
 cgCreateContext
 (
-    cg_application_info_t const  *app_info, 
-    cg_allocation_callbacks_t    *alloc_cb, 
+    cg_application_info_t const  *app_info,
+    cg_allocation_callbacks_t    *alloc_cb,
     int                          &result
 )
 {
@@ -1001,7 +1001,7 @@ cgGetCpuCounts
     uint8_t *bufferp     = NULL;
     uint8_t *buffere     = NULL;
     DWORD    buffer_size = 0;
-    
+
     // figure out the amount of space required, and allocate a temporary buffer:
     GetLogicalProcessorInformationEx(RelationAll, NULL, &buffer_size);
     if ((lpibuf = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*) cgAllocateHostMemory(&ctx->HostAllocator, size_t(buffer_size), 0, CG_ALLOCATION_TYPE_TEMP)) == NULL)
@@ -1064,10 +1064,10 @@ cgGetCpuCounts
 internal_function bool
 cgClDoesDeviceExist
 (
-    CG_CONTEXT    *ctx, 
-    cl_platform_id platform, 
-    cl_device_id   device, 
-    size_t        &index, 
+    CG_CONTEXT    *ctx,
+    cl_platform_id platform,
+    cl_device_id   device,
+    size_t        &index,
     bool           check
 )
 {
@@ -1077,7 +1077,7 @@ cgClDoesDeviceExist
     }
     for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
     {
-        if (ctx->DeviceTable.Objects[i].PlatformId == platform && 
+        if (ctx->DeviceTable.Objects[i].PlatformId == platform &&
             ctx->DeviceTable.Objects[i].DeviceId   == device)
         {
             index = i;
@@ -1121,8 +1121,8 @@ cgClEnumerateDevices
     clGetPlatformIDs(total_platforms, platforms, NULL);
 
     // enumerate the devices in each supported platform:
-    for (size_t platform_index = 0, platform_count = size_t(total_platforms); 
-                platform_index <    platform_count; 
+    for (size_t platform_index = 0, platform_count = size_t(total_platforms);
+                platform_index <    platform_count;
               ++platform_index)
     {   cl_platform_id platform  =  platforms[platform_index];
 
@@ -1172,7 +1172,7 @@ cgClEnumerateDevices
 
             // this device meets the CGFX requirements for use; create an object:
             CG_DEVICE dev;
-            
+
             // save basic device information.
             dev.ExecutionGroup   = CG_INVALID_HANDLE;
 
@@ -1244,9 +1244,9 @@ cleanup:
 internal_function bool
 cgGlDoesDisplayExist
 (
-    CG_CONTEXT  *ctx, 
-    TCHAR const *display_name, 
-    size_t      &index, 
+    CG_CONTEXT  *ctx,
+    TCHAR const *display_name,
+    size_t      &index,
     bool         check
 )
 {
@@ -1277,10 +1277,10 @@ cgGlDoesDisplayExist
 internal_function bool
 cgGlInitializeWGLEW
 (
-    CG_DISPLAY *display, 
-    int         x, 
-    int         y, 
-    int         w, 
+    CG_DISPLAY *display,
+    int         x,
+    int         y,
+    int         w,
     int         h
 )
 {
@@ -1292,8 +1292,8 @@ cgGlInitializeWGLEW
     bool res = true;
     int  fmt = 0;
 
-    // create a dummy window, pixel format and rendering context and 
-    // make them current so we can retrieve the wgl extension entry 
+    // create a dummy window, pixel format and rendering context and
+    // make them current so we can retrieve the wgl extension entry
     // points. in order to create a rendering context, the pixel format
     // must be set on a window, and Windows only allows the pixel format
     // to be set once for a given window - which is dumb.
@@ -1306,15 +1306,15 @@ cgGlInitializeWGLEW
         res  = false; goto cleanup;
     }
     // fill out a PIXELFORMATDESCRIPTOR using common pixel format attributes.
-    memset(&pfd,   0, sizeof(PIXELFORMATDESCRIPTOR)); 
-    pfd.nSize       = sizeof(PIXELFORMATDESCRIPTOR); 
-    pfd.nVersion    = 1; 
-    pfd.dwFlags     = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW; 
-    pfd.iPixelType  = PFD_TYPE_RGBA; 
-    pfd.cColorBits  = 32; 
-    pfd.cDepthBits  = 24; 
+    memset(&pfd,   0, sizeof(PIXELFORMATDESCRIPTOR));
+    pfd.nSize       = sizeof(PIXELFORMATDESCRIPTOR);
+    pfd.nVersion    = 1;
+    pfd.dwFlags     = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
+    pfd.iPixelType  = PFD_TYPE_RGBA;
+    pfd.cColorBits  = 32;
+    pfd.cDepthBits  = 24;
     pfd.cStencilBits=  8;
-    pfd.iLayerType  = PFD_MAIN_PLANE; 
+    pfd.iLayerType  = PFD_MAIN_PLANE;
     if ((fmt = ChoosePixelFormat(dc, &pfd)) == 0)
     {   // unable to find a matching pixel format - can't create an OpenGL rendering context.
         res  = false; goto cleanup;
@@ -1355,7 +1355,7 @@ cleanup:
 internal_function int
 cgGlCreateRenderingContext
 (
-    CG_CONTEXT *ctx, 
+    CG_CONTEXT *ctx,
     CG_DISPLAY *display
 )
 {
@@ -1368,7 +1368,7 @@ cgGlCreateRenderingContext
     if (display->DisplayRC != NULL)
         return CG_SUCCESS;
 
-    // initialize wgl GLEW function pointers to assist with pixel format 
+    // initialize wgl GLEW function pointers to assist with pixel format
     // selection and  OpenGL rendering context creation.
     if (!cgGlInitializeWGLEW(display, x, y, w, h))
     {   // can't initialize GLEW, so only OpenGL 1.1 would be available.
@@ -1390,17 +1390,17 @@ cgGlCreateRenderingContext
     if (WGLEW_ARB_pixel_format)
     {   // use the more recent method to find a pixel format.
         UINT fmt_count     = 0;
-        int  fmt_attribs[] = 
+        int  fmt_attribs[] =
         {
-            WGL_SUPPORT_OPENGL_ARB,                      GL_TRUE, 
-            WGL_DRAW_TO_WINDOW_ARB,                      GL_TRUE, 
-            WGL_DEPTH_BITS_ARB    ,                           24, 
+            WGL_SUPPORT_OPENGL_ARB,                      GL_TRUE,
+            WGL_DRAW_TO_WINDOW_ARB,                      GL_TRUE,
+            WGL_DEPTH_BITS_ARB    ,                           24,
             WGL_STENCIL_BITS_ARB  ,                            8,
-            WGL_RED_BITS_ARB      ,                            8, 
+            WGL_RED_BITS_ARB      ,                            8,
             WGL_GREEN_BITS_ARB    ,                            8,
             WGL_BLUE_BITS_ARB     ,                            8,
             WGL_PIXEL_TYPE_ARB    ,            WGL_TYPE_RGBA_ARB,
-            WGL_ACCELERATION_ARB  ,    WGL_FULL_ACCELERATION_ARB, 
+            WGL_ACCELERATION_ARB  ,    WGL_FULL_ACCELERATION_ARB,
             //WGL_SAMPLE_BUFFERS_ARB,                     GL_FALSE, /* GL_TRUE to enable MSAA */
             //WGL_SAMPLES_ARB       ,                            1, /* ex. 4 = 4x MSAA        */
             0
@@ -1412,12 +1412,12 @@ cgGlCreateRenderingContext
     }
     else
     {   // use the legacy method to find the pixel format.
-        pfd.dwFlags      = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW; 
-        pfd.iPixelType   = PFD_TYPE_RGBA; 
-        pfd.cColorBits   = 32; 
-        pfd.cDepthBits   = 24; 
+        pfd.dwFlags      = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
+        pfd.iPixelType   = PFD_TYPE_RGBA;
+        pfd.cColorBits   = 32;
+        pfd.cDepthBits   = 24;
         pfd.cStencilBits =  8;
-        pfd.iLayerType   = PFD_MAIN_PLANE; 
+        pfd.iLayerType   = PFD_MAIN_PLANE;
         if ((fmt = ChoosePixelFormat(win_dc, &pfd)) == 0)
         {   // unable to find a matching pixel format - can't create an OpenGL rendering context.
             return CG_NO_PIXELFORMAT;
@@ -1430,16 +1430,16 @@ cgGlCreateRenderingContext
         return CG_BAD_PIXELFORMAT;
     }
 
-    // attempt to create the OpenGL rendering context. we can either use 
+    // attempt to create the OpenGL rendering context. we can either use
     // the new method, or if that's not available, fall back to the old way.
     if (WGLEW_ARB_create_context)
     {
         if (WGLEW_ARB_create_context_profile)
         {
-            int  rc_attribs[] = 
+            int  rc_attribs[] =
             {
-                WGL_CONTEXT_MAJOR_VERSION_ARB,    CG_OPENGL_VERSION_MAJOR, 
-                WGL_CONTEXT_MINOR_VERSION_ARB,    CG_OPENGL_VERSION_MINOR, 
+                WGL_CONTEXT_MAJOR_VERSION_ARB,    CG_OPENGL_VERSION_MAJOR,
+                WGL_CONTEXT_MINOR_VERSION_ARB,    CG_OPENGL_VERSION_MINOR,
                 WGL_CONTEXT_PROFILE_MASK_ARB ,    WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
 #ifdef _DEBUG
                 WGL_CONTEXT_FLAGS_ARB        ,    WGL_CONTEXT_DEBUG_BIT_ARB,
@@ -1453,7 +1453,7 @@ cgGlCreateRenderingContext
         }
         else
         {
-            int  rc_attribs[] = 
+            int  rc_attribs[] =
             {
                 WGL_CONTEXT_MAJOR_VERSION_ARB,    CG_OPENGL_VERSION_MAJOR,
                 WGL_CONTEXT_MINOR_VERSION_ARB,    CG_OPENGL_VERSION_MINOR,
@@ -1475,7 +1475,7 @@ cgGlCreateRenderingContext
             return CG_NO_GLCONTEXT;
         }
     }
-    
+
     // make the rendering context current.
     if (wglMakeCurrent(win_dc, gl_rc) != TRUE)
     {   // unable to activate the OpenGL rendering context on the current thread.
@@ -1505,8 +1505,8 @@ cgGlCreateRenderingContext
     if (WGLEW_EXT_swap_control)
     {
         if (WGLEW_EXT_swap_control_tear)
-        {   // SwapBuffers synchronizes with the vertical retrace interval, 
-            // except when the interval is missed, in which case the swap 
+        {   // SwapBuffers synchronizes with the vertical retrace interval,
+            // except when the interval is missed, in which case the swap
             // is performed immediately.
             wglSwapIntervalEXT(-1);
         }
@@ -1520,10 +1520,10 @@ cgGlCreateRenderingContext
     for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
     {
         CG_DEVICE            *device  = &ctx->DeviceTable.Objects[i];
-        cl_context_properties props[] = 
+        cl_context_properties props[] =
         {
-            CL_CONTEXT_PLATFORM, (cl_context_properties) device->PlatformId, 
-            CL_GL_CONTEXT_KHR  , (cl_context_properties) gl_rc, 
+            CL_CONTEXT_PLATFORM, (cl_context_properties) device->PlatformId,
+            CL_GL_CONTEXT_KHR  , (cl_context_properties) gl_rc,
             CL_WGL_HDC_KHR     , (cl_context_properties) win_dc,
             0
         };
@@ -1554,7 +1554,7 @@ cgGlCreateRenderingContext
         if (device_id != device->DeviceId)
             continue; // no, so keep looking.
 
-        // we've found a match. 
+        // we've found a match.
         if (device->DisplayRC != NULL)
         {   // delete the RC we just created and use the active device RC.
             wglMakeCurrent(NULL, NULL);
@@ -1664,7 +1664,7 @@ cgGlEnumerateDisplays
         {   // unable to create the display window. skip the display.
             continue;
         }
-        
+
         // create the display object.
         CG_DISPLAY           disp;
         disp.Ordinal       = ordinal;
@@ -1804,7 +1804,7 @@ cgGlBytesPerBlock
 internal_function size_t
 cgGlBytesPerElement
 (
-    GLenum internal_format, 
+    GLenum internal_format,
     GLenum data_type
 )
 {
@@ -1908,9 +1908,9 @@ cgGlBytesPerElement
 internal_function size_t
 cgGlBytesPerRow
 (
-    GLenum internal_format, 
-    GLenum data_type, 
-    size_t width, 
+    GLenum internal_format,
+    GLenum data_type,
+    size_t width,
     size_t alignment
 )
 {
@@ -2016,10 +2016,10 @@ cgGlBytesPerRow
 internal_function size_t
 cgGlBytesPerSlice
 (
-    GLenum internal_format, 
-    GLenum data_type, 
-    size_t width, 
-    size_t height, 
+    GLenum internal_format,
+    GLenum data_type,
+    size_t width,
+    size_t height,
     size_t alignment
 )
 {
@@ -2125,7 +2125,7 @@ cgGlBytesPerSlice
 internal_function size_t
 cgGlImageDimension
 (
-    GLenum internal_format, 
+    GLenum internal_format,
     size_t dimension
 )
 {
@@ -2333,9 +2333,9 @@ cgGlTextureTarget
 internal_function bool
 cgGlDxgiFormatToGL
 (
-    uint32_t dxgi, 
-    GLenum  &out_internalformat, 
-    GLenum  &out_format, 
+    uint32_t dxgi,
+    GLenum  &out_internalformat,
+    GLenum  &out_format,
     GLenum  &out_datatype
 )
 {
@@ -2749,9 +2749,9 @@ cgGlDxgiFormatToGL
 internal_function size_t
 cgGlLevelCount
 (
-    size_t width, 
-    size_t height, 
-    size_t slice_count, 
+    size_t width,
+    size_t height,
+    size_t slice_count,
     size_t max_levels
 )
 {
@@ -2778,7 +2778,7 @@ cgGlLevelCount
 internal_function size_t
 cgGlLevelDimension
 (
-    size_t dimension, 
+    size_t dimension,
     size_t level_index
 )
 {
@@ -2798,13 +2798,13 @@ cgGlLevelDimension
 /*internal_function void
 cgGlDescribeMipmaps
 (
-    GLenum         internal_format, 
-    GLenum         data_type, 
-    size_t         width, 
-    size_t         height, 
-    size_t         slice_count, 
-    size_t         alignment, 
-    size_t         max_levels, 
+    GLenum         internal_format,
+    GLenum         data_type,
+    size_t         width,
+    size_t         height,
+    size_t         slice_count,
+    size_t         alignment,
+    size_t         max_levels,
     CG_LEVEL_DESC *level_desc
 )
 {
@@ -2846,15 +2846,15 @@ cgGlDescribeMipmaps
 internal_function void
 cgGlTextureStorage
 (
-    CG_DISPLAY *display, 
-    GLenum      target, 
-    GLenum      internal_format, 
-    GLenum      data_type, 
-    GLenum      min_filter, 
-    GLenum      mag_filter, 
-    size_t      width, 
-    size_t      height, 
-    size_t      slice_count, 
+    CG_DISPLAY *display,
+    GLenum      target,
+    GLenum      internal_format,
+    GLenum      data_type,
+    GLenum      min_filter,
+    GLenum      mag_filter,
+    size_t      width,
+    size_t      height,
+    size_t      slice_count,
     size_t      max_levels
 )
 {
@@ -2972,7 +2972,7 @@ cgGlTextureStorage
 internal_function void
 cgGlTransferPixelsDeviceToHost
 (
-    CG_DISPLAY            *display, 
+    CG_DISPLAY            *display,
     CG_PIXEL_TRANSFER_D2H *transfer
 )
 {
@@ -3072,7 +3072,7 @@ cgGlTransferPixelsDeviceToHost
 internal_function void
 cgGlPixelTransferHostToDevice
 (
-    CG_DISPLAY            *display, 
+    CG_DISPLAY            *display,
     CG_PIXEL_TRANSFER_H2D *transfer
 )
 {
@@ -3187,7 +3187,7 @@ cgGlPixelTransferHostToDevice
 /// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms, samplers and compute kernel arguments, allowing for more efficient look-up by name.
 /// @param name A NULL-terminated ASCII string identifier.
 /// @return A 32-bit unsigned integer hash of the name.
-internal_function uint32_t 
+internal_function uint32_t
 cgHashName
 (
     char const *name
@@ -3219,7 +3219,7 @@ cgHashName
 /// @summary Determines whether an identifier would be considered a GLSL built- in value; that is, whether the identifier starts with 'gl_'.
 /// @param name A NULL-terminated ASCII string identifier.
 /// @return true if @a name starts with 'gl_'.
-internal_function bool 
+internal_function bool
 cgGlslBuiltIn
 (
     char const *name
@@ -3237,9 +3237,9 @@ cgGlslBuiltIn
 internal_function void
 cgCheckerFillRGBA
 (
-    size_t width, 
-    size_t height, 
-    float  alpha, 
+    size_t width,
+    size_t height,
+    float  alpha,
     void  *buffer
 )
 {
@@ -3268,11 +3268,11 @@ cgCheckerFillRGBA
 internal_function void
 cgCreateLogicalDevices
 (
-    CG_CONTEXT   *ctx, 
-    CG_DEVICE    *device, 
-    cl_device_id *sub_ids, 
+    CG_CONTEXT   *ctx,
+    CG_DEVICE    *device,
+    cl_device_id *sub_ids,
     cl_uint       num_subdevs,
-    size_t       &num_devices, 
+    size_t       &num_devices,
     cg_handle_t  *sub_devices
 )
 {
@@ -3331,14 +3331,14 @@ cgCreateLogicalDevices
 internal_function size_t
 cgDeviceCountForCPUPartitions
 (
-    CG_CONTEXT *ctx, 
-    uint32_t    create_flags, 
-    size_t      partition_count 
+    CG_CONTEXT *ctx,
+    uint32_t    create_flags,
+    size_t      partition_count
 )
 {
     if (create_flags & CG_EXECUTION_GROUP_CPU_PARTITION)
-    {   // TASK_PARALLEL may also be specified, which acts 
-        // as a modifier when creating queues, and not as 
+    {   // TASK_PARALLEL may also be specified, which acts
+        // as a modifier when creating queues, and not as
         // a partition method, so check CPU_PARTITION first.
         return partition_count > 0 ? partition_count : 1;
     }
@@ -3348,11 +3348,11 @@ cgDeviceCountForCPUPartitions
         return ctx->CPUCounts.NUMANodes;
     }
     if (create_flags & CG_EXECUTION_GROUP_TASK_PARALLEL)
-    {   // TASK_PARALLEL partitioning creates one device 
+    {   // TASK_PARALLEL partitioning creates one device
         // for each physical core in the system.
         return ctx->CPUCounts.PhysicalCores;
     }
-    // no partitioning results in a single device representing 
+    // no partitioning results in a single device representing
     // all hardware threads, even for multiple physical CPUs.
     return 1;
 }
@@ -3366,9 +3366,9 @@ cgDeviceCountForCPUPartitions
 internal_function int
 cgConfigureCPUTaskParallel
 (
-    CG_CONTEXT  *ctx, 
-    CG_DEVICE   *cpu, 
-    size_t      &num_devices, 
+    CG_CONTEXT  *ctx,
+    CG_DEVICE   *cpu,
+    size_t      &num_devices,
     cg_handle_t *sub_devices
 )
 {
@@ -3410,8 +3410,8 @@ cgConfigureCPUTaskParallel
         num_devices = 0;
         return CG_UNSUPPORTED;
     }
-    
-    // configure device fission for hyperthreading. 
+
+    // configure device fission for hyperthreading.
     if (ctx->CPUCounts.HardwareThreads == (ctx->CPUCounts.PhysicalCores * 2))
     {   // the CPU(s) support SMT; each device gets two threads.
         divisor = 2;
@@ -3427,10 +3427,10 @@ cgConfigureCPUTaskParallel
     }
 
     // partition the device equally into a number of sub-devices:
-    cl_device_partition_property partition_list[3] = 
+    cl_device_partition_property partition_list[3] =
     {
-        (cl_device_partition_property) CL_DEVICE_PARTITION_EQUALLY, 
-        (cl_device_partition_property) divisor, 
+        (cl_device_partition_property) CL_DEVICE_PARTITION_EQUALLY,
+        (cl_device_partition_property) divisor,
         (cl_device_partition_property) 0
     };
     cl_uint num_entries = sub_count / divisor;
@@ -3458,8 +3458,8 @@ cgConfigureCPUTaskParallel
 internal_function int
 cgConfigureCPUHighThroughput
 (
-    CG_CONTEXT  *ctx, 
-    CG_DEVICE   *cpu, 
+    CG_CONTEXT  *ctx,
+    CG_DEVICE   *cpu,
     size_t      &num_devices,
     cg_handle_t *sub_devices
 )
@@ -3511,10 +3511,10 @@ cgConfigureCPUHighThroughput
     }
 
     // partition the device equally into a number of sub-devices:
-    cl_device_partition_property partition_list[3] = 
+    cl_device_partition_property partition_list[3] =
     {
-        (cl_device_partition_property) CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN, 
-        (cl_device_partition_property) CL_DEVICE_AFFINITY_DOMAIN_NUMA, 
+        (cl_device_partition_property) CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN,
+        (cl_device_partition_property) CL_DEVICE_AFFINITY_DOMAIN_NUMA,
         (cl_device_partition_property) 0
     };
     cl_uint num_entries = ctx->CPUCounts.NUMANodes;
@@ -3543,11 +3543,11 @@ cgConfigureCPUHighThroughput
 internal_function int
 cgConfigureCPUPartitionCount
 (
-    CG_CONTEXT  *ctx, 
-    CG_DEVICE   *cpu, 
-    int         *thread_counts, 
+    CG_CONTEXT  *ctx,
+    CG_DEVICE   *cpu,
+    int         *thread_counts,
     size_t       device_count,
-    size_t      &num_devices, 
+    size_t      &num_devices,
     cg_handle_t *sub_devices
 )
 {   // to disable hardware threads for OpenCL use, using an example 8 (physical) core SMT system where we only want 4 cores to be used:
@@ -3648,11 +3648,11 @@ cgConfigureCPUPartitionCount
 internal_function bool
 cgShouldIncludeDeviceInGroup
 (
-    CG_DEVICE   *root_device, 
+    CG_DEVICE   *root_device,
     CG_DEVICE   *check_device,
     cg_handle_t  check_handle,
     uint32_t     create_flags,
-    cg_handle_t *device_list, 
+    cg_handle_t *device_list,
     size_t       device_count,
     size_t      &explicit_count
 )
@@ -3691,16 +3691,16 @@ cgShouldIncludeDeviceInGroup
 /// @return An array of num_devices handles to the devices used to create the execution group (including the root device), or NULL.
 internal_function cg_handle_t*
 cgCreateExecutionGroupDeviceList
-(   
-    CG_CONTEXT  *ctx, 
-    cg_handle_t  root_device, 
-    uint32_t     create_flags, 
-    int         *thread_counts, 
+(
+    CG_CONTEXT  *ctx,
+    cg_handle_t  root_device,
+    uint32_t     create_flags,
+    int         *thread_counts,
     size_t       partition_count,
-    cg_handle_t *device_list, 
+    cg_handle_t *device_list,
     size_t       device_count,
-    size_t      &num_devices, 
-    size_t      &num_contexts, 
+    size_t      &num_devices,
+    size_t      &num_contexts,
     int         &result
 )
 {
@@ -3767,7 +3767,7 @@ cgCreateExecutionGroupDeviceList
             {   // this is a CPU device. partition it according to user preferences.
                 size_t out_count = 0;
                 if (create_flags & CG_EXECUTION_GROUP_CPU_PARTITION)
-                {   // partition into one or more logical sub-devices, each  
+                {   // partition into one or more logical sub-devices, each
                     // with an explicitly specified number of hardware threads.
                     if ((result = cgConfigureCPUPartitionCount(ctx, check, thread_counts, partition_count, out_count, &devices[num_devices])) != CG_SUCCESS)
                         goto error_cleanup;
@@ -3818,8 +3818,8 @@ error_return:
 internal_function inline void
 cgFreeExecutionGroupDeviceList
 (
-    CG_CONTEXT  *ctx, 
-    cg_handle_t *devices, 
+    CG_CONTEXT  *ctx,
+    cg_handle_t *devices,
     size_t       num_devices
 )
 {
@@ -3841,10 +3841,10 @@ cgCmdBufferGetState
 /// @summary Updates the current state of a command buffer.
 /// @param cmdbuf The command buffer to update.
 /// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
-internal_function inline void 
+internal_function inline void
 cgCmdBufferSetState
 (
-    CG_CMD_BUFFER *cmdbuf, 
+    CG_CMD_BUFFER *cmdbuf,
     uint32_t       state
 )
 {
@@ -3871,13 +3871,13 @@ cgCmdBufferGetQueueType
 internal_function inline void
 cgCmdBufferSetTypeAndState
 (
-    CG_CMD_BUFFER *cmdbuf, 
-    int            queue_type, 
+    CG_CMD_BUFFER *cmdbuf,
+    int            queue_type,
     uint32_t       state
 )
 {
-    cmdbuf->TypeAndState = 
-        ((uint32_t(queue_type) & CG_CMD_BUFFER::TYPE_MASK_U ) << CG_CMD_BUFFER::TYPE_SHIFT) | 
+    cmdbuf->TypeAndState =
+        ((uint32_t(queue_type) & CG_CMD_BUFFER::TYPE_MASK_U ) << CG_CMD_BUFFER::TYPE_SHIFT) |
         ((uint32_t(state     ) & CG_CMD_BUFFER::STATE_MASK_U) << CG_CMD_BUFFER::STATE_SHIFT);
 }
 
@@ -3938,10 +3938,10 @@ library_function int
 cgEnumerateDevices
 (
     cg_application_info_t const *app_info,
-    cg_allocation_callbacks_t   *alloc_cb, 
-    size_t                      &device_count, 
+    cg_allocation_callbacks_t   *alloc_cb,
+    size_t                      &device_count,
     cg_handle_t                 *device_list,
-    size_t                       max_devices, 
+    size_t                       max_devices,
     uintptr_t                   &context
 )
 {
@@ -3984,7 +3984,7 @@ cgEnumerateDevices
     }
 
     // create rendering contexts for each attached display.
-    // this sets up sharing between OpenGL and OpenCL and 
+    // this sets up sharing between OpenGL and OpenCL and
     // establishes device<->display associations.
     for (size_t i = 0, n = ctx->DisplayTable.ObjectCount; i < n; ++i)
     {   // creating rendering contexts could fail for several reasons.
@@ -3994,7 +3994,7 @@ cgEnumerateDevices
 
     // update device count and handle tables:
     if (device_list == NULL || max_devices == 0)
-    {   // return the total number of compatible devices in the system. 
+    {   // return the total number of compatible devices in the system.
         device_count = ctx->DeviceTable.ObjectCount;
     }
     else if (device_list != NULL && max_devices > 0)
@@ -4041,9 +4041,9 @@ library_function int
 cgGetContextInfo
 (
     uintptr_t        context,
-    int              param, 
-    void            *buffer, 
-    size_t           buffer_size, 
+    int              param,
+    void            *buffer,
+    size_t           buffer_size,
     size_t          *bytes_needed
 )
 {
@@ -4132,11 +4132,11 @@ cgGetDeviceCount
 library_function int
 cgGetDeviceInfo
 (
-    uintptr_t   context, 
-    cg_handle_t device_handle, 
+    uintptr_t   context,
+    cg_handle_t device_handle,
     int         param,
-    void       *buffer, 
-    size_t      buffer_size, 
+    void       *buffer,
+    size_t      buffer_size,
     size_t     *bytes_needed
 )
 {
@@ -4281,7 +4281,7 @@ cgGetPrimaryDisplay
 library_function cg_handle_t
 cgGetDisplayByOrdinal
 (
-    uintptr_t context, 
+    uintptr_t context,
     size_t    ordinal
 )
 {
@@ -4303,11 +4303,11 @@ cgGetDisplayByOrdinal
 library_function int
 cgGetDisplayInfo
 (
-    uintptr_t   context, 
-    cg_handle_t display_handle, 
+    uintptr_t   context,
+    cg_handle_t display_handle,
     int         param,
-    void       *buffer, 
-    size_t      buffer_size, 
+    void       *buffer,
+    size_t      buffer_size,
     size_t     *bytes_needed
 )
 {
@@ -4435,7 +4435,7 @@ cgGetDisplayInfo
 library_function cg_handle_t
 cgGetDisplayDevice
 (
-    uintptr_t   context, 
+    uintptr_t   context,
     cg_handle_t display_handle
 )
 {
@@ -4461,9 +4461,9 @@ cgGetDisplayDevice
 library_function int
 cgGetCPUDevices
 (
-    uintptr_t     context, 
-    size_t       &cpu_count, 
-    size_t const  max_devices, 
+    uintptr_t     context,
+    size_t       &cpu_count,
+    size_t const  max_devices,
     cg_handle_t  *cpu_handles
 )
 {
@@ -4491,9 +4491,9 @@ cgGetCPUDevices
 library_function int
 cgGetGPUDevices
 (
-    uintptr_t     context, 
-    size_t       &gpu_count, 
-    size_t const  max_devices, 
+    uintptr_t     context,
+    size_t       &gpu_count,
+    size_t const  max_devices,
     cg_handle_t  *gpu_handles
 )
 {
@@ -4521,9 +4521,9 @@ cgGetGPUDevices
 library_function int
 cgGetAcceleratorDevices
 (
-    uintptr_t     context, 
-    size_t       &acl_count, 
-    size_t const  max_devices, 
+    uintptr_t     context,
+    size_t       &acl_count,
+    size_t const  max_devices,
     cg_handle_t  *acl_handles
 )
 {
@@ -4552,10 +4552,10 @@ cgGetAcceleratorDevices
 library_function int
 cgGetCPUDevicesInShareGroup
 (
-    uintptr_t     context, 
-    cg_handle_t   group_device, 
-    size_t       &cpu_count, 
-    size_t const  max_devices, 
+    uintptr_t     context,
+    cg_handle_t   group_device,
+    size_t       &cpu_count,
+    size_t const  max_devices,
     cg_handle_t  *cpu_handles
 )
 {
@@ -4586,10 +4586,10 @@ cgGetCPUDevicesInShareGroup
 library_function int
 cgGetGPUDevicesInShareGroup
 (
-    uintptr_t     context, 
-    cg_handle_t   group_device, 
-    size_t       &gpu_count, 
-    size_t const  max_devices, 
+    uintptr_t     context,
+    cg_handle_t   group_device,
+    size_t       &gpu_count,
+    size_t const  max_devices,
     cg_handle_t  *gpu_handles
 )
 {
@@ -4617,8 +4617,8 @@ cgGetGPUDevicesInShareGroup
 library_function cg_handle_t
 cgCreateExecutionGroup
 (
-    uintptr_t                   context, 
-    cg_execution_group_t const *config, 
+    uintptr_t                   context,
+    cg_execution_group_t const *config,
     int                        &result
 )
 {
@@ -4632,7 +4632,7 @@ cgCreateExecutionGroup
 
     // sanitize the CPU device configuration flags.
     // CPU_PARTITION and HIGH_THROUGHPUT are mutually exclusive.
-    if ((flags & CG_EXECUTION_GROUP_CPU_PARTITION) && 
+    if ((flags & CG_EXECUTION_GROUP_CPU_PARTITION) &&
         (flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT))
     {   // mutually-exclusive flags have been specified.
         goto error_invalid_value;
@@ -4671,7 +4671,7 @@ cgCreateExecutionGroup
         if (thread_count == 0 || thread_count > ctx->CPUCounts.HardwareThreads)
             goto error_invalid_value;
     }
-    // if HIGH_THROUGHPUT is specified, but there's only one NUMA node, 
+    // if HIGH_THROUGHPUT is specified, but there's only one NUMA node,
     // HIGH_THROUGHPUT doesn't specify any behavior different from the default.
     if ((flags & CG_EXECUTION_GROUP_HIGH_THROUGHPUT) && (ctx->CPUCounts.NUMANodes == 1))
     {   // so clear the HIGH_THROUGHPUT flag and don't try to partition the device.
@@ -4702,7 +4702,7 @@ cgCreateExecutionGroup
             CG_DEVICE *device = cgObjectTableGet(&ctx->DeviceTable, devices[i]);
             if (device->Type == CL_DEVICE_TYPE_CPU)
             {
-                cl_context_properties props[] = 
+                cl_context_properties props[] =
                 {
                     (cl_context_properties) CL_CONTEXT_PLATFORM,
                     (cl_context_properties) group.PlatformId,
@@ -4738,7 +4738,7 @@ cgCreateExecutionGroup
             if (group.ComputeContexts[i] == NULL)
                 device_ids[ndevs++] = group.DeviceList[i]->DeviceId;
         }
-        cl_context_properties props[] = 
+        cl_context_properties props[] =
         {
             (cl_context_properties) CL_CONTEXT_PLATFORM,
             (cl_context_properties) group.PlatformId,
@@ -4772,7 +4772,7 @@ cgCreateExecutionGroup
         }
     }
 
-    // create compute and transfer queues. each device gets its own unique 
+    // create compute and transfer queues. each device gets its own unique
     // compute queue, and each GPU or accelerator device that doesn't have
     // its unified memory capability set gets its own transfer queue.
     for (size_t i = 0; i < device_count; ++i)
@@ -4914,11 +4914,11 @@ error_invalid_value:
 library_function int
 cgGetExecutionGroupInfo
 (
-    uintptr_t   context, 
-    cg_handle_t group_handle, 
+    uintptr_t   context,
+    cg_handle_t group_handle,
     int         param,
-    void       *buffer, 
-    size_t      buffer_size, 
+    void       *buffer,
+    size_t      buffer_size,
     size_t     *bytes_needed
 )
 {
@@ -5203,9 +5203,9 @@ cgGetExecutionGroupInfo
 library_function cg_handle_t
 cgGetQueueForDevice
 (
-    uintptr_t   context, 
-    cg_handle_t device_handle, 
-    int         queue_type, 
+    uintptr_t   context,
+    cg_handle_t device_handle,
+    int         queue_type,
     int        &result
 )
 {
@@ -5222,7 +5222,7 @@ cgGetQueueForDevice
         result = CG_UNKNOWN_GROUP;
         return CG_INVALID_HANDLE;
     }
-    if (queue_type == CG_QUEUE_TYPE_COMPUTE) 
+    if (queue_type == CG_QUEUE_TYPE_COMPUTE)
     {   // search the device list to retrieve the queue.
         for (size_t i = 0, n = grp->DeviceCount; i < n; ++i)
         {
@@ -5247,7 +5247,7 @@ cgGetQueueForDevice
         for (size_t i = 0, n = grp->DisplayCount; i < n; ++i)
         {
             if (grp->AttachedDisplays[i]->DisplayDevice == dev)
-            {   
+            {
                 if (grp->GraphicsQueues[i] != NULL)
                 {   result = CG_SUCCESS;
                     return cgMakeHandle(grp->GraphicsQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
@@ -5270,8 +5270,8 @@ library_function cg_handle_t
 cgGetQueueForDisplay
 (
     uintptr_t   context,
-    cg_handle_t display_handle, 
-    int         queue_type, 
+    cg_handle_t display_handle,
+    int         queue_type,
     int        &result
 )
 {
@@ -5289,7 +5289,7 @@ cgGetQueueForDisplay
         result = CG_UNKNOWN_GROUP;
         return CG_INVALID_HANDLE;
     }
-    if (queue_type == CG_QUEUE_TYPE_COMPUTE) 
+    if (queue_type == CG_QUEUE_TYPE_COMPUTE)
     {   // search the device list to retrieve the queue.
         for (size_t i = 0, n = grp->DeviceCount; i < n; ++i)
         {
@@ -5314,7 +5314,7 @@ cgGetQueueForDisplay
         for (size_t i = 0, n = grp->DisplayCount; i < n; ++i)
         {
             if (grp->AttachedDisplays[i] == dsp)
-            {   
+            {
                 if (grp->GraphicsQueues[i] != NULL)
                 {   result = CG_SUCCESS;
                     return cgMakeHandle(grp->GraphicsQueues[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
@@ -5377,7 +5377,7 @@ library_function cg_handle_t
 cgCreateCommandBuffer
 (
     uintptr_t  context,
-    int        queue_type, 
+    int        queue_type,
     int       &result
 )
 {
@@ -5412,8 +5412,8 @@ cgCreateCommandBuffer
 library_function int
 cgBeginCommandBuffer
 (
-    uintptr_t   context, 
-    cg_handle_t cmd_buffer, 
+    uintptr_t   context,
+    cg_handle_t cmd_buffer,
     uint32_t    flags
 )
 {
@@ -5424,7 +5424,7 @@ cgBeginCommandBuffer
         return CG_INVALID_VALUE;
     }
     uint32_t state = cgCmdBufferGetState(cmdbuf);
-    if (state != CG_CMD_BUFFER::UNINITIALIZED && 
+    if (state != CG_CMD_BUFFER::UNINITIALIZED &&
         state != CG_CMD_BUFFER::SUBMIT_READY)
     {   // the command buffer is in an invalid state for this call.
         return CG_INVALID_STATE;
@@ -5442,7 +5442,7 @@ cgBeginCommandBuffer
 library_function int
 cgResetCommandBuffer
 (
-    uintptr_t   context, 
+    uintptr_t   context,
     cg_handle_t cmd_buffer
 )
 {
@@ -5468,10 +5468,10 @@ cgResetCommandBuffer
 library_function int
 cgCommandBufferAppend
 (
-    uintptr_t   context, 
-    cg_handle_t cmd_buffer, 
-    uint16_t    cmd_type, 
-    size_t      data_size, 
+    uintptr_t   context,
+    cg_handle_t cmd_buffer,
+    uint16_t    cmd_type,
+    size_t      data_size,
     void const *cmd_data
 )
 {
@@ -5526,9 +5526,9 @@ cgCommandBufferAppend
 library_function int
 cgCommandBufferMapAppend
 (
-    uintptr_t      context, 
-    cg_handle_t    cmd_buffer, 
-    size_t         reserve_size, 
+    uintptr_t      context,
+    cg_handle_t    cmd_buffer,
+    size_t         reserve_size,
     cg_command_t **command
 )
 {
@@ -5574,8 +5574,8 @@ cgCommandBufferMapAppend
 library_function int
 cgCommandBufferUnmapAppend
 (
-    uintptr_t      context, 
-    cg_handle_t    cmd_buffer, 
+    uintptr_t      context,
+    cg_handle_t    cmd_buffer,
     size_t         data_written
 )
 {
@@ -5610,7 +5610,7 @@ cgCommandBufferUnmapAppend
 library_function int
 cgEndCommandBuffer
 (
-    uintptr_t   context, 
+    uintptr_t   context,
     cg_handle_t cmd_buffer
 )
 {
@@ -5637,8 +5637,8 @@ cgEndCommandBuffer
 library_function int
 cgCommandBufferCanRead
 (
-    uintptr_t   context, 
-    cg_handle_t cmd_buffer, 
+    uintptr_t   context,
+    cg_handle_t cmd_buffer,
     size_t     &bytes_total
 )
 {
@@ -5668,9 +5668,9 @@ cgCommandBufferCanRead
 library_function cg_command_t*
 cgCommandBufferCommandAt
 (
-    uintptr_t   context, 
-    cg_handle_t cmd_buffer, 
-    size_t     &cmd_offset, 
+    uintptr_t   context,
+    cg_handle_t cmd_buffer,
+    size_t     &cmd_offset,
     int        &result
 )
 {
@@ -5695,9 +5695,9 @@ cgCommandBufferCommandAt
 library_function cg_handle_t
 cgCreateKernel
 (
-    uintptr_t               context, 
+    uintptr_t               context,
     cg_handle_t             exec_group,
-    cg_kernel_code_t const *code, 
+    cg_kernel_code_t const *code,
     int                    &result
 )
 {
@@ -5834,7 +5834,7 @@ cgCreateKernel
                 }
             }
             else
-            {   // TODO(rlk): support loading of binaries. 
+            {   // TODO(rlk): support loading of binaries.
                 // this requires having a list of devices per-context.
                 cgDeleteKernel(ctx, &kernel);
                 result = CG_UNSUPPORTED;
@@ -5861,7 +5861,7 @@ cgCreateKernel
 /// @summary Initialize a blend state descriptor such that alpha blending is disabled.
 /// @param state The fixed-function blend state descriptor to configure.
 /// @return CG_SUCCESS.
-library_function int 
+library_function int
 cgBlendStateInitNone
 (
     cg_blend_state_t &state
@@ -5996,7 +5996,7 @@ cgDepthStencilStateInitDefault
 internal_function void
 cgDeleteComputePipeline
 (
-    CG_CONTEXT          *ctx, 
+    CG_CONTEXT          *ctx,
     CG_COMPUTE_PIPELINE *pipeline
 )
 {
@@ -6024,9 +6024,9 @@ cgDeleteComputePipeline
 library_function cg_handle_t
 cgCreateComputePipeline
 (
-    uintptr_t                    context, 
-    cg_handle_t                  exec_group, 
-    cg_compute_pipeline_t const *create, 
+    uintptr_t                    context,
+    cg_handle_t                  exec_group,
+    cg_compute_pipeline_t const *create,
     int                         &result
 )
 {
@@ -6148,7 +6148,7 @@ error_cleanup:
 internal_function void
 cgDeleteGraphicsPipeline
 (
-    CG_CONTEXT           *ctx, 
+    CG_CONTEXT           *ctx,
     CG_GRAPHICS_PIPELINE *pipeline
 )
 {
@@ -6177,7 +6177,7 @@ cgDeleteGraphicsPipeline
 internal_function GLuint
 cgResolveGraphicsShader
 (
-    CG_KERNEL *kernel, 
+    CG_KERNEL *kernel,
     CG_DEVICE *device
 )
 {
@@ -6208,12 +6208,12 @@ internal_function void
 cgGlslReflectProgramCounts
 (
     CG_DISPLAY *display,
-    GLuint      program, 
-    char       *buffer, 
-    size_t      buffer_size, 
+    GLuint      program,
+    char       *buffer,
+    size_t      buffer_size,
     bool        include_builtins,
-    size_t     &out_num_attribs, 
-    size_t     &out_num_samplers, 
+    size_t     &out_num_attribs,
+    size_t     &out_num_samplers,
     size_t     &out_num_uniforms
 )
 {
@@ -6305,10 +6305,10 @@ cgGlslReflectProgramCounts
 internal_function void
 cgGlslReflectProgramMetadata
 (
-    CG_DISPLAY      *display, 
+    CG_DISPLAY      *display,
     GLuint           program,
-    char            *buffer, 
-    size_t           buffer_size, 
+    char            *buffer,
+    size_t           buffer_size,
     bool             include_builtins,
     CG_GLSL_PROGRAM *glsl
 )
@@ -6433,6 +6433,194 @@ cgGlslReflectProgramMetadata
     }
 }
 
+/// @summary Convert a CGFX blend function value to the corresponding OpenGL enum.
+/// @param factor The CGFX blend function value, one of cg_blend_function_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlBlendFunction
+(
+    int func
+)
+{
+    switch (func)
+    {
+        case CG_BLEND_FUNCTION_ADD             : return GL_FUNC_ADD;
+        case CG_BLEND_FUNCTION_SUBTRACT        : return GL_FUNC_SUBTRACT;
+        case CG_BLEND_FUNCTION_REVERSE_SUBTRACT: return GL_FUNC_REVERSE_SUBTRACT;
+        case CG_BLEND_FUNCTION_MIN             : return GL_MIN;
+        case CG_BLEND_FUNCTION_MAX             : return GL_MAX;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX blend factor value to the corresponding OpenGL enum.
+/// @param factor The CGFX blend factor value, one of cg_blend_factor_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlBlendFactor
+(
+    int factor
+)
+{
+    switch (factor)
+    {
+        case CG_BLEND_FACTOR_ZERO           : return GL_ZERO;
+        case CG_BLEND_FACTOR_ONE            : return GL_ONE;
+        case CG_BLEND_FACTOR_SRC_COLOR      : return GL_SRC_COLOR;
+        case CG_BLEND_FACTOR_INV_SRC_COLOR  : return GL_ONE_MINUS_SRC_COLOR;
+        case CG_BLEND_FACTOR_DST_COLOR      : return GL_DST_COLOR;
+        case CG_BLEND_FACTOR_INV_DST_COLOR  : return GL_ONE_MINUS_DST_COLOR;
+        case CG_BLEND_FACTOR_SRC_ALPHA      : return GL_SRC_ALPHA;
+        case CG_BLEND_FACTOR_INV_SRC_ALPHA  : return GL_ONE_MINUS_SRC_ALPHA;
+        case CG_BLEND_FACTOR_DST_ALPHA      : return GL_DST_ALPHA;
+        case CG_BLEND_FACTOR_INV_DST_ALPHA  : return GL_ONE_MINUS_DST_ALPHA;
+        case CG_BLEND_FACTOR_CONST_COLOR    : return GL_CONSTANT_COLOR;
+        case CG_BLEND_FACTOR_INV_CONST_COLOR: return GL_ONE_MINUS_CONSTANT_COLOR;
+        case CG_BLEND_FACTOR_CONST_ALPHA    : return GL_CONSTANT_ALPHA;
+        case CG_BLEND_FACTOR_INV_CONST_ALPHA: return GL_ONE_MINUS_CONSTANT_ALPHA;
+        case CG_BLEND_FACTOR_SRC_ALPHA_SAT  : return GL_SRC_ALPHA_SATURATE;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX comparison function value to the corresponding OpenGL enum.
+/// @param mode The CGFX comparison function, one of cg_compare_function_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlCompareFunction
+(
+    int func
+)
+{
+    switch (func)
+    {
+        case CG_COMPARE_NEVER        : return GL_NEVER;
+        case CG_COMPARE_LESS         : return GL_LESS;
+        case CG_COMPARE_EQUAL        : return GL_EQUAL;
+        case CG_COMPARE_LESS_EQUAL   : return GL_LEQUAL;
+        case CG_COMPARE_GREATER      : return GL_GREATER;
+        case CG_COMPARE_NOT_EQUAL    : return GL_NOTEQUAL;
+        case CG_COMPARE_GREATER_EQUAL: return GL_GEQUAL;
+        case CG_COMPARE_ALWAYS       : return GL_ALWAYS;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX fill mode value to the corresponding OpenGL enum.
+/// @param mode The CGFX fill mode, one of cg_fill_mode_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlFillMode
+(
+    int mode
+)
+{
+    switch (mode)
+    {
+        case CG_FILL_SOLID    : return GL_FILL;
+        case CG_FILL_WIREFRAME: return GL_LINE;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX cull mode value to the corresponding OpenGL enum.
+/// @param mode The CGFX culling mode, one of cg_cull_mode_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlCullMode
+(
+    int mode
+)
+{
+    switch (mode)
+    {
+        case CG_CULL_NONE : return GL_NONE;
+        case CG_CULL_FRONT: return GL_FRONT;
+        case CG_CULL_BACK : return GL_BACK;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX winding order value to the corresponding OpenGL enum.
+/// @param winding The CGFX winding order value, one of cg_winding_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlWindingOrder
+(
+    int winding
+)
+{
+    switch (winding)
+    {
+        case CG_WINDING_CCW: return GL_CCW;
+        case CG_WINDING_CW : return GL_CW;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX primitive topology value to the corresponding OpenGL enum.
+/// @param topology The CGFX primitive topology value, one of cg_primitive_topology_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlPrimitiveTopology
+(
+    int topology
+)
+{
+    switch (topology)
+    {
+        case CG_PRIMITIVE_POINT_LIST    : return GL_POINTS;
+        case CG_PRIMITIVE_LINE_LIST     : return GL_LINES;
+        case CG_PRIMITIVE_LINE_STRIP    : return GL_LINE_STRIP;
+        case CG_PRIMITIVE_TRIANGLE_LIST : return GL_TRIANGLES;
+        case CG_PRIMITIVE_TRIANGLE_STRIP: return GL_TRIANGLE_STRIP;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX stencil operation value to the corresponding OpenGL enum.
+/// @param op The CGFX stencil operation, one of cg_stencil_operation_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlStencilOp
+(
+    int op
+)
+{
+    switch (op)
+    {
+        case CG_STENCIL_OP_KEEP     : return GL_KEEP;
+        case CG_STENCIL_OP_ZERO     : return GL_ZERO;
+        case CG_STENCIL_OP_REPLACE  : return GL_REPLACE;
+        case CG_STENCIL_OP_INC_CLAMP: return GL_INCR;
+        case CG_STENCIL_OP_DEC_CLAMP: return GL_DECR;
+        case CG_STENCIL_OP_INVERT   : return GL_INVERT;
+        case CG_STENCIL_OP_INC_WRAP : return GL_INCR_WRAP;
+        case CG_STENCIL_OP_DEC_WRAP : return GL_DECR_WRAP;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a boolean value into either GL_TRUE or GL_FALSE.
+/// @param value The value to convert.
+/// @return One of GL_TRUE or GL_FALSE.
+internal_function GLboolean
+cgGlBoolean
+(
+    bool value
+)
+{
+    return value ? GL_TRUE : GL_FALSE;
+}
+
 /// @summary Create a new graphics pipeline object to execute an OpenGL shader program.
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group defining the rendering contexts.
@@ -6442,9 +6630,9 @@ cgGlslReflectProgramMetadata
 library_function cg_handle_t
 cgCreateGraphicsPipeline
 (
-    uintptr_t                     context, 
-    cg_handle_t                   exec_group, 
-    cg_graphics_pipeline_t const *create, 
+    uintptr_t                     context,
+    cg_handle_t                   exec_group,
+    cg_graphics_pipeline_t const *create,
     int                          &result
 )
 {
@@ -6596,7 +6784,7 @@ cgCreateGraphicsPipeline
                 goto error_cleanup;
             }
             cgGlslReflectProgramCounts(display, program, name_buf, name_max, false, num_attribs, num_samplers, num_uniforms);
-            
+
             // allocate storage for the attribute, sampler and uniform metadata.
             glsl.AttributeCount = num_attribs;
             glsl.AttributeNames =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
@@ -6607,8 +6795,8 @@ cgCreateGraphicsPipeline
             glsl.UniformCount   = num_uniforms;
             glsl.UniformNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
             glsl.Uniforms       =(CG_GLSL_UNIFORM  *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-            if (glsl.AttributeNames == NULL || glsl.Attributes == NULL || 
-                glsl.SamplerNames   == NULL || glsl.Samplers   == NULL || 
+            if (glsl.AttributeNames == NULL || glsl.Attributes == NULL ||
+                glsl.SamplerNames   == NULL || glsl.Samplers   == NULL ||
                 glsl.UniformNames   == NULL || glsl.Uniforms   == NULL)
             {   // unable to allocate the required memory.
                 glDeleteProgram(program);
@@ -6628,6 +6816,45 @@ cgCreateGraphicsPipeline
             }
         }
     }
+
+    // convert the fixed-function state from CGFX enums to their OpenGL equivalents.
+    CG_DEPTH_STENCIL_STATE &dss = pipe.Graphics.DepthStencilState;
+    dss.DepthTestEnable     = cgGlBoolean(create->DepthStencilState.DepthTestEnable);
+    dss.DepthWriteEnable    = cgGlBoolean(create->DepthStencilState.DepthWriteEnable);
+    dss.DepthBoundsEnable   = cgGlBoolean(create->DepthStencilState.DepthBoundsEnable);
+    dss.DepthTestFunction   = cgGlCompareFunction(create->DepthStencilState.DepthTestFunction);
+    dss.DepthMin            = create->DepthStencilState.DepthMin;
+    dss.DepthMax            = create->DepthStencilState.DepthMax;
+    dss.StencilTestEnable   = cgGlBoolean(create->DepthStencilState.StencilTestEnable);
+    dss.StencilTestFunction = cgGlCompareFunction(create->DepthStencilState.StencilTestFunction);
+    dss.StencilFailOp       = cgGlStencilOp(create->DepthStencilState.StencilFailOp);
+    dss.StencilPassZPassOp  = cgGlStencilOp(create->DepthStencilState.StencilPassZPassOp);
+    dss.StencilPassZFailOp  = cgGlStencilOp(create->DepthStencilState.StencilPassZFailOp);
+    dss.StencilReadMask     = create->DepthStencilState.StencilReadMask;
+    dss.StencilWriteMask    = create->DepthStencilState.StencilWriteMask;
+    dss.StencilReference    = create->DepthStencilState.StencilReference;
+
+    CG_RASTER_STATE        &rs = pipe.Graphics.RasterizerState;
+    rs.FillMode             = cgGlFillMode(create->RasterizerState.FillMode);
+    rs.CullMode             = cgGlCullMode(create->RasterizerState.CullMode);
+    rs.FrontFace            = cgGlWindingOrder(create->RasterizerState.FrontFace);
+    rs.DepthBias            = create->RasterizerState.DepthBias;
+    rs.SlopeScaledDepthBias = create->RasterizerState.SlopeScaledDepthBias;
+
+    CG_BLEND_STATE         &bs = pipe.Graphics.BlendState;
+    bs.BlendEnabled         = cgGlBoolean(create->BlendState.BlendEnabled);
+    bs.SrcBlendColor        = cgGlBlendFactor(create->BlendState.SrcBlendColor);
+    bs.DstBlendColor        = cgGlBlendFactor(create->BlendState.DstBlendColor);
+    bs.ColorBlendFunction   = cgGlBlendFunction(create->BlendState.ColorBlendFunction);
+    bs.SrcBlendAlpha        = cgGlBlendFactor(create->BlendState.SrcBlendAlpha);
+    bs.DstBlendAlpha        = cgGlBlendFactor(create->BlendState.DstBlendAlpha);
+    bs.AlphaBlendFunction   = cgGlBlendFunction(create->BlendState.AlphaBlendFunction);
+    bs.ConstantRGBA[0]      = create->BlendState.ConstantRGBA[0];
+    bs.ConstantRGBA[1]      = create->BlendState.ConstantRGBA[1];
+    bs.ConstantRGBA[2]      = create->BlendState.ConstantRGBA[2];
+    bs.ConstantRGBA[3]      = create->BlendState.ConstantRGBA[3];
+
+    pipe.Graphics.Topology  = cgGlPrimitiveTopology(create->PrimitiveType);
 
     // insert the pipeline into the object table.
     if ((handle = cgObjectTableAdd(&ctx->PipelineTable, pipe)) == CG_INVALID_HANDLE)

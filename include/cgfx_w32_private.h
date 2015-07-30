@@ -584,8 +584,6 @@ struct CG_GRAPHICS_PIPELINE
     CG_RASTER_STATE              RasterizerState;      /// The fixed-function rasterizer state to apply.
     CG_BLEND_STATE               BlendState;           /// The fixed-function blending unit state to apply.
     GLenum                       Topology;             /// The primitive topology, for example, GL_TRIANGLES.
-    size_t                       KernelCount;          /// The number of valid entries in the Kernels array.
-    cg_handle_t                  Kernels[STAGES];      /// References to kernels making up the shader program.
 
     size_t                       DeviceCount;          /// The number of devices the pipeline can execute on.
     CG_DEVICE                  **DeviceList;           /// The set of devices the pipeline can execute on. Reference to CG_EXEC_GROUP.
