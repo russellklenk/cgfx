@@ -303,6 +303,38 @@ cgStrdup
     return mem;
 }
 
+/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms, samplers and compute kernel arguments, allowing for more efficient look-up by name.
+/// @param name A NULL-terminated ASCII string identifier.
+/// @return A 32-bit unsigned integer hash of the name.
+internal_function uint32_t
+cgHashName
+(
+    char const *name
+)
+{
+    #define HAS_NULL_BYTE(x) (((x) - 0x01010101) & (~(x) & 0x80808080))
+    #define ROTL32(x, y)     _rotl((x), (y))
+
+    uint32_t hash = 0;
+    if (name != NULL)
+    {
+        // hash the majority of the data in 4-byte chunks.
+        while (!HAS_NULL_BYTE(*((uint32_t*)name)))
+        {
+            hash  = ROTL32(hash, 7) + name[0];
+            hash  = ROTL32(hash, 7) + name[1];
+            hash  = ROTL32(hash, 7) + name[2];
+            hash  = ROTL32(hash, 7) + name[3];
+            name += 4;
+        }
+        // hash the remaining 0-3 bytes.
+        while (*name) hash = ROTL32(hash, 7) + *name++;
+    }
+    #undef HAS_NULL_BYTE
+    #undef ROTL32
+    return hash;
+}
+
 /// @summary Retrieve the length of an OpenCL platform string value, allocate a buffer and store a copy of the value.
 /// @param ctx The CGFX context requesting the string data.
 /// @param id The OpenCL platform identifier being queried.
@@ -686,6 +718,31 @@ cgDeleteCmdBuffer
     cmdbuf->CommandData  = NULL;
 }
 
+/// @summary Find the OpenGL shader object name within a kernel that corresponds to a given device.
+/// @param kernel The kernel object to search.
+/// @param device The device object on which the shader will execute.
+/// @return The OpenGL shader object name, or 0 if there is no shader object for the device.
+internal_function GLuint
+cgResolveGraphicsShader
+(
+    CG_KERNEL *kernel,
+    CG_DEVICE *device
+)
+{
+    if (kernel != NULL)
+    {
+        for (size_t i = 0, n = kernel->Graphics.DisplayCount; i < n; ++i)
+        {
+            if (kernel->Graphics.DisplayList[i]->DisplayDevice == device)
+            {   // found the shader object corresponding to this device.
+                // note that the shader object may not actually be valid.
+                return kernel->Graphics.Shader[i];
+            }
+        }
+    }
+    return GLuint(0);
+}
+
 /// @summary Frees all resources and releases all references associated with a kernel object.
 /// @param ctx The CGFX context that owns the kernel object.
 /// @param kernel The kernel object to delete.
@@ -898,6 +955,86 @@ cgDeleteExecutionGroup
     memset(group, 0, sizeof(CG_EXEC_GROUP));
 }
 
+/// @summary Frees all resources associated with a compute pipeline object.
+/// @param ctx The CGFX context that owns the compute pipeline object.
+/// @param pipeline The compute pipeline object to delete.
+internal_function void
+cgDeleteComputePipeline
+(
+    CG_CONTEXT          *ctx,
+    CG_COMPUTE_PIPELINE *pipeline
+)
+{
+    for (size_t i = 0, n = pipeline->ContextCount; i < n; ++i)
+    {
+        if (pipeline->KernelList[i] != NULL)
+        {
+            clReleaseKernel(pipeline->KernelList[i]);
+        }
+    }
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->Arguments       , pipeline->ArgumentCount * sizeof(CG_CL_KERNEL_ARG)    , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->ArgumentNames   , pipeline->ArgumentCount * sizeof(uint32_t)            , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernelInfo, pipeline->DeviceCount   * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernels   , pipeline->DeviceCount   * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->KernelList      , pipeline->ContextCount  * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
+    memset(pipeline, 0, sizeof(CG_COMPUTE_PIPELINE));
+}
+
+/// @summary Frees all resources associated with a graphics pipeline object.
+/// @param ctx The CGFX context that owns the graphics pipeline object.
+/// @param pipeline The graphics pipeline object to delete.
+internal_function void
+cgDeleteGraphicsPipeline
+(
+    CG_CONTEXT           *ctx,
+    CG_GRAPHICS_PIPELINE *pipeline
+)
+{
+    for (size_t i = 0, n = pipeline->DeviceCount; i < n; ++i)
+    {
+        CG_GLSL_PROGRAM *glsl = &pipeline->DevicePrograms[i];
+        if (glsl->Program)
+        {   // the OpenGL entry points are the same for all displays attached to the device.
+            CG_DISPLAY *display = pipeline->DeviceList[i]->AttachedDisplays[0];
+            glDeleteProgram(glsl->Program);
+        }
+        // free related metadata allocated in host memory.
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->Samplers      , glsl->SamplerCount   * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->SamplerNames  , glsl->SamplerCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->Attributes    , glsl->AttributeCount * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->AttributeNames, glsl->AttributeCount * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->Uniforms      , glsl->UniformCount   * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+        cgFreeHostMemory(&ctx->HostAllocator, glsl->UniformNames  , glsl->UniformCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+        memset(glsl, 0, sizeof(CG_GLSL_PROGRAM));
+    }
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DevicePrograms , pipeline->DeviceCount   * sizeof(CG_GLSL_PROGRAM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DisplayPrograms, pipeline->DisplayCount  * sizeof(CG_GLSL_PROGRAM*) , 0, CG_ALLOCATION_TYPE_OBJECT);
+    memset(pipeline, 0, sizeof(CG_GRAPHICS_PIPELINE));
+}
+
+/// @summary Frees all resources associated with a pipeline object.
+/// @param ctx The CGFX context that owns the pipeline object.
+/// @param pipeline The pipeline object to delete.
+internal_function void
+cgDeletePipeline
+(
+    CG_CONTEXT  *ctx, 
+    CG_PIPELINE *pipeline
+)
+{
+    switch (pipeline->PipelineType)
+    {
+    case CG_PIPELINE_TYPE_COMPUTE:
+        cgDeleteComputePipeline(ctx, &pipeline->Compute);
+        break;
+    case CG_PIPELINE_TYPE_GRAPHICS:
+        cgDeleteGraphicsPipeline(ctx, &pipeline->Graphics);
+        break;
+    default:
+        break;
+    }
+}
+
 /// @summary Allocates memory for and initializes an empty CGFX context object.
 /// @param app_info Information about the application associated with the context.
 /// @param alloc_cb User-supplied host memory allocator callbacks, or NULL.
@@ -930,6 +1067,7 @@ cgCreateContext
     cgObjectTableInit(&ctx->CmdBufferTable, CG_OBJECT_COMMAND_BUFFER , CG_CMD_BUFFER_TABLE_ID);
     cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
     cgObjectTableInit(&ctx->KernelTable   , CG_OBJECT_KERNEL         , CG_KERNEL_TABLE_ID);
+    cgObjectTableInit(&ctx->PipelineTable , CG_OBJECT_PIPELINE       , CG_PIPELINE_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -946,6 +1084,12 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all pipeline objects:
+    for (size_t i = 0, n = ctx->PipelineTable.ObjectCount; i < n; ++i)
+    {
+        CG_PIPELINE *obj = &ctx->PipelineTable.Objects[i];
+        cgDeletePipeline(ctx, obj);
+    }
     // free all kernel objects:
     for (size_t i = 0, n = ctx->KernelTable.ObjectCount; i < n; ++i)
     {
@@ -3184,36 +3328,192 @@ cgGlPixelTransferHostToDevice
         glPixelStorei(GL_UNPACK_SKIP_IMAGES,  0);
 }*/
 
-/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms, samplers and compute kernel arguments, allowing for more efficient look-up by name.
-/// @param name A NULL-terminated ASCII string identifier.
-/// @return A 32-bit unsigned integer hash of the name.
-internal_function uint32_t
-cgHashName
+/// @summary Convert a CGFX blend function value to the corresponding OpenGL enum.
+/// @param factor The CGFX blend function value, one of cg_blend_function_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlBlendFunction
 (
-    char const *name
+    int func
 )
 {
-    #define HAS_NULL_BYTE(x) (((x) - 0x01010101) & (~(x) & 0x80808080))
-    #define ROTL32(x, y)     _rotl((x), (y))
-
-    uint32_t hash = 0;
-    if (name != NULL)
+    switch (func)
     {
-        // hash the majority of the data in 4-byte chunks.
-        while (!HAS_NULL_BYTE(*((uint32_t*)name)))
-        {
-            hash  = ROTL32(hash, 7) + name[0];
-            hash  = ROTL32(hash, 7) + name[1];
-            hash  = ROTL32(hash, 7) + name[2];
-            hash  = ROTL32(hash, 7) + name[3];
-            name += 4;
-        }
-        // hash the remaining 0-3 bytes.
-        while (*name) hash = ROTL32(hash, 7) + *name++;
+        case CG_BLEND_FUNCTION_ADD             : return GL_FUNC_ADD;
+        case CG_BLEND_FUNCTION_SUBTRACT        : return GL_FUNC_SUBTRACT;
+        case CG_BLEND_FUNCTION_REVERSE_SUBTRACT: return GL_FUNC_REVERSE_SUBTRACT;
+        case CG_BLEND_FUNCTION_MIN             : return GL_MIN;
+        case CG_BLEND_FUNCTION_MAX             : return GL_MAX;
+        default: break;
     }
-    #undef HAS_NULL_BYTE
-    #undef ROTL32
-    return hash;
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX blend factor value to the corresponding OpenGL enum.
+/// @param factor The CGFX blend factor value, one of cg_blend_factor_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlBlendFactor
+(
+    int factor
+)
+{
+    switch (factor)
+    {
+        case CG_BLEND_FACTOR_ZERO           : return GL_ZERO;
+        case CG_BLEND_FACTOR_ONE            : return GL_ONE;
+        case CG_BLEND_FACTOR_SRC_COLOR      : return GL_SRC_COLOR;
+        case CG_BLEND_FACTOR_INV_SRC_COLOR  : return GL_ONE_MINUS_SRC_COLOR;
+        case CG_BLEND_FACTOR_DST_COLOR      : return GL_DST_COLOR;
+        case CG_BLEND_FACTOR_INV_DST_COLOR  : return GL_ONE_MINUS_DST_COLOR;
+        case CG_BLEND_FACTOR_SRC_ALPHA      : return GL_SRC_ALPHA;
+        case CG_BLEND_FACTOR_INV_SRC_ALPHA  : return GL_ONE_MINUS_SRC_ALPHA;
+        case CG_BLEND_FACTOR_DST_ALPHA      : return GL_DST_ALPHA;
+        case CG_BLEND_FACTOR_INV_DST_ALPHA  : return GL_ONE_MINUS_DST_ALPHA;
+        case CG_BLEND_FACTOR_CONST_COLOR    : return GL_CONSTANT_COLOR;
+        case CG_BLEND_FACTOR_INV_CONST_COLOR: return GL_ONE_MINUS_CONSTANT_COLOR;
+        case CG_BLEND_FACTOR_CONST_ALPHA    : return GL_CONSTANT_ALPHA;
+        case CG_BLEND_FACTOR_INV_CONST_ALPHA: return GL_ONE_MINUS_CONSTANT_ALPHA;
+        case CG_BLEND_FACTOR_SRC_ALPHA_SAT  : return GL_SRC_ALPHA_SATURATE;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX comparison function value to the corresponding OpenGL enum.
+/// @param mode The CGFX comparison function, one of cg_compare_function_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlCompareFunction
+(
+    int func
+)
+{
+    switch (func)
+    {
+        case CG_COMPARE_NEVER        : return GL_NEVER;
+        case CG_COMPARE_LESS         : return GL_LESS;
+        case CG_COMPARE_EQUAL        : return GL_EQUAL;
+        case CG_COMPARE_LESS_EQUAL   : return GL_LEQUAL;
+        case CG_COMPARE_GREATER      : return GL_GREATER;
+        case CG_COMPARE_NOT_EQUAL    : return GL_NOTEQUAL;
+        case CG_COMPARE_GREATER_EQUAL: return GL_GEQUAL;
+        case CG_COMPARE_ALWAYS       : return GL_ALWAYS;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX fill mode value to the corresponding OpenGL enum.
+/// @param mode The CGFX fill mode, one of cg_fill_mode_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlFillMode
+(
+    int mode
+)
+{
+    switch (mode)
+    {
+        case CG_FILL_SOLID    : return GL_FILL;
+        case CG_FILL_WIREFRAME: return GL_LINE;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX cull mode value to the corresponding OpenGL enum.
+/// @param mode The CGFX culling mode, one of cg_cull_mode_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlCullMode
+(
+    int mode
+)
+{
+    switch (mode)
+    {
+        case CG_CULL_NONE : return GL_NONE;
+        case CG_CULL_FRONT: return GL_FRONT;
+        case CG_CULL_BACK : return GL_BACK;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX winding order value to the corresponding OpenGL enum.
+/// @param winding The CGFX winding order value, one of cg_winding_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlWindingOrder
+(
+    int winding
+)
+{
+    switch (winding)
+    {
+        case CG_WINDING_CCW: return GL_CCW;
+        case CG_WINDING_CW : return GL_CW;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX primitive topology value to the corresponding OpenGL enum.
+/// @param topology The CGFX primitive topology value, one of cg_primitive_topology_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlPrimitiveTopology
+(
+    int topology
+)
+{
+    switch (topology)
+    {
+        case CG_PRIMITIVE_POINT_LIST    : return GL_POINTS;
+        case CG_PRIMITIVE_LINE_LIST     : return GL_LINES;
+        case CG_PRIMITIVE_LINE_STRIP    : return GL_LINE_STRIP;
+        case CG_PRIMITIVE_TRIANGLE_LIST : return GL_TRIANGLES;
+        case CG_PRIMITIVE_TRIANGLE_STRIP: return GL_TRIANGLE_STRIP;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a CGFX stencil operation value to the corresponding OpenGL enum.
+/// @param op The CGFX stencil operation, one of cg_stencil_operation_e.
+/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
+internal_function GLenum
+cgGlStencilOp
+(
+    int op
+)
+{
+    switch (op)
+    {
+        case CG_STENCIL_OP_KEEP     : return GL_KEEP;
+        case CG_STENCIL_OP_ZERO     : return GL_ZERO;
+        case CG_STENCIL_OP_REPLACE  : return GL_REPLACE;
+        case CG_STENCIL_OP_INC_CLAMP: return GL_INCR;
+        case CG_STENCIL_OP_DEC_CLAMP: return GL_DECR;
+        case CG_STENCIL_OP_INVERT   : return GL_INVERT;
+        case CG_STENCIL_OP_INC_WRAP : return GL_INCR_WRAP;
+        case CG_STENCIL_OP_DEC_WRAP : return GL_DECR_WRAP;
+        default: break;
+    }
+    return GL_INVALID_ENUM;
+}
+
+/// @summary Convert a boolean value into either GL_TRUE or GL_FALSE.
+/// @param value The value to convert.
+/// @return One of GL_TRUE or GL_FALSE.
+internal_function GLboolean
+cgGlBoolean
+(
+    bool value
+)
+{
+    return value ? GL_TRUE : GL_FALSE;
 }
 
 /// @summary Determines whether an identifier would be considered a GLSL built- in value; that is, whether the identifier starts with 'gl_'.
@@ -3227,6 +3527,251 @@ cgGlslBuiltIn
 {
     char prefix[4] = {'g','l','_','\0'};
     return (strncmp(name, prefix, 3) == 0);
+}
+
+/// @summary Counts the number of active vertex attribues, texture samplers and uniform values defined in a shader program.
+/// @param display The display managing the rendering context.
+/// @param program The OpenGL program object to query.
+/// @param buffer A temporary buffer used to hold attribute and uniform names.
+/// @param buffer_size The maximum number of bytes that can be written to the temporary name buffer.
+/// @param include_builtins Specify true to include GLSL builtin values in the returned vertex attribute count.
+/// @param out_num_attribs On return, this address is updated with the number of active vertex attribute values.
+/// @param out_num_samplers On return, this address is updated with the number of active texture sampler values.
+/// @param out_num_uniforms On return, this address is updated with the number of active uniform values.
+internal_function void
+cgGlslReflectProgramCounts
+(
+    CG_DISPLAY *display,
+    GLuint      program,
+    char       *buffer,
+    size_t      buffer_size,
+    bool        include_builtins,
+    size_t     &out_num_attribs,
+    size_t     &out_num_samplers,
+    size_t     &out_num_uniforms
+)
+{
+    size_t  num_attribs  = 0;
+    GLint   attrib_count = 0;
+    GLsizei buf_size     = (GLsizei) buffer_size;
+
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attrib_count);
+    for (GLint i = 0; i < attrib_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  sz   = 0;
+        glGetActiveAttrib(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn(buffer) && !include_builtins)
+            continue;
+        num_attribs++;
+    }
+
+    size_t num_samplers  = 0;
+    size_t num_uniforms  = 0;
+    GLint  uniform_count = 0;
+
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
+    for (GLint i = 0; i < uniform_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  sz   = 0;
+        glGetActiveUniform(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn (buffer) && !include_builtins)
+            continue;
+
+        switch (type)
+        {
+            case GL_SAMPLER_1D:
+            case GL_INT_SAMPLER_1D:
+            case GL_UNSIGNED_INT_SAMPLER_1D:
+            case GL_SAMPLER_1D_SHADOW:
+            case GL_SAMPLER_2D:
+            case GL_INT_SAMPLER_2D:
+            case GL_UNSIGNED_INT_SAMPLER_2D:
+            case GL_SAMPLER_2D_SHADOW:
+            case GL_SAMPLER_3D:
+            case GL_INT_SAMPLER_3D:
+            case GL_UNSIGNED_INT_SAMPLER_3D:
+            case GL_SAMPLER_CUBE:
+            case GL_INT_SAMPLER_CUBE:
+            case GL_UNSIGNED_INT_SAMPLER_CUBE:
+            case GL_SAMPLER_CUBE_SHADOW:
+            case GL_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_1D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_1D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_2D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_BUFFER:
+            case GL_INT_SAMPLER_BUFFER:
+            case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+            case GL_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_RECT_SHADOW:
+            case GL_INT_SAMPLER_2D_RECT:
+            case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_MULTISAMPLE:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+                num_samplers++;
+                break;
+
+            default:
+                num_uniforms++;
+                break;
+        }
+    }
+
+    // set the output values for the caller.
+    out_num_attribs  = num_attribs;
+    out_num_samplers = num_samplers;
+    out_num_uniforms = num_uniforms;
+}
+
+/// @summary Retrieve information about the active vertex attribues, texture samplers and uniform values defined in a shader program.
+/// @param display The display managing the rendering context.
+/// @param program The OpenGL program object to query.
+/// @param buffer A temporary buffer used to hold attribute and uniform names.
+/// @param buffer_size The maximum number of bytes that can be written to the temporary name buffer.
+/// @param include_builtins Specify true to include GLSL builtin values in the returned vertex attribute count.
+/// @param glsl The GLSL program descriptor to populate with data.
+internal_function void
+cgGlslReflectProgramMetadata
+(
+    CG_DISPLAY      *display,
+    GLuint           program,
+    char            *buffer,
+    size_t           buffer_size,
+    bool             include_builtins,
+    CG_GLSL_PROGRAM *glsl
+)
+{
+    uint32_t          *attrib_names  = glsl->AttributeNames;
+    uint32_t          *sampler_names = glsl->SamplerNames;
+    uint32_t          *uniform_names = glsl->UniformNames;
+    CG_GLSL_ATTRIBUTE *attrib_info   = glsl->Attributes;
+    CG_GLSL_SAMPLER   *sampler_info  = glsl->Samplers;
+    CG_GLSL_UNIFORM   *uniform_info  = glsl->Uniforms;
+    size_t             num_attribs   = 0;
+    GLint              attrib_count  = 0;
+    GLsizei            buf_size      =(GLsizei) buffer_size;
+
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attrib_count);
+    for (GLint i = 0; i < attrib_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  loc  = 0;
+        GLint  sz   = 0;
+        glGetActiveAttrib(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn(buffer) && !include_builtins)
+            continue;
+
+        CG_GLSL_ATTRIBUTE va;
+        loc             = glGetAttribLocation(program, buffer);
+        va.DataType     =(GLenum)   type;
+        va.Location     =(GLint)    loc;
+        va.DataSize     =(size_t)   cgGlDataSize(type) * sz;
+        va.DataOffset   =(size_t)   0; // for application use only
+        va.Dimension    =(size_t)   sz;
+        attrib_names[num_attribs] = cgHashName(buffer);
+        attrib_info [num_attribs] = va;
+        num_attribs++;
+    }
+
+    size_t num_samplers  = 0;
+    size_t num_uniforms  = 0;
+    GLint  uniform_count = 0;
+    GLint  texture_unit  = 0;
+
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
+    for (GLint i = 0; i < uniform_count; ++i)
+    {
+        GLenum type = GL_FLOAT;
+        GLuint idx  = (GLuint) i;
+        GLint  len  = 0;
+        GLint  loc  = 0;
+        GLint  sz   = 0;
+        glGetActiveUniform(program, idx, buf_size, &len, &sz, &type, buffer);
+        if (cgGlslBuiltIn (buffer) && !include_builtins)
+            continue;
+
+        switch (type)
+        {
+            case GL_SAMPLER_1D:
+            case GL_INT_SAMPLER_1D:
+            case GL_UNSIGNED_INT_SAMPLER_1D:
+            case GL_SAMPLER_1D_SHADOW:
+            case GL_SAMPLER_2D:
+            case GL_INT_SAMPLER_2D:
+            case GL_UNSIGNED_INT_SAMPLER_2D:
+            case GL_SAMPLER_2D_SHADOW:
+            case GL_SAMPLER_3D:
+            case GL_INT_SAMPLER_3D:
+            case GL_UNSIGNED_INT_SAMPLER_3D:
+            case GL_SAMPLER_CUBE:
+            case GL_INT_SAMPLER_CUBE:
+            case GL_UNSIGNED_INT_SAMPLER_CUBE:
+            case GL_SAMPLER_CUBE_SHADOW:
+            case GL_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_1D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_1D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_2D_ARRAY_SHADOW:
+            case GL_INT_SAMPLER_2D_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+            case GL_SAMPLER_BUFFER:
+            case GL_INT_SAMPLER_BUFFER:
+            case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+            case GL_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_RECT_SHADOW:
+            case GL_INT_SAMPLER_2D_RECT:
+            case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
+            case GL_SAMPLER_2D_MULTISAMPLE:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+                {
+                    CG_GLSL_SAMPLER  ts;
+                    loc            = glGetUniformLocation(program, buffer);
+                    ts.SamplerType =(GLenum)      type;
+                    ts.BindTarget  =(GLenum)      cgGlTextureTarget(type);
+                    ts.Location    =(GLint)       loc;
+                    ts.ImageUnit   =(GLint)       texture_unit++;
+                    sampler_names[num_samplers] = cgHashName(buffer);
+                    sampler_info [num_samplers] = ts;
+                    num_samplers++;
+                }
+                break;
+
+            default:
+                {
+                    CG_GLSL_UNIFORM  uv;
+                    loc            = glGetUniformLocation(program, buffer);
+                    uv.DataType    =(GLenum)      type;
+                    uv.Location    =(GLint)       loc;
+                    uv.DataSize    =(size_t)      cgGlDataSize(type) * sz;
+                    uv.DataOffset  =(size_t)      0; // for application use only
+                    uv.Dimension   =(size_t)      sz;
+                    uniform_names[num_uniforms] = cgHashName(buffer);
+                    uniform_info [num_uniforms] = uv;
+                    num_uniforms++;
+                }
+                break;
+        }
+    }
 }
 
 /// @summary Fills a memory buffer with a checkerboard pattern. This is useful for indicating uninitialized textures and for testing. The image internal format is expected to be GL_RGBA, data type GL_UNSIGNED_INT_8_8_8_8_REV, and the data is written using the native system byte ordering (GL_BGRA).
@@ -5993,28 +6538,6 @@ cgDepthStencilStateInitDefault
     return CG_SUCCESS;
 }
 
-internal_function void
-cgDeleteComputePipeline
-(
-    CG_CONTEXT          *ctx,
-    CG_COMPUTE_PIPELINE *pipeline
-)
-{
-    for (size_t i = 0, n = pipeline->ContextCount; i < n; ++i)
-    {
-        if (pipeline->KernelList[i] != NULL)
-        {
-            clReleaseKernel(pipeline->KernelList[i]);
-        }
-    }
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->Arguments       , pipeline->ArgumentCount * sizeof(CG_CL_KERNEL_ARG)    , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->ArgumentNames   , pipeline->ArgumentCount * sizeof(uint32_t)            , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernelInfo, pipeline->DeviceCount   * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernels   , pipeline->DeviceCount   * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->KernelList      , pipeline->ContextCount  * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
-    memset(pipeline, 0, sizeof(CG_COMPUTE_PIPELINE));
-}
-
 /// @summary Create a new compute pipeline object to execute an OpenCL compute kernel.
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group defining the devices the kernel may execute on.
@@ -6143,482 +6666,6 @@ cgCreateComputePipeline
 error_cleanup:
     cgDeleteComputePipeline(ctx, &pipe.Compute);
     return CG_INVALID_HANDLE;
-}
-
-internal_function void
-cgDeleteGraphicsPipeline
-(
-    CG_CONTEXT           *ctx,
-    CG_GRAPHICS_PIPELINE *pipeline
-)
-{
-    for (size_t i = 0, n = pipeline->DeviceCount; i < n; ++i)
-    {
-        CG_GLSL_PROGRAM *glsl = &pipeline->DevicePrograms[i];
-        if (glsl->Program)
-        {   // the OpenGL entry points are the same for all displays attached to the device.
-            CG_DISPLAY *display = pipeline->DeviceList[i]->AttachedDisplays[0];
-            glDeleteProgram(glsl->Program);
-        }
-        // free related metadata allocated in host memory.
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->Samplers      , glsl->SamplerCount   * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->SamplerNames  , glsl->SamplerCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->Attributes    , glsl->AttributeCount * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->AttributeNames, glsl->AttributeCount * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->Uniforms      , glsl->UniformCount   * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->UniformNames  , glsl->UniformCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-        memset(glsl, 0, sizeof(CG_GLSL_PROGRAM));
-    }
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DevicePrograms , pipeline->DeviceCount   * sizeof(CG_GLSL_PROGRAM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DisplayPrograms, pipeline->DisplayCount  * sizeof(CG_GLSL_PROGRAM*) , 0, CG_ALLOCATION_TYPE_OBJECT);
-    memset(pipeline, 0, sizeof(CG_GRAPHICS_PIPELINE));
-}
-
-internal_function GLuint
-cgResolveGraphicsShader
-(
-    CG_KERNEL *kernel,
-    CG_DEVICE *device
-)
-{
-    if (kernel != NULL)
-    {
-        for (size_t i = 0, n = kernel->Graphics.DisplayCount; i < n; ++i)
-        {
-            if (kernel->Graphics.DisplayList[i]->DisplayDevice == device)
-            {   // found the shader object corresponding to this device.
-                // note that the shader object may not actually be valid.
-                return kernel->Graphics.Shader[i];
-            }
-        }
-    }
-    return GLuint(0);
-}
-
-/// @summary Counts the number of active vertex attribues, texture samplers and uniform values defined in a shader program.
-/// @param display The display managing the rendering context.
-/// @param program The OpenGL program object to query.
-/// @param buffer A temporary buffer used to hold attribute and uniform names.
-/// @param buffer_size The maximum number of bytes that can be written to the temporary name buffer.
-/// @param include_builtins Specify true to include GLSL builtin values in the returned vertex attribute count.
-/// @param out_num_attribs On return, this address is updated with the number of active vertex attribute values.
-/// @param out_num_samplers On return, this address is updated with the number of active texture sampler values.
-/// @param out_num_uniforms On return, this address is updated with the number of active uniform values.
-internal_function void
-cgGlslReflectProgramCounts
-(
-    CG_DISPLAY *display,
-    GLuint      program,
-    char       *buffer,
-    size_t      buffer_size,
-    bool        include_builtins,
-    size_t     &out_num_attribs,
-    size_t     &out_num_samplers,
-    size_t     &out_num_uniforms
-)
-{
-    size_t  num_attribs  = 0;
-    GLint   attrib_count = 0;
-    GLsizei buf_size     = (GLsizei) buffer_size;
-
-    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attrib_count);
-    for (GLint i = 0; i < attrib_count; ++i)
-    {
-        GLenum type = GL_FLOAT;
-        GLuint idx  = (GLuint) i;
-        GLint  len  = 0;
-        GLint  sz   = 0;
-        glGetActiveAttrib(program, idx, buf_size, &len, &sz, &type, buffer);
-        if (cgGlslBuiltIn(buffer) && !include_builtins)
-            continue;
-        num_attribs++;
-    }
-
-    size_t num_samplers  = 0;
-    size_t num_uniforms  = 0;
-    GLint  uniform_count = 0;
-
-    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
-    for (GLint i = 0; i < uniform_count; ++i)
-    {
-        GLenum type = GL_FLOAT;
-        GLuint idx  = (GLuint) i;
-        GLint  len  = 0;
-        GLint  sz   = 0;
-        glGetActiveUniform(program, idx, buf_size, &len, &sz, &type, buffer);
-        if (cgGlslBuiltIn (buffer) && !include_builtins)
-            continue;
-
-        switch (type)
-        {
-            case GL_SAMPLER_1D:
-            case GL_INT_SAMPLER_1D:
-            case GL_UNSIGNED_INT_SAMPLER_1D:
-            case GL_SAMPLER_1D_SHADOW:
-            case GL_SAMPLER_2D:
-            case GL_INT_SAMPLER_2D:
-            case GL_UNSIGNED_INT_SAMPLER_2D:
-            case GL_SAMPLER_2D_SHADOW:
-            case GL_SAMPLER_3D:
-            case GL_INT_SAMPLER_3D:
-            case GL_UNSIGNED_INT_SAMPLER_3D:
-            case GL_SAMPLER_CUBE:
-            case GL_INT_SAMPLER_CUBE:
-            case GL_UNSIGNED_INT_SAMPLER_CUBE:
-            case GL_SAMPLER_CUBE_SHADOW:
-            case GL_SAMPLER_1D_ARRAY:
-            case GL_SAMPLER_1D_ARRAY_SHADOW:
-            case GL_INT_SAMPLER_1D_ARRAY:
-            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
-            case GL_SAMPLER_2D_ARRAY:
-            case GL_SAMPLER_2D_ARRAY_SHADOW:
-            case GL_INT_SAMPLER_2D_ARRAY:
-            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
-            case GL_SAMPLER_BUFFER:
-            case GL_INT_SAMPLER_BUFFER:
-            case GL_UNSIGNED_INT_SAMPLER_BUFFER:
-            case GL_SAMPLER_2D_RECT:
-            case GL_SAMPLER_2D_RECT_SHADOW:
-            case GL_INT_SAMPLER_2D_RECT:
-            case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
-            case GL_SAMPLER_2D_MULTISAMPLE:
-            case GL_INT_SAMPLER_2D_MULTISAMPLE:
-            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
-            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
-            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
-            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
-                num_samplers++;
-                break;
-
-            default:
-                num_uniforms++;
-                break;
-        }
-    }
-
-    // set the output values for the caller.
-    out_num_attribs  = num_attribs;
-    out_num_samplers = num_samplers;
-    out_num_uniforms = num_uniforms;
-}
-
-internal_function void
-cgGlslReflectProgramMetadata
-(
-    CG_DISPLAY      *display,
-    GLuint           program,
-    char            *buffer,
-    size_t           buffer_size,
-    bool             include_builtins,
-    CG_GLSL_PROGRAM *glsl
-)
-{
-    uint32_t          *attrib_names  = glsl->AttributeNames;
-    uint32_t          *sampler_names = glsl->SamplerNames;
-    uint32_t          *uniform_names = glsl->UniformNames;
-    CG_GLSL_ATTRIBUTE *attrib_info   = glsl->Attributes;
-    CG_GLSL_SAMPLER   *sampler_info  = glsl->Samplers;
-    CG_GLSL_UNIFORM   *uniform_info  = glsl->Uniforms;
-    size_t             num_attribs   = 0;
-    GLint              attrib_count  = 0;
-    GLsizei            buf_size      =(GLsizei) buffer_size;
-
-    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTES, &attrib_count);
-    for (GLint i = 0; i < attrib_count; ++i)
-    {
-        GLenum type = GL_FLOAT;
-        GLuint idx  = (GLuint) i;
-        GLint  len  = 0;
-        GLint  loc  = 0;
-        GLint  sz   = 0;
-        glGetActiveAttrib(program, idx, buf_size, &len, &sz, &type, buffer);
-        if (cgGlslBuiltIn(buffer) && !include_builtins)
-            continue;
-
-        CG_GLSL_ATTRIBUTE va;
-        loc             = glGetAttribLocation(program, buffer);
-        va.DataType     =(GLenum)   type;
-        va.Location     =(GLint)    loc;
-        va.DataSize     =(size_t)   cgGlDataSize(type) * sz;
-        va.DataOffset   =(size_t)   0; // for application use only
-        va.Dimension    =(size_t)   sz;
-        attrib_names[num_attribs] = cgHashName(buffer);
-        attrib_info [num_attribs] = va;
-        num_attribs++;
-    }
-
-    size_t num_samplers  = 0;
-    size_t num_uniforms  = 0;
-    GLint  uniform_count = 0;
-    GLint  texture_unit  = 0;
-
-    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniform_count);
-    for (GLint i = 0; i < uniform_count; ++i)
-    {
-        GLenum type = GL_FLOAT;
-        GLuint idx  = (GLuint) i;
-        GLint  len  = 0;
-        GLint  loc  = 0;
-        GLint  sz   = 0;
-        glGetActiveUniform(program, idx, buf_size, &len, &sz, &type, buffer);
-        if (cgGlslBuiltIn (buffer) && !include_builtins)
-            continue;
-
-        switch (type)
-        {
-            case GL_SAMPLER_1D:
-            case GL_INT_SAMPLER_1D:
-            case GL_UNSIGNED_INT_SAMPLER_1D:
-            case GL_SAMPLER_1D_SHADOW:
-            case GL_SAMPLER_2D:
-            case GL_INT_SAMPLER_2D:
-            case GL_UNSIGNED_INT_SAMPLER_2D:
-            case GL_SAMPLER_2D_SHADOW:
-            case GL_SAMPLER_3D:
-            case GL_INT_SAMPLER_3D:
-            case GL_UNSIGNED_INT_SAMPLER_3D:
-            case GL_SAMPLER_CUBE:
-            case GL_INT_SAMPLER_CUBE:
-            case GL_UNSIGNED_INT_SAMPLER_CUBE:
-            case GL_SAMPLER_CUBE_SHADOW:
-            case GL_SAMPLER_1D_ARRAY:
-            case GL_SAMPLER_1D_ARRAY_SHADOW:
-            case GL_INT_SAMPLER_1D_ARRAY:
-            case GL_UNSIGNED_INT_SAMPLER_1D_ARRAY:
-            case GL_SAMPLER_2D_ARRAY:
-            case GL_SAMPLER_2D_ARRAY_SHADOW:
-            case GL_INT_SAMPLER_2D_ARRAY:
-            case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
-            case GL_SAMPLER_BUFFER:
-            case GL_INT_SAMPLER_BUFFER:
-            case GL_UNSIGNED_INT_SAMPLER_BUFFER:
-            case GL_SAMPLER_2D_RECT:
-            case GL_SAMPLER_2D_RECT_SHADOW:
-            case GL_INT_SAMPLER_2D_RECT:
-            case GL_UNSIGNED_INT_SAMPLER_2D_RECT:
-            case GL_SAMPLER_2D_MULTISAMPLE:
-            case GL_INT_SAMPLER_2D_MULTISAMPLE:
-            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
-            case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
-            case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
-            case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
-                {
-                    CG_GLSL_SAMPLER  ts;
-                    loc            = glGetUniformLocation(program, buffer);
-                    ts.SamplerType =(GLenum)      type;
-                    ts.BindTarget  =(GLenum)      cgGlTextureTarget(type);
-                    ts.Location    =(GLint)       loc;
-                    ts.ImageUnit   =(GLint)       texture_unit++;
-                    sampler_names[num_samplers] = cgHashName(buffer);
-                    sampler_info [num_samplers] = ts;
-                    num_samplers++;
-                }
-                break;
-
-            default:
-                {
-                    CG_GLSL_UNIFORM  uv;
-                    loc            = glGetUniformLocation(program, buffer);
-                    uv.DataType    =(GLenum)      type;
-                    uv.Location    =(GLint)       loc;
-                    uv.DataSize    =(size_t)      cgGlDataSize(type) * sz;
-                    uv.DataOffset  =(size_t)      0; // for application use only
-                    uv.Dimension   =(size_t)      sz;
-                    uniform_names[num_uniforms] = cgHashName(buffer);
-                    uniform_info [num_uniforms] = uv;
-                    num_uniforms++;
-                }
-                break;
-        }
-    }
-}
-
-/// @summary Convert a CGFX blend function value to the corresponding OpenGL enum.
-/// @param factor The CGFX blend function value, one of cg_blend_function_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlBlendFunction
-(
-    int func
-)
-{
-    switch (func)
-    {
-        case CG_BLEND_FUNCTION_ADD             : return GL_FUNC_ADD;
-        case CG_BLEND_FUNCTION_SUBTRACT        : return GL_FUNC_SUBTRACT;
-        case CG_BLEND_FUNCTION_REVERSE_SUBTRACT: return GL_FUNC_REVERSE_SUBTRACT;
-        case CG_BLEND_FUNCTION_MIN             : return GL_MIN;
-        case CG_BLEND_FUNCTION_MAX             : return GL_MAX;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX blend factor value to the corresponding OpenGL enum.
-/// @param factor The CGFX blend factor value, one of cg_blend_factor_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlBlendFactor
-(
-    int factor
-)
-{
-    switch (factor)
-    {
-        case CG_BLEND_FACTOR_ZERO           : return GL_ZERO;
-        case CG_BLEND_FACTOR_ONE            : return GL_ONE;
-        case CG_BLEND_FACTOR_SRC_COLOR      : return GL_SRC_COLOR;
-        case CG_BLEND_FACTOR_INV_SRC_COLOR  : return GL_ONE_MINUS_SRC_COLOR;
-        case CG_BLEND_FACTOR_DST_COLOR      : return GL_DST_COLOR;
-        case CG_BLEND_FACTOR_INV_DST_COLOR  : return GL_ONE_MINUS_DST_COLOR;
-        case CG_BLEND_FACTOR_SRC_ALPHA      : return GL_SRC_ALPHA;
-        case CG_BLEND_FACTOR_INV_SRC_ALPHA  : return GL_ONE_MINUS_SRC_ALPHA;
-        case CG_BLEND_FACTOR_DST_ALPHA      : return GL_DST_ALPHA;
-        case CG_BLEND_FACTOR_INV_DST_ALPHA  : return GL_ONE_MINUS_DST_ALPHA;
-        case CG_BLEND_FACTOR_CONST_COLOR    : return GL_CONSTANT_COLOR;
-        case CG_BLEND_FACTOR_INV_CONST_COLOR: return GL_ONE_MINUS_CONSTANT_COLOR;
-        case CG_BLEND_FACTOR_CONST_ALPHA    : return GL_CONSTANT_ALPHA;
-        case CG_BLEND_FACTOR_INV_CONST_ALPHA: return GL_ONE_MINUS_CONSTANT_ALPHA;
-        case CG_BLEND_FACTOR_SRC_ALPHA_SAT  : return GL_SRC_ALPHA_SATURATE;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX comparison function value to the corresponding OpenGL enum.
-/// @param mode The CGFX comparison function, one of cg_compare_function_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlCompareFunction
-(
-    int func
-)
-{
-    switch (func)
-    {
-        case CG_COMPARE_NEVER        : return GL_NEVER;
-        case CG_COMPARE_LESS         : return GL_LESS;
-        case CG_COMPARE_EQUAL        : return GL_EQUAL;
-        case CG_COMPARE_LESS_EQUAL   : return GL_LEQUAL;
-        case CG_COMPARE_GREATER      : return GL_GREATER;
-        case CG_COMPARE_NOT_EQUAL    : return GL_NOTEQUAL;
-        case CG_COMPARE_GREATER_EQUAL: return GL_GEQUAL;
-        case CG_COMPARE_ALWAYS       : return GL_ALWAYS;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX fill mode value to the corresponding OpenGL enum.
-/// @param mode The CGFX fill mode, one of cg_fill_mode_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlFillMode
-(
-    int mode
-)
-{
-    switch (mode)
-    {
-        case CG_FILL_SOLID    : return GL_FILL;
-        case CG_FILL_WIREFRAME: return GL_LINE;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX cull mode value to the corresponding OpenGL enum.
-/// @param mode The CGFX culling mode, one of cg_cull_mode_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlCullMode
-(
-    int mode
-)
-{
-    switch (mode)
-    {
-        case CG_CULL_NONE : return GL_NONE;
-        case CG_CULL_FRONT: return GL_FRONT;
-        case CG_CULL_BACK : return GL_BACK;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX winding order value to the corresponding OpenGL enum.
-/// @param winding The CGFX winding order value, one of cg_winding_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlWindingOrder
-(
-    int winding
-)
-{
-    switch (winding)
-    {
-        case CG_WINDING_CCW: return GL_CCW;
-        case CG_WINDING_CW : return GL_CW;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX primitive topology value to the corresponding OpenGL enum.
-/// @param topology The CGFX primitive topology value, one of cg_primitive_topology_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlPrimitiveTopology
-(
-    int topology
-)
-{
-    switch (topology)
-    {
-        case CG_PRIMITIVE_POINT_LIST    : return GL_POINTS;
-        case CG_PRIMITIVE_LINE_LIST     : return GL_LINES;
-        case CG_PRIMITIVE_LINE_STRIP    : return GL_LINE_STRIP;
-        case CG_PRIMITIVE_TRIANGLE_LIST : return GL_TRIANGLES;
-        case CG_PRIMITIVE_TRIANGLE_STRIP: return GL_TRIANGLE_STRIP;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a CGFX stencil operation value to the corresponding OpenGL enum.
-/// @param op The CGFX stencil operation, one of cg_stencil_operation_e.
-/// @return The corresponding OpenGL enum value, or GL_INVALID_ENUM.
-internal_function GLenum
-cgGlStencilOp
-(
-    int op
-)
-{
-    switch (op)
-    {
-        case CG_STENCIL_OP_KEEP     : return GL_KEEP;
-        case CG_STENCIL_OP_ZERO     : return GL_ZERO;
-        case CG_STENCIL_OP_REPLACE  : return GL_REPLACE;
-        case CG_STENCIL_OP_INC_CLAMP: return GL_INCR;
-        case CG_STENCIL_OP_DEC_CLAMP: return GL_DECR;
-        case CG_STENCIL_OP_INVERT   : return GL_INVERT;
-        case CG_STENCIL_OP_INC_WRAP : return GL_INCR_WRAP;
-        case CG_STENCIL_OP_DEC_WRAP : return GL_DECR_WRAP;
-        default: break;
-    }
-    return GL_INVALID_ENUM;
-}
-
-/// @summary Convert a boolean value into either GL_TRUE or GL_FALSE.
-/// @param value The value to convert.
-/// @return One of GL_TRUE or GL_FALSE.
-internal_function GLboolean
-cgGlBoolean
-(
-    bool value
-)
-{
-    return value ? GL_TRUE : GL_FALSE;
 }
 
 /// @summary Create a new graphics pipeline object to execute an OpenGL shader program.
