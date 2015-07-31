@@ -367,6 +367,22 @@ struct CG_DISPLAY
     WGLEWContext                 WGLEW;                /// OpenGL windowing extension function pointers for the attached displays.
 };
 
+/// @summary Define the state associated with a device memory heap.
+struct CG_HEAP
+{
+    cl_device_id                 ParentDeviceId;       /// The OpenCL device identifier of the device that owns the heap.
+    int                          Type;                 /// One of cg_heap_type_e specifying the type of heap, relative to the device.
+    uint32_t                     Flags;                /// A combination of cg_heap_flags_e specifying heap attributes.
+    cl_device_type               DeviceType;           /// The type of OpenCL device that owns this heap.
+    cl_ulong                     HeapSizeTotal;        /// The total size of the heap, in bytes.
+    cl_ulong                     HeapSizeUsed;         /// An estimate of the number of bytes allocated from the heap.
+    cl_ulong                     PinnableTotal;        /// The number of bytes of pinnable memory.
+    cl_ulong                     PinnableUsed;         /// An estimate of the number of bytes of pinnable memory allocated from the heap.
+    size_t                       DeviceAlignment;      /// The allocation alignment for device-allocated memory.
+    size_t                       UserAlignment;        /// The allocation alignment for user-allocated memory.
+    size_t                       UserSizeAlign;        /// The allocation size multiple for user-allocated memory.
+};
+
 /// @summary Define the data used to identify a device queue. The queue may be used for compute, graphics, or data transfer.
 /// Command buffer construction may be performed from multiple threads, but command buffer submission must be performed from the 
 /// thread that called cgEnumerateDevices().
@@ -622,6 +638,9 @@ struct CG_CONTEXT
     CG_HOST_ALLOCATOR            HostAllocator;        /// The allocator implementation used to allocate host memory.
 
     cg_cpu_counts_t              CPUCounts;            /// Information about the CPU resources available in the local system.
+
+    size_t                       HeapCount;            /// The number of heaps defined by all devices in the local system.
+    CG_HEAP                     *HeapList;             /// The set of heaps defined by all devices in the local system.
 
     CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
     CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.

@@ -64,6 +64,7 @@ struct cg_application_info_t;
 struct cg_allocation_callbacks_t;
 struct cg_execution_group_t;
 struct cg_cpu_counts_t;
+struct cg_heap_info_t;
 struct cg_command_t;
 struct cg_kernel_code_t;
 struct cg_blend_state_t;
@@ -86,6 +87,8 @@ typedef void         (CG_API *cgMemoryFree_fn                  )(void *, size_t,
 typedef char const*  (CG_API *cgResultString_fn                )(int);
 typedef int          (CG_API *cgEnumerateDevices_fn            )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
 typedef int          (CG_API *cgGetContextInfo_fn              )(uintptr_t, int, void *, size_t, size_t *);
+typedef size_t       (CG_API *cgGetHeapCount_fn                )(uintptr_t);
+typedef int          (CG_API *cgGetHeapProperties_fn           )(uintptr_t, size_t, cg_heap_info_t &);
 typedef size_t       (CG_API *cgGetDeviceCount_fn              )(uintptr_t);
 typedef int          (CG_API *cgGetDeviceInfo_fn               )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef size_t       (CG_API *cgGetDisplayCount_fn             )(uintptr_t);
@@ -415,6 +418,15 @@ enum cg_memory_ref_flags_e : uint32_t
     CG_MEMORY_REF_FLAGS_WRITE_ONLY     = (1 << 1),  /// The memory object will only be written to.
 };
 
+enum cg_memory_object_flags_e : uint32_t
+{
+    CG_MEMORY_OBJECT_COMPUTE           = (1 << 0),  /// The memory object may be referenced in compute kernels.
+    CG_MEMORY_OBJECT_GRAPHICS          = (1 << 1),  /// The memory object may be referenced in graphics kernels.
+    CG_MEMORY_OBJECT_KERNEL_READ_WRITE = (1 << 2),  /// The memory object may be used for both input and output within a kernel.
+    CG_MEMORY_OBJECT_KERNEL_READ_ONLY  = (1 << 3),  /// The memory object is only used for input within a kernel.
+    CG_MEMORY_OBJECT_KERNEL_WRITE_ONLY = (1 << 4),  /// The memory object is only used for output within a kernel.
+};
+
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
 struct cg_application_info_t
 {
@@ -456,13 +468,25 @@ struct cg_memory_ref_t
 };
 
 /// @summary Define the data returned when querying for the CPU resources available in the system.
-/// cg_context_info_param_e::CG_CONTEXT_CPU_COUNTS.
 struct cg_cpu_counts_t
 {
     size_t                        NUMANodes;        /// The number of NUMA nodes in the system.
     size_t                        PhysicalCPUs;     /// The number of physical CPU packages in the system.
     size_t                        PhysicalCores;    /// The number of physical CPU cores in the system.
     size_t                        HardwareThreads;  /// The number of hardware threads in the system.
+};
+
+/// @summary Define basic properties of a memory heap.
+struct cg_heap_info_t
+{
+    size_t                        Ordinal;          /// The heap ordinal identifier.
+    int                           Type;             /// One of cg_heap_type_e specifying the type of video memory.
+    uint32_t                      Flags;            /// A combination of cg_heap_flags_e specifying heap attributes.
+    uint64_t                      HeapSize;         /// The total size of the heap memory, in bytes.
+    uint64_t                      PinnableSize;     /// The total number of bytes of heap memory that can be pinned.
+    size_t                        DeviceAlignment;  /// The address alignment of any buffer allocated on the heap.
+    size_t                        UserAlignment;    /// The address alignment of any user-allocated memory shared with the heap.
+    size_t                        UserSizeAlign;    /// The allocation size multiple for user-allocated memory.
 };
 
 /// @summary Define the basic in-memory format of a single command in a command buffer.
@@ -592,6 +616,20 @@ cgGetContextInfo                                    /// Retrieve context-level c
     void                         *data,             /// Buffer to receive the data.
     size_t                        buffer_size,      /// The maximum number of bytes to write to the data buffer.
     size_t                       *bytes_needed      /// On return, if non-NULL, store the number of bytes required to receive the data.
+);
+
+size_t
+cgGetHeapCount                                      /// Retrieve the number of memory heaps available to compute devices.
+(
+    uintptr_t                     context           /// A CGFX context returned by cgEnumerateDevices.
+);
+
+int
+cgGetHeapProperties                                 /// Query the attributes of a heap memory.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    size_t                        ordinal,          /// The ordinal number of the heap to query, in [0, cgGetHeapCount(context)).
+    cg_heap_info_t               &heap_info         /// On return, stores attributes of the specified heap.
 );
 
 size_t
@@ -875,6 +913,10 @@ cgCreateGraphicsPipeline                            /// Create a new graphics pi
     cg_graphics_pipeline_t const *create_info,      /// A description of the graphics pipeline to create.
     int                          &result            /// On return, set to CG_SUCCESS, CG_UNSUPPORTED or another value.
 );
+
+// when creating a buffer, need to know if it will be used for display.
+// if so, the buffer needs to be created from the GL side first, and then
+// use clCreateFromGLBuffer to create the corresponding CL object.
 
 #ifdef __cplusplus
 };     /* extern "C"  */

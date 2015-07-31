@@ -1059,6 +1059,7 @@ cgCreateContext
         result = CG_OUT_OF_MEMORY;
         return NULL;
     }
+    memset(ctx, 0, sizeof(CG_CONTEXT));
 
     // initialize the various object tables on the context to empty.
     cgObjectTableInit(&ctx->DeviceTable   , CG_OBJECT_DEVICE         , CG_DEVICE_TABLE_ID);
@@ -1126,6 +1127,8 @@ cgDeleteContext
         CG_DISPLAY *obj = &ctx->DisplayTable.Objects[i];
         cgDeleteDisplay(ctx, obj);
     }
+    // free heap descriptors:
+    cgFreeHostMemory(host_alloc, ctx->HeapList, ctx->HeapCount * sizeof(CG_HEAP), 0, CG_ALLOCATION_TYPE_OBJECT);
     // finally, free the memory block for the context structure:
     cgFreeHostMemory(host_alloc, ctx, sizeof(CG_CONTEXT), 0, CG_ALLOCATION_TYPE_OBJECT);
 }
@@ -1197,6 +1200,152 @@ cgGetCpuCounts
     // free the temporary buffer:
     cgFreeHostMemory(&ctx->HostAllocator, lpibuf, size_t(buffer_size), 0, CG_ALLOCATION_TYPE_TEMP);
     return CG_SUCCESS;
+}
+
+/// @summary Determine the number of heaps exposed by the set of devices in the local system.
+/// @param ctx The CGFX context managing the device set.
+/// @return The number of unique heaps in the local system.
+internal_function size_t
+cgClCountUniqueHeaps
+(
+    CG_CONTEXT *ctx
+)
+{
+    size_t cpus_n = 0;
+    size_t heap_n = 0;
+    for (size_t i = 0, n = ctx->DeviceTable.ObjectCount; i < n; ++i)
+    {
+        CG_DEVICE const *dev = &ctx->DeviceTable.Objects[i];
+        if (dev->Type == CL_DEVICE_TYPE_CPU)
+        {   // CPU devices support partitioning. CPUs share a heap.
+            cpus_n++;  // heap_n updated outside of the loop.
+        }
+        else
+        {   // GPU and accelerator devices have two heaps.
+            // the first is the local heap, which is sized to device global memory.
+            // the second is the pinned memory heap, which is sized to the max allocation.
+            heap_n += 2;
+        }
+    }
+    if (cpus_n > 0)
+    {
+        if (cpus_n >= ctx->CPUCounts.NUMANodes)
+        {   // CPUs have one heap per-NUMA node.
+            heap_n += ctx->CPUCounts.NUMANodes;
+        }
+        else
+        {   // one heap per logical CPU device. 
+            // it's possible that one or more nodes are disabled.
+            heap_n += cpus_n;
+        }
+    }
+    return heap_n;
+}
+
+/// @summary Determine whether a device heap is already defined. This is necessary for CPU devices that may be partitioned.
+/// @param partition_type One of cl_device_partition_property, or 0, specifying the parition type of the device.
+/// @param heap The heap attributes to search for.
+/// @param heap_list The heap list to search.
+/// @param heap_count The number of heaps currently defined.
+/// @param heap_index If the function returns true, on return, this value contains the zero-based index of the existing heap in @a heap_list.
+/// @return true if the specified heap exists.
+internal_function bool
+cgClHasHeap
+(
+    intptr_t partition_type,
+    CG_HEAP *heap,
+    CG_HEAP *heap_list, 
+    size_t   heap_count, 
+    size_t  &heap_index
+)
+{
+    if (partition_type == CL_DEVICE_PARTITION_AFFINITY_DOMAIN)
+        return false;
+    for (size_t i = 0; i < heap_count; ++i)
+    {
+        if (heap->ParentDeviceId == heap_list[i].ParentDeviceId && 
+            heap->Type           == heap_list[i].Type           && 
+            heap->HeapSizeTotal  == heap_list[i].HeapSizeTotal)
+        {
+            heap_index = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// @summary Retrieve information about the available heaps in the system.
+/// @param ctx The CGFX context defining the device list.
+/// @param heaps An array of @a max_heaps items to populate with data.
+/// @param max_heaps The maximum number of heaps to write to @a heaps.
+/// @return The number of heaps written to @a heaps.
+internal_function size_t
+cgClGetHeapInformation
+(
+    CG_CONTEXT *ctx, 
+    CG_HEAP    *heaps, 
+    size_t      max_heaps
+)
+{
+    SYSTEM_INFO  info;
+    size_t heap_count = 0;
+    GetNativeSystemInfo(&info);
+    for (size_t i = 0 , n = ctx->DeviceTable.ObjectCount; i < n && heap_count < max_heaps; ++i)
+    {
+        CG_DEVICE const *dev = &ctx->DeviceTable.Objects[i];
+        cl_device_id     did = NULL;
+
+        clGetDeviceInfo(dev->DeviceId, CL_DEVICE_PARENT_DEVICE, sizeof(cl_device_id), &did, NULL);
+        if (did == NULL)
+        {   // this is a root device; it has no parent.
+            did = dev->DeviceId;
+        }
+
+        size_t props_size = 0;
+        cl_device_partition_property props[16];
+        memset(props, 0, sizeof(props));
+        clGetDeviceInfo(dev->DeviceId, CL_DEVICE_PARTITION_PROPERTIES, sizeof(props), props, &props_size);
+        if (props_size == 0) props[0] = 0; // terminate the list explicitly
+
+        // all devices define a local heap.
+        size_t   index        = heap_count;
+        CG_HEAP &local        = heaps[heap_count];
+        local.ParentDeviceId  = did;
+        local.Type            = CG_HEAP_TYPE_LOCAL;
+        local.Flags           = 0;
+        local.DeviceType      = dev->Type;
+        local.HeapSizeTotal   = dev->Capabilities.GlobalMemorySize;
+        local.HeapSizeUsed    = 0;
+        local.PinnableTotal   = 0;
+        local.PinnableUsed    = 0;
+        local.DeviceAlignment = dev->Capabilities.AddressAlign;
+        local.UserAlignment   = info.dwPageSize;
+        local.UserSizeAlign   = dev->Capabilities.AddressAlign;
+        if (dev->Type   != CL_DEVICE_TYPE_CPU || dev->Capabilities.UnifiedMemory)
+            local.Flags |= CG_HEAP_GPU_ACCESSIBLE;
+        if (dev->Type   == CL_DEVICE_TYPE_CPU || dev->Capabilities.UnifiedMemory)
+            local.Flags |= CG_HEAP_CPU_ACCESSIBLE;
+        if (dev->Type   != CL_DEVICE_TYPE_CPU)
+        {   // GPU and accelerator devices are typically accessed over PCIe and 
+            // have a portion of address space reserved as pinnable so that data
+            // can be transferred to local device memory via DMA.
+            local.PinnableTotal = dev->Capabilities.MaxMallocSize;
+            local.PinnableUsed  = 0;
+            local.Flags        |= CG_HEAP_HOLDS_PINNED;
+        }
+        if (dev->Capabilities.UnifiedMemory)
+        {   // use the maximum of the system page size and the device alignment.
+            // zero-copy buffers require 4KB alignment and a size multiple of 64KB (Intel and AMD).
+            // https://software.intel.com/en-us/articles/getting-the-most-from-opencl-12-how-to-increase-performance-by-minimizing-buffer-copies-on-intel-processor-graphics
+            local.UserSizeAlign = dev->Capabilities.GlobalCacheLineSize;
+        }
+        if (cgClHasHeap(props[0], &local, heaps, heap_count, index))
+        {   // mark the existing heap as being shared.
+            heaps[index].Flags |= CG_HEAP_SHAREABLE;
+        }
+        else heap_count++;
+    }
+    return heap_count;
 }
 
 /// @summary Check the device table for a context to determine if a given device is already known.
@@ -4490,9 +4639,11 @@ cgEnumerateDevices
     uintptr_t                   &context
 )
 {
-    int         res = CG_SUCCESS;
-    bool    new_ctx = false;
-    CG_CONTEXT *ctx = NULL;
+    int           res = CG_SUCCESS;
+    size_t heap_count = 0;
+    CG_HEAP    *heaps = NULL;
+    bool      new_ctx = false;
+    CG_CONTEXT   *ctx = NULL;
 
     if (context != 0)
     {   // the caller is calling with an existing context to be updated.
@@ -4536,6 +4687,15 @@ cgEnumerateDevices
         // we only care about whether the RC is interoperable with CL.
         cgGlCreateRenderingContext(ctx, &ctx->DisplayTable.Objects[i]);
     }
+
+    // count device heaps and gather heap information.
+    heap_count =  cgClCountUniqueHeaps(ctx);
+    if ((heaps = (CG_HEAP*) cgAllocateHostMemory(&ctx->HostAllocator, heap_count * sizeof(CG_HEAP), 1, CG_ALLOCATION_TYPE_INTERNAL)) == NULL)
+    {   // unable to allocate the required memory.
+        goto error_cleanup;
+    }
+    ctx->HeapCount = cgClGetHeapInformation(ctx, heaps, heap_count);
+    ctx->HeapList  = heaps;
 
     // update device count and handle tables:
     if (device_list == NULL || max_devices == 0)
@@ -4651,6 +4811,53 @@ cgGetContextInfo
 #undef  BUFFER_SET_SCALAR
 #undef  BUFFER_CHECK_SIZE
 #undef  BUFFER_CHECK_TYPE
+}
+
+/// @summary Retrieve the number of heaps available to compute devices in the system.
+/// @param context The CGFX context returned by a prior call to cgEnumerateDevices().
+/// @return The number of heaps available in the system.
+library_function size_t
+cgGetHeapCount
+(
+    uintptr_t context
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    return ctx->HeapCount;
+}
+
+/// @summary Retrieve the properties of a memory heap.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param heap_ordinal The zero-based ordinal of the heap to query, in [0, cgGetHeapCount(context)).
+/// @param heap_info On return, this structure stores heap attributes.
+/// @return CG_SUCCESS or CG_INVALID_VALUE.
+library_function int
+cgGetHeapProperties
+(
+    uintptr_t       context, 
+    size_t          heap_ordinal, 
+    cg_heap_info_t &heap_info
+)
+{
+    CG_CONTEXT  *ctx = (CG_CONTEXT*) context;
+
+    // zero out the heap data for the caller.
+    memset(&heap_info, 0, sizeof(cg_heap_info_t));
+    heap_info.Ordinal   = heap_ordinal;
+
+    // validate the heap index.
+    if (heap_ordinal   >= ctx->HeapCount)
+        return CG_INVALID_VALUE;
+
+    // copy over the heap attributes.
+    heap_info.Type            = ctx->HeapList[heap_ordinal].Type;
+    heap_info.Flags           = ctx->HeapList[heap_ordinal].Flags;
+    heap_info.HeapSize        = ctx->HeapList[heap_ordinal].HeapSizeTotal;
+    heap_info.PinnableSize    = ctx->HeapList[heap_ordinal].PinnableTotal;
+    heap_info.DeviceAlignment = ctx->HeapList[heap_ordinal].DeviceAlignment;
+    heap_info.UserAlignment   = ctx->HeapList[heap_ordinal].UserAlignment;
+    heap_info.UserSizeAlign   = ctx->HeapList[heap_ordinal].UserSizeAlign;
+    return CG_SUCCESS;
 }
 
 /// @summary Retrieve the number of compute devices found by cgEnumerateDevices.
