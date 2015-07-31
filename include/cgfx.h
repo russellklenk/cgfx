@@ -79,6 +79,9 @@ struct cg_compute_pipeline_t;
 /// @summary A special value representing an invalid handle.
 #define CG_INVALID_HANDLE   ((cg_handle_t)0)
 
+/// @summary A special value meaning that CGFX will determine the best heap placement.
+#define CG_IDEAL_HEAP       (~size_t(0))
+
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
@@ -170,11 +173,11 @@ enum cg_result_e : int
 /// @summary Define the categories of host memory allocations performed by CGFX.
 enum cg_allocation_type_e : int
 {
-    CG_ALLOCATION_TYPE_OBJECT          = 1,         /// Allocation used for an API object or data with API lifetime.
-    CG_ALLOCATION_TYPE_INTERNAL        = 2,         /// Allocation used for long-lived internal data.
-    CG_ALLOCATION_TYPE_TEMP            = 3,         /// Allocation used for short-lived internal data.
-    CG_ALLOCATION_TYPE_KERNEL          = 4,         /// Allocation used for short-lived kernel compilation.
-    CG_ALLOCATION_TYPE_DEBUG           = 5          /// Allocation used for debug data.
+    CG_ALLOCATION_TYPE_OBJECT          =  1,        /// Allocation used for an API object or data with API lifetime.
+    CG_ALLOCATION_TYPE_INTERNAL        =  2,        /// Allocation used for long-lived internal data.
+    CG_ALLOCATION_TYPE_TEMP            =  3,        /// Allocation used for short-lived internal data.
+    CG_ALLOCATION_TYPE_KERNEL          =  4,        /// Allocation used for short-lived kernel compilation.
+    CG_ALLOCATION_TYPE_DEBUG           =  5         /// Allocation used for debug data.
 };
 
 /// @summary Define the recognized object type identifiers.
@@ -186,79 +189,87 @@ enum cg_object_e : uint32_t
     CG_OBJECT_EXECUTION_GROUP          = (1 <<  2), /// The object type identifier for an execution group.
     CG_OBJECT_QUEUE                    = (1 <<  3), /// The object type identifier for a queue.
     CG_OBJECT_COMMAND_BUFFER           = (1 <<  4), /// The object type identifier for a command buffer.
-    CG_OBJECT_MEMORY                   = (1 <<  5), /// The object type identifier for a generic memory object.
-    CG_OBJECT_FENCE                    = (1 <<  6), /// The object type identifier for a fence.
-    CG_OBJECT_EVENT                    = (1 <<  7), /// The object type identifier for a waitable event.
-    CG_OBJECT_QUERY_POOL               = (1 <<  8), /// The object type identifier for a query pool.
-    CG_OBJECT_IMAGE                    = (1 <<  9), /// The object type identifier for an image.
-    CG_OBJECT_KERNEL                   = (1 << 10), /// The object type identifier for a compute or shader kernel.
-    CG_OBJECT_PIPELINE                 = (1 << 11), /// The object type identifier for a compute or display pipeline.
-    CG_OBJECT_SAMPLER                  = (1 << 12), /// The object type identifier for an image sampler.
+    CG_OBJECT_FENCE                    = (1 <<  5), /// The object type identifier for a fence.
+    CG_OBJECT_EVENT                    = (1 <<  6), /// The object type identifier for a waitable event.
+    CG_OBJECT_QUERY_POOL               = (1 <<  7), /// The object type identifier for a query pool.
+    CG_OBJECT_IMAGE                    = (1 <<  8), /// The object type identifier for an image.
+    CG_OBJECT_KERNEL                   = (1 <<  9), /// The object type identifier for a compute or shader kernel.
+    CG_OBJECT_PIPELINE                 = (1 << 10), /// The object type identifier for a compute or display pipeline.
+    CG_OBJECT_SAMPLER                  = (1 << 11), /// The object type identifier for an image sampler.
+    CG_OBJECT_BUFFER                   = (1 << 12), /// The object type identifier for a data buffer.
 };
 
 /// @summary Define the queryable or settable data on a CGFX context.
 enum cg_context_info_param_e : int
 {
-    CG_CONTEXT_CPU_COUNTS              = 0,         /// Retrieve the number of CPU resources in the system. Data is cg_cpu_counts_t.
-    CG_CONTEXT_DEVICE_COUNT            = 1,         /// Retrieve the number of capable compute devices in the system. Data is size_t.
-    CG_CONTEXT_DISPLAY_COUNT           = 2,         /// Retrieve the number of capable display devices attached to the system. Data is size_t. 
+    CG_CONTEXT_CPU_COUNTS              =  0,        /// Retrieve the number of CPU resources in the system. Data is cg_cpu_counts_t.
+    CG_CONTEXT_DEVICE_COUNT            =  1,        /// Retrieve the number of capable compute devices in the system. Data is size_t.
+    CG_CONTEXT_DISPLAY_COUNT           =  2,        /// Retrieve the number of capable display devices attached to the system. Data is size_t. 
 };
 
 /// @summary Define the queryable or settable data on a CGFX device.
 enum cg_device_info_param_e : int
 {
-    CG_DEVICE_CL_PLATFORM_ID           = 0,         /// Retrieve the OpenCL platform ID of the device. Data is cl_platform_id.
-    CG_DEVICE_CL_DEVICE_ID             = 1,         /// Retrieve the OpenCL device ID of the device. Data is cl_device_id.
-    CG_DEVICE_CL_DEVICE_TYPE           = 2,         /// Retrieve the OpenCL device type of the device. Data is cl_device_type.
-    CG_DEVICE_WINDOWS_HGLRC            = 3,         /// Retrieve the OpenGL rendering context of the device. Windows-only. Data is HGLRC.
-    CG_DEVICE_DISPLAY_COUNT            = 4,         /// Retrieve the number of displays attached to the device. Data is size_t.
-    CG_DEVICE_ATTACHED_DISPLAYS        = 5,         /// Retrieve the object handles of the attached displays. Data is cg_handle_t[CG_DEVICE_DISPLAY_COUNT].
-    CG_DEVICE_PRIMARY_DISPLAY          = 6,         /// Retrieve the primary display attached to the device. Data is cg_handle_t.
+    CG_DEVICE_CL_PLATFORM_ID           =  0,        /// Retrieve the OpenCL platform ID of the device. Data is cl_platform_id.
+    CG_DEVICE_CL_DEVICE_ID             =  1,        /// Retrieve the OpenCL device ID of the device. Data is cl_device_id.
+    CG_DEVICE_CL_DEVICE_TYPE           =  2,        /// Retrieve the OpenCL device type of the device. Data is cl_device_type.
+    CG_DEVICE_WINDOWS_HGLRC            =  3,        /// Retrieve the OpenGL rendering context of the device. Windows-only. Data is HGLRC.
+    CG_DEVICE_DISPLAY_COUNT            =  4,        /// Retrieve the number of displays attached to the device. Data is size_t.
+    CG_DEVICE_ATTACHED_DISPLAYS        =  5,        /// Retrieve the object handles of the attached displays. Data is cg_handle_t[CG_DEVICE_DISPLAY_COUNT].
+    CG_DEVICE_PRIMARY_DISPLAY          =  6,        /// Retrieve the primary display attached to the device. Data is cg_handle_t.
 };
 
 /// @summary Define the queryable or settable data on a CGFX display.
 enum cg_display_info_param_e : int
 {
-    CG_DISPLAY_DEVICE                  = 0,         /// Retrieve the CGFX handle of the compute device driving the display. Data is cg_handle_t.
-    CG_DISPLAY_CL_PLATFORM_ID          = 1,         /// Retrieve the OpenCL platform ID of the device driving the display. Data is cl_platform_id.
-    CG_DISPLAY_CL_DEVICE_ID            = 2,         /// Retrieve the OpenCL device ID of the device driving the display. Data is cl_platform_id.
-    CG_DISPLAY_WINDOWS_HDC             = 3,         /// Retrieve the Windows device context of the display. Data is HDC.
-    CG_DISPLAY_WINDOWS_HGLRC           = 4,         /// Retrieve the Windows OpenGL rendering context of the device. Data is HGLRC.
-    CG_DISPLAY_POSITION                = 5,         /// Retrieve the x and y-coordinate of the upper-left corner of the display in global display coordinates. Data is int[2].
-    CG_DISPLAY_SIZE                    = 6,         /// Retrieve the width and height of the display, in pixels. Data is size_t[2].
-    CG_DISPLAY_ORIENTATION             = 7,         /// Retrieve the current orientation of the display. Data is cg_display_orientation_e.
-    CG_DISPLAY_REFRESH_RATE            = 8,         /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.
+    CG_DISPLAY_DEVICE                  =  0,        /// Retrieve the CGFX handle of the compute device driving the display. Data is cg_handle_t.
+    CG_DISPLAY_CL_PLATFORM_ID          =  1,        /// Retrieve the OpenCL platform ID of the device driving the display. Data is cl_platform_id.
+    CG_DISPLAY_CL_DEVICE_ID            =  2,        /// Retrieve the OpenCL device ID of the device driving the display. Data is cl_platform_id.
+    CG_DISPLAY_WINDOWS_HDC             =  3,        /// Retrieve the Windows device context of the display. Data is HDC.
+    CG_DISPLAY_WINDOWS_HGLRC           =  4,        /// Retrieve the Windows OpenGL rendering context of the device. Data is HGLRC.
+    CG_DISPLAY_POSITION                =  5,        /// Retrieve the x and y-coordinate of the upper-left corner of the display in global display coordinates. Data is int[2].
+    CG_DISPLAY_SIZE                    =  6,        /// Retrieve the width and height of the display, in pixels. Data is size_t[2].
+    CG_DISPLAY_ORIENTATION             =  7,        /// Retrieve the current orientation of the display. Data is cg_display_orientation_e.
+    CG_DISPLAY_REFRESH_RATE            =  8,        /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.
 };
 
 /// @summary Define the queryable or settable data on a CGFX execution group.
 enum cg_execution_group_info_param_e : int
 {
-    CG_EXEC_GROUP_DEVICE_COUNT         = 0,         /// Retrieve the number of devices in the execution group. Data is size_t.
-    CG_EXEC_GROUP_DEVICES              = 1,         /// Retrieve the handles of all devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_DEVICE_COUNT].
-    CG_EXEC_GROUP_CPU_COUNT            = 2,         /// Retrieve the number of CPU devices in the execution group. Data is size_t.
-    CG_EXEC_GROUP_CPU_DEVICES          = 3,         /// Retrieve the handles of all CPU devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_CPU_COUNT].
-    CG_EXEC_GROUP_GPU_COUNT            = 4,         /// Retrieve the number of GPU devices in the execution group. Data is size_t.
-    CG_EXEC_GROUP_GPU_DEVICES          = 5,         /// Retrieve the handles of all GPU devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_GPU_COUNT].
-    CG_EXEC_GROUP_ACCELERATOR_COUNT    = 6,         /// Retrieve the number of accelerator devices in the execution group. Data is size_t.
-    CG_EXEC_GROUP_ACCELERATOR_DEVICES  = 7,         /// Retrieve the handles of all accelerator devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_ACCELERATOR_COUNT].
-    CG_EXEC_GROUP_DISPLAY_COUNT        = 8,         /// Retrieve the number of displays attached to the execution group. Data is size_t.
-    CG_EXEC_GROUP_ATTACHED_DISPLAYS    = 9,         /// Retrieve the handles of all attached displays in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_DISPLAY_COUNT].
-    CG_EXEC_GROUP_QUEUE_COUNT          = 10,        /// Retrieve the number of queues in the execution group. Data is size_t.
-    CG_EXEC_GROUP_QUEUES               = 11,        /// Retrieve the handles of all queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_QUEUE_COUNT].
-    CG_EXEC_GROUP_COMPUTE_QUEUE_COUNT  = 12,        /// Retrieve the number of compute queues in the execution group. Data is size_t.
-    CG_EXEC_GROUP_COMPUTE_QUEUES       = 13,        /// Retrieve the handles of all compute queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_COMPUTE_QUEUE_COUNT].
-    CG_EXEC_GROUP_TRANSFER_QUEUE_COUNT = 14,        /// Retrieve the number of transfer queues in the execution group. Data is size_t.
-    CG_EXEC_GROUP_TRANSFER_QUEUES      = 15,        /// Retrieve the handles of all transfer queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_TRANSFER_QUEUE_COUNT].
-    CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT = 16,        /// Retrieve the number of graphics queues in the execution group. Data is size_t.
-    CG_EXEC_GROUP_GRAPHICS_QUEUES      = 17,        /// Retrieve the handles of all graphics queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT].
+    CG_EXEC_GROUP_DEVICE_COUNT         =  0,        /// Retrieve the number of devices in the execution group. Data is size_t.
+    CG_EXEC_GROUP_DEVICES              =  1,        /// Retrieve the handles of all devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_DEVICE_COUNT].
+    CG_EXEC_GROUP_CPU_COUNT            =  2,        /// Retrieve the number of CPU devices in the execution group. Data is size_t.
+    CG_EXEC_GROUP_CPU_DEVICES          =  3,        /// Retrieve the handles of all CPU devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_CPU_COUNT].
+    CG_EXEC_GROUP_GPU_COUNT            =  4,        /// Retrieve the number of GPU devices in the execution group. Data is size_t.
+    CG_EXEC_GROUP_GPU_DEVICES          =  5,        /// Retrieve the handles of all GPU devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_GPU_COUNT].
+    CG_EXEC_GROUP_ACCELERATOR_COUNT    =  6,        /// Retrieve the number of accelerator devices in the execution group. Data is size_t.
+    CG_EXEC_GROUP_ACCELERATOR_DEVICES  =  7,        /// Retrieve the handles of all accelerator devices in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_ACCELERATOR_COUNT].
+    CG_EXEC_GROUP_DISPLAY_COUNT        =  8,        /// Retrieve the number of displays attached to the execution group. Data is size_t.
+    CG_EXEC_GROUP_ATTACHED_DISPLAYS    =  9,        /// Retrieve the handles of all attached displays in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_DISPLAY_COUNT].
+    CG_EXEC_GROUP_QUEUE_COUNT          =  10,       /// Retrieve the number of queues in the execution group. Data is size_t.
+    CG_EXEC_GROUP_QUEUES               =  11,       /// Retrieve the handles of all queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_QUEUE_COUNT].
+    CG_EXEC_GROUP_COMPUTE_QUEUE_COUNT  =  12,       /// Retrieve the number of compute queues in the execution group. Data is size_t.
+    CG_EXEC_GROUP_COMPUTE_QUEUES       =  13,       /// Retrieve the handles of all compute queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_COMPUTE_QUEUE_COUNT].
+    CG_EXEC_GROUP_TRANSFER_QUEUE_COUNT =  14,       /// Retrieve the number of transfer queues in the execution group. Data is size_t.
+    CG_EXEC_GROUP_TRANSFER_QUEUES      =  15,       /// Retrieve the handles of all transfer queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_TRANSFER_QUEUE_COUNT].
+    CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT =  16,       /// Retrieve the number of graphics queues in the execution group. Data is size_t.
+    CG_EXEC_GROUP_GRAPHICS_QUEUES      =  17,       /// Retrieve the handles of all graphics queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT].
+};
+
+enum cg_data_buffer_info_param_e : int
+{
+    CG_DATA_BUFFER_HEAP_ORDINAL        =  0,        /// Retrieve the ordinal of the heap on which the buffer was allocated.
+    CG_DATA_BUFFER_HEAP_TYPE           =  1,        /// Retrieve the cg_heap_type_e of the heap from which the buffer was allocated. Data is int.
+    CG_DATA_BUFFER_HEAP_FLAGS          =  2,        /// Retrieve the cg_heap_flags_e of the heap from which the buffer was allocated. Data is uint32_t.
+    CG_DATA_BUFFER_ALLOCATED_SIZE      =  3,        /// Retrieve the number of bytes allocated for the data buffer. Data is size_t.
 };
 
 /// @summary Define the recognized display orientation values.
 enum cg_display_orientation_e : int
 {
-    CG_DISPLAY_ORIENTATION_UNKNOWN     = 0,         /// The display orientation is not known.
-    CG_DISPLAY_ORIENTATION_LANDSCAPE   = 1,         /// The display device is in landscape mode.
-    CG_DISPLAY_ORIENTATION_PORTRAIT    = 2,         /// The display device is in portrait mode.
+    CG_DISPLAY_ORIENTATION_UNKNOWN     =  0,        /// The display orientation is not known.
+    CG_DISPLAY_ORIENTATION_LANDSCAPE   =  1,        /// The display device is in landscape mode.
+    CG_DISPLAY_ORIENTATION_PORTRAIT    =  2,        /// The display device is in portrait mode.
 };
 
 /// @summary Define the supported types of execution group queues.
@@ -381,6 +392,13 @@ enum cg_stencil_operation_e : int
     CG_STENCIL_OP_DEC_WRAP             =  8,        /// Decrement the existing stencil value by one, wrapping to maximum if the result exceeds the minimum value.
 };
 
+/// @summary Define the possible types of memory object access.
+enum cg_memory_access_e : int
+{
+    CG_MEMORY_ACCESS_HOST              =  1,        /// The memory object will be primarily accessed by the host.
+    CG_MEMORY_ACCESS_DEVICE            =  2,        /// The memory object will be primarily accessed by the device.
+};
+
 /// @summary Define flags that can be specified when creating an execution group.
 enum cg_execution_group_flags_e : uint32_t
 {
@@ -410,21 +428,19 @@ enum cg_heap_flags_e : uint32_t
     CG_HEAP_SHAREABLE                  = (1 << 3),  /// Memory objects can be shared between GPUs.
 };
 
-/// @summary Define the flags that can be specified with a memory object reference for command buffer submission.
-enum cg_memory_ref_flags_e : uint32_t
+/// @summary Define the types of kernels that will access a given memory object.
+enum cg_memory_object_kernel_e : uint32_t
 {
-    CG_MEMORY_REF_FLAGS_READ_WRITE     = (0 << 0),  /// The memory object may be both read and written.
-    CG_MEMORY_REF_FLAGS_READ_ONLY      = (1 << 0),  /// The memory object will only be read from.
-    CG_MEMORY_REF_FLAGS_WRITE_ONLY     = (1 << 1),  /// The memory object will only be written to.
+    CG_MEMORY_OBJECT_KERNEL_COMPUTE    = (1 << 0),  /// The memory object will be used with compute kernels.
+    CG_MEMORY_OBJECT_KERNEL_GRAPHICS   = (1 << 1),  /// The memory object will be used with graphics kernels.
 };
 
-enum cg_memory_object_flags_e : uint32_t
+/// @summary Define the flags specifying how data will be accessed by the host.
+enum cg_memory_access_flags_e : uint32_t
 {
-    CG_MEMORY_OBJECT_COMPUTE           = (1 << 0),  /// The memory object may be referenced in compute kernels.
-    CG_MEMORY_OBJECT_GRAPHICS          = (1 << 1),  /// The memory object may be referenced in graphics kernels.
-    CG_MEMORY_OBJECT_KERNEL_READ_WRITE = (1 << 2),  /// The memory object may be used for both input and output within a kernel.
-    CG_MEMORY_OBJECT_KERNEL_READ_ONLY  = (1 << 3),  /// The memory object is only used for input within a kernel.
-    CG_MEMORY_OBJECT_KERNEL_WRITE_ONLY = (1 << 4),  /// The memory object is only used for output within a kernel.
+    CG_MEMORY_ACCESS_READ              = (1 << 0),  /// The memory object will be read.
+    CG_MEMORY_ACCESS_WRITE             = (1 << 1),  /// The memory object will be written.
+    CG_MEMORY_ACCESS_PRESERVE          = (1 << 2),  /// The memory contents should be preserved.
 };
 
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
@@ -876,6 +892,48 @@ cgCreateGraphicsPipeline                            /// Create a new graphics pi
     cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
     cg_graphics_pipeline_t const *create_info,      /// A description of the graphics pipeline to create.
     int                          &result            /// On return, set to CG_SUCCESS, CG_UNSUPPORTED or another value.
+);
+
+cg_handle_t
+cgCreateDataBuffer                                  /// Create a new data buffer object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group defining the devices that will operate on the buffer.
+    size_t                        buffer_size,      /// The desired size of the data buffer, in bytes.
+    uint32_t                      kernel_types,     /// One or more of cg_memory_object_kernel_e specifying the type(s) of kernels requiring access to the buffer.
+    int                           primary_reader,   /// One of cg_memory_access_e specifying whether the host or a device is the primary reader of data in the buffer.
+    int                           primary_writer,   /// One of cg_memory_access_e specifying whether the host or a device is the primary writer of data in the buffer.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgGetDataBufferInfo                                 /// Retrieve data buffer properties.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   buffer,           /// The handle of the data buffer to query.
+    int                           param,            /// One of cg_data_buffer_info_param_e.
+    void                         *data,             /// Buffer to receive the data.
+    size_t                        buffer_size,      /// The maximum number of bytes to write to the data buffer.
+    size_t                       *bytes_needed      /// On return, if non-NULL, store the number of bytes required to receive the data.
+);
+
+void*
+cgMapDataBuffer                                     /// Map a portion of a data buffer into the host address space. This may initiate a blocking device to host data transfer operation.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   buffer,           /// The handle of the buffer to map.
+    size_t                        amount,           /// The number of bytes of the buffer that will be accessed.
+    uint32_t                      flags,            /// A combination of cg_memory_access_flags_e specifying how the buffer will be accessed.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgUnmapDataBuffer                                   /// Unmap a portion of a data buffer from the host address space. This may initiate a non-blocking host to device data transfer operation.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   buffer,           /// The handle of the buffer to unmap.
+    size_t                        modified_offset,  /// The offset of the first byte of the range that was modified by the host, with 0 indicating the start of the mapped range.
+    size_t                        modified_amount   /// The number of bytes that were modified.
 );
 
 int

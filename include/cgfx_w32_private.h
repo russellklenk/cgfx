@@ -123,6 +123,7 @@ struct CG_EXEC_GROUP;
 #define CG_EXEC_GROUP_TABLE_ID                   (4)
 #define CG_KERNEL_TABLE_ID                       (5)
 #define CG_PIPELINE_TABLE_ID                     (6)
+#define CG_BUFFER_TABLE_ID                       (7)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -133,6 +134,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_EXEC_GROUPS                       (CG_MAX_DEVICES)
 #define CG_MAX_KERNELS                           (8192)
 #define CG_MAX_PIPELINES                         (4096)
+#define CG_MAX_BUFFERS                           (65536)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -595,7 +597,6 @@ struct CG_COMPUTE_PIPELINE
 /// @summary Defines the data associated with an execution-read graphics pipeline.
 struct CG_GRAPHICS_PIPELINE
 {
-    #define STAGES               CG_OPENGL_MAX_SHADER_STAGES
     CG_DEPTH_STENCIL_STATE       DepthStencilState;    /// The fixed-function depth and stencil testing state to apply.
     CG_RASTER_STATE              RasterizerState;      /// The fixed-function rasterizer state to apply.
     CG_BLEND_STATE               BlendState;           /// The fixed-function blending unit state to apply.
@@ -623,6 +624,21 @@ struct CG_PIPELINE
     };
 };
 
+/// @summary Defines the data associated with a data buffer object.
+struct CG_BUFFER
+{
+    uint32_t                     ObjectId;             /// The CGFX internal object identifier.
+    uint32_t                     KernelTypes;          /// One or more of cg_memory_object_kernel_e specifying the types of kernels that can access the buffer.
+    CG_HEAP                     *SourceHeap;           /// The heap from which buffer memory is allocated.
+    cl_context                   SourceContext;        /// The OpenCL context in which the object is allocated.
+    cl_mem                       Compute;              /// The handle of the associated compute memory object, or NULL.
+    size_t                       WriteOffset;          /// The current write offset, in bytes.
+    size_t                       AllocatedSize;        /// The number of bytes actually allocated for the buffer.
+    size_t                       RequestedSize;        /// The number of bytes requested for the buffer.
+    cg_handle_t                  ExecutionGroup;       /// The handle of the execution group that owns the buffer.
+    GLuint                       Graphics;             /// The handle of the OpenGL buffer object, or 0.
+};
+
 /// @summary Typedef the object tables held by a context object.
 typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
 typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
@@ -631,6 +647,7 @@ typedef CG_OBJECT_TABLE<CG_CMD_BUFFER, CG_MAX_CMD_BUFFERS> CG_CMD_BUFFER_TABLE;
 typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
 typedef CG_OBJECT_TABLE<CG_PIPELINE  , CG_MAX_PIPELINES  > CG_PIPELINE_TABLE;
+typedef CG_OBJECT_TABLE<CG_BUFFER    , CG_MAX_BUFFERS    > CG_BUFFER_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -649,6 +666,7 @@ struct CG_CONTEXT
     CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
     CG_KERNEL_TABLE              KernelTable;          /// The object table of all compiled kernels.
     CG_PIPELINE_TABLE            PipelineTable;        /// The object table of all compiled pipelines.
+    CG_BUFFER_TABLE              BufferTable;          /// The object table of all data buffers.
 };
 
 /*/////////////////
