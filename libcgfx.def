@@ -35,9 +35,15 @@ EXPORTS
     cgCreateKernel                 @33
     cgCreateComputePipeline        @34
     cgCreateGraphicsPipeline       @35
-    cgDisplayForWindowEXT          @36
-    cgMakeWindowOnDisplayEXT       @37
-    cgAttachWindowToDisplayEXT     @38
-    cgSetDisplayDrawableEXT        @39
-    cgSetActiveDrawableEXT         @40
-    cgPresentDrawableEXT           @41
+    cgBlendStateInitNone           @36
+    cgBlendStateInitAlpha          @37
+    cgBlendStateInitAdditive       @38
+    cgBlendStateInitPremultiplied  @39
+    cgRasterStateInitDefault       @40
+    cgDepthStencilStateInitDefault @41
+    cgDisplayForWindowEXT          @42
+    cgMakeWindowOnDisplayEXT       @43
+    cgAttachWindowToDisplayEXT     @44
+    cgSetDisplayDrawableEXT        @45
+    cgSetActiveDrawableEXT         @46
+    cgPresentDrawableEXT           @47

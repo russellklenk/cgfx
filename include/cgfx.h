@@ -860,6 +860,24 @@ cgCreateKernel                                      /// Create a new kernel obje
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
 );
 
+cg_handle_t
+cgCreateComputePipeline                             /// Create a new compute pipeline object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
+    cg_compute_pipeline_t const  *create_info,      /// A description of the compute pipeline to create.
+    int                          &result            /// On return, set to CG_SUCCESS or another value.
+);
+
+cg_handle_t
+cgCreateGraphicsPipeline                            /// Create a new graphics pipeline object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
+    cg_graphics_pipeline_t const *create_info,      /// A description of the graphics pipeline to create.
+    int                          &result            /// On return, set to CG_SUCCESS, CG_UNSUPPORTED or another value.
+);
+
 int
 cgBlendStateInitNone                                /// Initialize fixed-function alpha blending configuration for no blending.
 (
@@ -894,24 +912,6 @@ int
 cgDepthStencilStateInitDefault                      /// Initialize fixed-function depth and stencil testing configuration to the default values.
 (
     cg_depth_stencil_state_t     &state             /// The depth and stencil testing configuration to update.
-);
-
-cg_handle_t
-cgCreateComputePipeline                             /// Create a new compute pipeline object.
-(
-    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
-    cg_compute_pipeline_t const  *create_info,      /// A description of the compute pipeline to create.
-    int                          &result            /// On return, set to CG_SUCCESS or another value.
-);
-
-cg_handle_t
-cgCreateGraphicsPipeline                            /// Create a new graphics pipeline object.
-(
-    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
-    cg_graphics_pipeline_t const *create_info,      /// A description of the graphics pipeline to create.
-    int                          &result            /// On return, set to CG_SUCCESS, CG_UNSUPPORTED or another value.
 );
 
 // when creating a buffer, need to know if it will be used for display.
