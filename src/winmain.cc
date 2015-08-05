@@ -300,13 +300,19 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     cg_handle_t           exec_ctx     = CG_INVALID_HANDLE;
     cg_handle_t           display      = CG_INVALID_HANDLE;
     cg_handle_t           display_dev  = CG_INVALID_HANDLE;
+    cg_cpu_info_t         cpu_info;      cgGetCpuInfo(&cpu_info);
+    cg_cpu_partition_t    cpu_part;
     cg_application_info_t app_info;
     app_info.AppName        = "cgfxTest";
     app_info.AppVersion     =  CG_MAKE_VERSION(1, 0, 0);
     app_info.DriverName     = "cgfxTest Driver";
     app_info.DriverVersion  =  CG_MAKE_VERSION(1, 0, 0);
     app_info.ApiVersion     =  CG_API_VERSION;
-    if ((cgres = cgEnumerateDevices(&app_info, NULL, device_count, NULL, 0, context)) != CG_SUCCESS)
+    cpu_part.PartitionType  =  CG_CPU_PARTITION_NONE;
+    cpu_part.ReserveThreads =  0; // cpu_info.ThreadsPerCore; // reserve 1 core for application use
+    cpu_part.PartitionCount =  0;
+    cpu_part.ThreadCounts   =  NULL;
+    if ((cgres = cgEnumerateDevices(&app_info, NULL, &cpu_part, device_count, NULL, 0, context)) != CG_SUCCESS)
     {
         OutputDebugString(_T("ERROR: Unable to enumerate CGFX devices: "));
         OutputDebugStringA(cgResultString(cgres));
@@ -329,9 +335,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     exec_info.DeviceList      = NULL;
     exec_info.ExtensionCount  = 0;
     exec_info.ExtensionNames  = NULL;
-    exec_info.PartitionCount  = 0;
-    exec_info.ThreadCounts    = NULL;
-    exec_info.CreateFlags     = CG_EXECUTION_GROUP_CPUS | CG_EXECUTION_GROUP_TASK_PARALLEL;
+    exec_info.CreateFlags     = CG_EXECUTION_GROUP_CPUS;
     exec_info.ValidationLevel = 0;
     if ((exec_ctx = cgCreateExecutionGroup(context, &exec_info, cgres)) == CG_INVALID_HANDLE)
     {

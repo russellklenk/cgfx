@@ -654,7 +654,7 @@ struct CG_CONTEXT
 {
     CG_HOST_ALLOCATOR            HostAllocator;        /// The allocator implementation used to allocate host memory.
 
-    cg_cpu_counts_t              CPUCounts;            /// Information about the CPU resources available in the local system.
+    cg_cpu_info_t                CpuInfo;              /// Information about the CPU resources available in the local system.
 
     size_t                       HeapCount;            /// The number of heaps defined by all devices in the local system.
     CG_HEAP                     *HeapList;             /// The set of heaps defined by all devices in the local system.

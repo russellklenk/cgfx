@@ -63,7 +63,8 @@ typedef uint64_t cg_handle_t;
 struct cg_application_info_t;
 struct cg_allocation_callbacks_t;
 struct cg_execution_group_t;
-struct cg_cpu_counts_t;
+struct cg_cpu_partition_t;
+struct cg_cpu_info_t;
 struct cg_heap_info_t;
 struct cg_command_t;
 struct cg_kernel_code_t;
@@ -88,6 +89,9 @@ struct cg_compute_pipeline_t;
 typedef void*        (CG_API *cgMemoryAlloc_fn                 )(size_t, size_t, int, uintptr_t);
 typedef void         (CG_API *cgMemoryFree_fn                  )(void *, size_t, size_t, int, uintptr_t);
 typedef char const*  (CG_API *cgResultString_fn                )(int);
+typedef int          (CG_API *cgGetCpuInfo_fn                  )(cg_cpu_info_t *);
+typedef int          (CG_API *cgDefaultCpuPartition_fn         )(cg_cpu_partition_t *);
+typedef int          (CG_API *cgValidateCpuPartition_fn        )(cg_cpu_partition_t const *, cg_cpu_info_t const *);
 typedef int          (CG_API *cgEnumerateDevices_fn            )(cg_application_info_t const*, cg_allocation_callbacks_t *, size_t&, cg_handle_t *, size_t, uintptr_t &);
 typedef int          (CG_API *cgGetContextInfo_fn              )(uintptr_t, int, void *, size_t, size_t *);
 typedef size_t       (CG_API *cgGetHeapCount_fn                )(uintptr_t);
@@ -399,16 +403,23 @@ enum cg_memory_access_e : int
     CG_MEMORY_ACCESS_DEVICE            =  2,        /// The memory object will be primarily accessed by the device.
 };
 
+/// @summary Define the supported types of CPU device paritioning.
+enum cg_cpu_partition_type_e : int
+{
+    CG_CPU_PARTITION_NONE              =  0,        /// The CPU device will not be partitioned.
+    CG_CPU_PARTITION_PER_CORE          =  1,        /// The CPU device will be partitioned into one sub-device per physical core.
+    CG_CPU_PARTITION_PER_NODE          =  2,        /// The CPU device will be partitioned into one sub-device per NUMA node.
+    CG_CPU_PARTITION_EXPLICIT          =  3,        /// The CPU device will be partitioned into one or more sub-devices, each with a user-specified number of hardware threads.
+};
+
 /// @summary Define flags that can be specified when creating an execution group.
 enum cg_execution_group_flags_e : uint32_t
 {
-    CG_EXECUTION_GROUP_FLAGS_NONE      = (0 << 0),  /// Configure CPUs for data parallel operation, specify devices explicitly.
-    CG_EXECUTION_GROUP_TASK_PARALLEL   = (1 << 0),  /// Configure all CPU devices in the group for task-parallel operation.
-    CG_EXECUTION_GROUP_HIGH_THROUGHPUT = (1 << 1),  /// Configure all CPU devices in the group for maximum throughput.
-    CG_EXECUTION_GROUP_CPU_PARTITION   = (1 << 2),  /// Configure CPU devices according to a specified partition layout.
-    CG_EXECUTION_GROUP_CPUS            = (1 << 3),  /// Include all CPUs in the sharegroup of the master device.
-    CG_EXECUTION_GROUP_GPUS            = (1 << 4),  /// Include all GPUs in the sharegroup of the master device.
-    CG_EXECUTION_GROUP_ACCELERATORS    = (1 << 5),  /// Include all accelerators in the sharegroup of the master device.
+    CG_EXECUTION_GROUP_NONE            = (0 << 0),  /// Configure CPUs for data parallel operation, specify devices explicitly.
+    CG_EXECUTION_GROUP_CPUS            = (1 << 0),  /// Include all CPUs in the sharegroup of the master device.
+    CG_EXECUTION_GROUP_GPUS            = (1 << 1),  /// Include all GPUs in the sharegroup of the master device.
+    CG_EXECUTION_GROUP_ACCELERATORS    = (1 << 2),  /// Include all accelerators in the sharegroup of the master device.
+    CG_EXECUTION_GROUP_CONTEXT_PER_CPU = (1 << 3),  /// Create a separate OpenCL context for each CPU device.
 };
 
 /// @summary Define flags that can be specified with kernel code.
@@ -461,14 +472,21 @@ struct cg_allocation_callbacks_t
     uintptr_t                     UserData;         /// Opaque data to be passed to the callbacks. May be 0.
 };
 
+/// @summary Data used to describe how the CPU device should be configured for kernel execution.
+struct cg_cpu_partition_t
+{
+    int                           PartitionType;    /// The CPU device partition type, one of cg_cpu_partition_type_e.
+    size_t                        ReserveThreads;   /// The number of hardware threads to reserve for use by the application. Kernels will not be executed on reserved threads.
+    size_t                        PartitionCount;   /// The number of explicit partitions, if PartitionType is CG_CPU_PARTITION_EXPLICIT. Otherwise, set to zero.
+    int                          *ThreadCounts;     /// An array of PartitionCount items, each specifying the number of hardware threads to assign to the corresponding partition.
+};
+
 /// @summary Define the data used to create an execution group.
 struct cg_execution_group_t
 {
     cg_handle_t                   RootDevice;       /// The handle of the root device used to determine the share group.
     size_t                        DeviceCount;      /// The number of explicitly-specified devices in the execution group.
     cg_handle_t                  *DeviceList;       /// An array of DeviceCount handles of the explicitly-specified devices in the execution group.
-    size_t                        PartitionCount;   /// The number of CPU device partitions specified.
-    int                          *ThreadCounts;     /// An array of PartitionCount items specifying the number of hardware threads per-partition.
     size_t                        ExtensionCount;   /// The number of extensions to enable.
     char const                  **ExtensionNames;   /// An array of ExtensionCount NULL-terminated ASCII strings naming the extensions to enable.
     uint32_t                      CreateFlags;      /// A combination of cg_extension_group_flags_e specifying group creation flags.
@@ -484,12 +502,17 @@ struct cg_memory_ref_t
 };
 
 /// @summary Define the data returned when querying for the CPU resources available in the system.
-struct cg_cpu_counts_t
+struct cg_cpu_info_t
 {
     size_t                        NUMANodes;        /// The number of NUMA nodes in the system.
     size_t                        PhysicalCPUs;     /// The number of physical CPU packages in the system.
     size_t                        PhysicalCores;    /// The number of physical CPU cores in the system.
     size_t                        HardwareThreads;  /// The number of hardware threads in the system.
+    size_t                        ThreadsPerCore;   /// The number of hardware threads per CPU core.
+    char                          VendorName[13];   /// The CPU vendor string returned by executing CPUID with EAX=0.
+    char                          PreferAMD;        /// true if the AMD OpenCL platform is preferred.
+    char                          PreferIntel;      /// true if the Intel OpenCL platform is preferred.
+    char                          IsVirtualMachine; /// Is the application running in a virtualized environment?
 };
 
 /// @summary Define basic properties of a memory heap.
@@ -608,10 +631,30 @@ cgResultString                                      /// Convert a result code in
 );
 
 int
+cgGetCpuInfo                                        /// Retrieve information about the CPUs installed in the local system.
+(
+    cg_cpu_info_t                *cpu_info          /// On return, stores information about the CPUs in the system.
+);
+
+int
+cgDefaultCpuPartition                               /// Retrieve the default CPU partition layout.
+(
+    cg_cpu_partition_t           *cpu_partition     /// The CPU partition layout to initialize.
+);
+
+int
+cgValidateCpuPartition                              /// Perform basic validate of a CPU partition definition.
+(
+    cg_cpu_partition_t const     *cpu_partition,    /// The CPU partition layout to validate.
+    cg_cpu_info_t      const     *cpu_info          /// The CPU information to validate against.
+);
+
+int
 cgEnumerateDevices                                  /// Enumerate all devices and displays installed in the system.
 (
     cg_application_info_t const  *app_info,         /// Information describing the calling application.
     cg_allocation_callbacks_t    *alloc_cb,         /// Application-defined memory allocation callbacks, or NULL.
+    cg_cpu_partition_t const     *cpu_partition,    /// Information about how CPU devices should be exposed.
     size_t                       &device_count,     /// On return, store the number of devices in the system.
     cg_handle_t                  *device_list,      /// On return, populated with a list of device handles.
     size_t                        max_devices,      /// The maximum number of device handles to write to device_list.
