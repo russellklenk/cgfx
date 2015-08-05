@@ -6891,6 +6891,11 @@ cgCreateGraphicsPipeline
         result = CG_INVALID_VALUE;
         return CG_INVALID_HANDLE;
     }
+    if (group->RenderingContext == NULL)
+    {   // this execution group has no OpenGL support.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
 
     // resolve references to kernel objects and link them into an OpenGL program.
     CG_KERNEL *vs_kernel = cgObjectTableGet(&ctx->KernelTable, create->VertexShader);
