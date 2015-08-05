@@ -718,31 +718,6 @@ cgDeleteCmdBuffer
     cmdbuf->CommandData  = NULL;
 }
 
-/// @summary Find the OpenGL shader object name within a kernel that corresponds to a given device.
-/// @param kernel The kernel object to search.
-/// @param device The device object on which the shader will execute.
-/// @return The OpenGL shader object name, or 0 if there is no shader object for the device.
-internal_function GLuint
-cgResolveGraphicsShader
-(
-    CG_KERNEL *kernel,
-    CG_DEVICE *device
-)
-{
-    if (kernel != NULL)
-    {
-        for (size_t i = 0, n = kernel->Graphics.DisplayCount; i < n; ++i)
-        {
-            if (kernel->Graphics.DisplayList[i]->DisplayDevice == device)
-            {   // found the shader object corresponding to this device.
-                // note that the shader object may not actually be valid.
-                return kernel->Graphics.Shader[i];
-            }
-        }
-    }
-    return GLuint(0);
-}
-
 /// @summary Frees all resources and releases all references associated with a kernel object.
 /// @param ctx The CGFX context that owns the kernel object.
 /// @param kernel The kernel object to delete.
@@ -752,37 +727,26 @@ cgDeleteKernel
     CG_CONTEXT *ctx,
     CG_KERNEL  *kernel
 )
-{
+{   UNREFERENCED_PARAMETER(ctx);
     switch (kernel->KernelType)
     {
     case CG_KERNEL_TYPE_GRAPHICS_VERTEX:
     case CG_KERNEL_TYPE_GRAPHICS_FRAGMENT:
     case CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE:
         {
-            for (size_t i = 0, n = kernel->Graphics.DisplayCount; i < n; ++i)
+            CG_DISPLAY *display = kernel->AttachedDisplay;
+            if (kernel->GraphicsShader != 0)
             {
-                CG_DISPLAY *display = kernel->Graphics.DisplayList[i];
-                if (kernel->Graphics.Shader[i] != 0)
-                {   // the same shader handle may be shared and appear several
-                    // times in the shader handle list. wipe out all records.
-                    // if only OpenGL had object retain functionality like CL...
-                    GLuint shader = kernel->Graphics.Shader[i];
-                    for (size_t j = 0; j < n; ++j)
-                    {
-                        if (kernel->Graphics.Shader[j] == shader)
-                            kernel->Graphics.Shader[j]  = 0;
-                    }
-                    glDeleteShader(shader);
-                }
+                glDeleteShader(kernel->GraphicsShader);
             }
-            cgFreeHostMemory(&ctx->HostAllocator, kernel->Graphics.Shader, kernel->Graphics.DisplayCount * sizeof(GLuint), 0, CG_ALLOCATION_TYPE_OBJECT);
         }
         break;
     case CG_KERNEL_TYPE_COMPUTE:
         {
-            for (size_t i = 0, n = kernel->Compute.ContextCount; i < n; ++i)
-                clReleaseProgram(kernel->Compute.Program[i]);
-            cgFreeHostMemory(&ctx->HostAllocator, kernel->Compute.Program, kernel->Compute.ContextCount * sizeof(cl_program), 0, CG_ALLOCATION_TYPE_OBJECT);
+            if (kernel->ComputeProgram != NULL)
+            {
+                clReleaseProgram(kernel->ComputeProgram);
+            }
         }
         break;
     default:
@@ -797,7 +761,6 @@ cgDeleteKernel
 /// @param root_device The handle of the device that defines the share group.
 /// @param device_list The list of handles of the devices in the execution group.
 /// @param device_count The number of devices in the execution group.
-/// @param context_count The number of OpenCL contexts in the execution group.
 /// @return CG_SUCCESS or CG_OUT_OF_MEMORY.
 internal_function int
 cgAllocExecutionGroup
@@ -806,20 +769,17 @@ cgAllocExecutionGroup
     CG_EXEC_GROUP *group,
     cg_handle_t    root_device,
     cg_handle_t   *device_list,
-    size_t         device_count,
-    size_t         context_count
+    size_t         device_count
 )
 {
     CG_DEVICE        *root             = cgObjectTableGet(&ctx->DeviceTable, root_device);
     CG_DEVICE       **device_refs      = NULL;
     cl_device_id     *device_ids       = NULL;
-    cl_context       *compute_contexts = NULL;
     CG_QUEUE        **compute_queues   = NULL;
     CG_QUEUE        **transfer_queues  = NULL;
     CG_DISPLAY      **display_refs     = NULL;
     CG_QUEUE        **graphics_queues  = NULL;
     CG_QUEUE        **queue_refs       = NULL;
-    cl_context       *context_refs     = NULL;
     size_t            display_count    = 0;
     size_t            queue_count      = 0;
 
@@ -842,10 +802,9 @@ cgAllocExecutionGroup
     {   // allocate all of the device list storage.
         device_refs      = (CG_DEVICE   **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
         device_ids       = (cl_device_id *) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_OBJECT);
-        compute_contexts = (cl_context   *) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
         compute_queues   = (CG_QUEUE    **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
         transfer_queues  = (CG_QUEUE    **) cgAllocateHostMemory(&ctx->HostAllocator, device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
-        if (device_refs == NULL || device_ids == NULL || compute_contexts == NULL || transfer_queues == NULL)
+        if (device_refs == NULL || device_ids == NULL || transfer_queues == NULL)
             goto error_cleanup;
         // populate the device reference list and initialize everything else to NULL.
         for (size_t device_index = 0; device_index < device_count; ++device_index)
@@ -853,7 +812,6 @@ cgAllocExecutionGroup
             device_refs[device_index] = cgObjectTableGet(&ctx->DeviceTable, device_list[device_index]);
             device_ids [device_index] = device_refs[device_index]->DeviceId;
         }
-        memset(compute_contexts, 0, device_count * sizeof(cl_context));
         memset(compute_queues  , 0, device_count * sizeof(CG_QUEUE*));
         memset(transfer_queues , 0, device_count * sizeof(CG_QUEUE*));
     }
@@ -883,21 +841,15 @@ cgAllocExecutionGroup
         // NULL out all of the queue references.
         memset(queue_refs, 0, queue_count * sizeof(CG_QUEUE*));
     }
-    if (context_count > 0)
-    {   // allocate all of the context ref storage.
-        context_refs  = (cl_context*) cgAllocateHostMemory(&ctx->HostAllocator, context_count * sizeof(cl_context), 0, CG_ALLOCATION_TYPE_OBJECT);
-        if (context_refs == NULL)
-            goto error_cleanup;
-        // NULL out all of the context references.
-        memset(context_refs, 0, context_count * sizeof(cl_context));
-    }
 
     // initialization was successful, save all of the references.
     group->PlatformId       = root->PlatformId;
+    group->ComputeContext   = NULL;
+    group->RenderingContext = NULL;
+    group->AttachedDisplay  = NULL;
     group->DeviceCount      = device_count;
     group->DeviceList       = device_refs;
     group->DeviceIds        = device_ids;
-    group->ComputeContexts  = compute_contexts;
     group->ComputeQueues    = compute_queues;
     group->TransferQueues   = transfer_queues;
     group->DisplayCount     = display_count;
@@ -905,18 +857,14 @@ cgAllocExecutionGroup
     group->GraphicsQueues   = graphics_queues;
     group->QueueCount       = queue_count;
     group->QueueList        = queue_refs;
-    group->ContextCount     = context_count;
-    group->ContextList      = context_refs;
     return CG_SUCCESS;
 
 error_cleanup:
-    cgFreeHostMemory(&ctx->HostAllocator, context_refs    , context_count * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, queue_refs      , queue_count   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, graphics_queues , display_count * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, display_refs    , display_count * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, transfer_queues , device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, compute_queues  , device_count  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, compute_contexts, device_count  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, device_ids      , device_count  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, device_refs     , device_count  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     return CG_OUT_OF_MEMORY;
@@ -936,20 +884,17 @@ cgDeleteExecutionGroup
     // release device references back to the execution group.
     for (size_t i = 0, n = group->DeviceCount; i < n; ++i)
     {
-        clReleaseContext(group->ComputeContexts[i]);
         group->DeviceList[i]->ExecutionGroup = CG_INVALID_HANDLE;
     }
-    for (size_t i = 0, n = group->ContextCount; i < n; ++i)
+    if (group->ComputeContext != NULL)
     {
-        clReleaseContext(group->ContextList[i]);
+        clReleaseContext(group->ComputeContext);
     }
-    cgFreeHostMemory(host_alloc, group->ContextList     , group->ContextCount * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->QueueList       , group->QueueCount   * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->GraphicsQueues  , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->AttachedDisplays, group->DisplayCount * sizeof(CG_DISPLAY*) , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->TransferQueues  , group->DeviceCount  * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->ComputeQueues   , group->DisplayCount * sizeof(CG_QUEUE*)   , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(host_alloc, group->ComputeContexts , group->DeviceCount  * sizeof(cl_context)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->DeviceIds       , group->DeviceCount  * sizeof(cl_device_id), 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(host_alloc, group->DeviceList      , group->DeviceCount  * sizeof(CG_DEVICE*)  , 0, CG_ALLOCATION_TYPE_OBJECT);
     memset(group, 0, sizeof(CG_EXEC_GROUP));
@@ -965,18 +910,13 @@ cgDeleteComputePipeline
     CG_COMPUTE_PIPELINE *pipeline
 )
 {
-    for (size_t i = 0, n = pipeline->ContextCount; i < n; ++i)
+    if (pipeline->ComputeKernel != NULL)
     {
-        if (pipeline->KernelList[i] != NULL)
-        {
-            clReleaseKernel(pipeline->KernelList[i]);
-        }
+        clReleaseKernel(pipeline->ComputeKernel);
     }
     cgFreeHostMemory(&ctx->HostAllocator, pipeline->Arguments       , pipeline->ArgumentCount * sizeof(CG_CL_KERNEL_ARG)    , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, pipeline->ArgumentNames   , pipeline->ArgumentCount * sizeof(uint32_t)            , 0, CG_ALLOCATION_TYPE_OBJECT);
     cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernelInfo, pipeline->DeviceCount   * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DeviceKernels   , pipeline->DeviceCount   * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->KernelList      , pipeline->ContextCount  * sizeof(cl_kernel)           , 0, CG_ALLOCATION_TYPE_OBJECT);
     memset(pipeline, 0, sizeof(CG_COMPUTE_PIPELINE));
 }
 
@@ -990,25 +930,18 @@ cgDeleteGraphicsPipeline
     CG_GRAPHICS_PIPELINE *pipeline
 )
 {
-    for (size_t i = 0, n = pipeline->DeviceCount; i < n; ++i)
+    CG_DISPLAY   *display = pipeline->AttachedDisplay;
+    CG_GLSL_PROGRAM &glsl = pipeline->ShaderProgram;
+    if (glsl.Program != 0)
     {
-        CG_GLSL_PROGRAM *glsl = &pipeline->DevicePrograms[i];
-        if (glsl->Program)
-        {   // the OpenGL entry points are the same for all displays attached to the device.
-            CG_DISPLAY *display = pipeline->DeviceList[i]->AttachedDisplays[0];
-            glDeleteProgram(glsl->Program);
-        }
-        // free related metadata allocated in host memory.
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->Samplers      , glsl->SamplerCount   * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->SamplerNames  , glsl->SamplerCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->Attributes    , glsl->AttributeCount * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->AttributeNames, glsl->AttributeCount * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->Uniforms      , glsl->UniformCount   * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-        cgFreeHostMemory(&ctx->HostAllocator, glsl->UniformNames  , glsl->UniformCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-        memset(glsl, 0, sizeof(CG_GLSL_PROGRAM));
+        glDeleteProgram(glsl.Program);
     }
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DevicePrograms , pipeline->DeviceCount   * sizeof(CG_GLSL_PROGRAM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, pipeline->DisplayPrograms, pipeline->DisplayCount  * sizeof(CG_GLSL_PROGRAM*) , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, glsl.Samplers      , glsl.SamplerCount   * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, glsl.SamplerNames  , glsl.SamplerCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, glsl.Attributes    , glsl.AttributeCount * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, glsl.AttributeNames, glsl.AttributeCount * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, glsl.Uniforms      , glsl.UniformCount   * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, glsl.UniformNames  , glsl.UniformCount   * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
     memset(pipeline, 0, sizeof(CG_GRAPHICS_PIPELINE));
 }
 
@@ -4326,25 +4259,56 @@ cgShouldIncludeDeviceInGroup
     size_t      &explicit_count
 )
 {
+    if (check_device->ExecutionGroup != CG_INVALID_HANDLE)
+        return false;    // devices must not already be assigned to an execution group
     if (check_device == root_device)
         return true;     // always include the root device
     if (check_device->PlatformId != root_device->PlatformId)
         return false;    // devices must be in the same share group
-    if (check_device->ExecutionGroup != CG_INVALID_HANDLE)
-        return false;    // devices must not already be assigned to an execution group
     for (size_t i = 0; i  < device_count; ++i)
     {   if (check_handle == device_list[i])
         {   explicit_count++;
             return true; // the device is in the explicit device list
         }
     }
-    if (check_device->Type == CL_DEVICE_TYPE_CPU && (create_flags & CG_EXECUTION_GROUP_CPUS))
-        return true;     // the device is in the implicit device list
-    else if (check_device->Type == CL_DEVICE_TYPE_GPU && (create_flags & CG_EXECUTION_GROUP_GPUS))
-        return true;     // the device is in the implicit device list
-    else if (check_device->Type == CL_DEVICE_TYPE_ACCELERATOR && (create_flags & CG_EXECUTION_GROUP_ACCELERATORS))
-        return true;     // the device is in the implicit device list
-    return false;
+    switch (root_device->Type)
+    {
+    case CL_DEVICE_TYPE_CPU:
+        {
+            if (check_device->Type == CL_DEVICE_TYPE_CPU && (create_flags & CG_EXECUTION_GROUP_CPUS))
+                return true; // CPU devices may always be used together.
+            if (check_device->Type == CL_DEVICE_TYPE_GPU && (create_flags & CG_EXECUTION_GROUP_GPUS))
+                return check_device->Capabilities.UnifiedMemory == CL_TRUE; // GPUs can be paired if unified memory.
+            if (check_device->Type == CL_DEVICE_TYPE_ACCELERATOR && (create_flags & CG_EXECUTION_GROUP_ACCELERATORS))
+                return check_device->Capabilities.UnifiedMemory == CL_TRUE; // accelerators can be paired if unified memory.
+        }
+        return false;
+
+    case CL_DEVICE_TYPE_GPU:
+        {
+            if (check_device->Type == CL_DEVICE_TYPE_CPU && (create_flags & CG_EXECUTION_GROUP_CPUS))
+                return (root_device->Capabilities.UnifiedMemory == CL_TRUE); // CPUs can be paired if unified memory.
+            if (check_device->Type == CL_DEVICE_TYPE_GPU && (create_flags & CG_EXECUTION_GROUP_GPUS))
+                return (create_flags & CG_EXECUTION_GROUP_DISPLAY_OUTPUT) == 0; // GPUs can be paired if not used for display output.
+            if (check_device->Type == CL_DEVICE_TYPE_ACCELERATOR && (create_flags & CG_EXECUTION_GROUP_ACCELERATORS))
+                return (root_device->Capabilities.UnifiedMemory == CL_TRUE && check_device->Capabilities.UnifiedMemory == CL_TRUE); // pairing allowed if both devices support unified memory.
+        }
+        return false;
+
+    case CL_DEVICE_TYPE_ACCELERATOR:
+        {
+            if (check_device->Type == CL_DEVICE_TYPE_CPU && (create_flags & CG_EXECUTION_GROUP_CPUS))
+                return (root_device->Capabilities.UnifiedMemory == CL_TRUE); // CPUs can be paired if unified memory.
+            if (check_device->Type == CL_DEVICE_TYPE_GPU && (create_flags & CG_EXECUTION_GROUP_GPUS))
+                return (root_device->Capabilities.UnifiedMemory == CL_TRUE && check_device->Capabilities.UnifiedMemory == CL_TRUE); // pairing allowed if both devices support unified memory.
+            if (check_device->Type == CL_DEVICE_TYPE_ACCELERATOR && (create_flags & CG_EXECUTION_GROUP_ACCELERATORS))
+                return true; // accelerator devices may always be used together.
+        }
+        return false;
+
+    default:
+        return false;
+    }
 }
 
 /// @summary Create a complete list of device handles for an execution group and perform partitioning of any CPU devices.
@@ -4365,7 +4329,6 @@ cgCreateExecutionGroupDeviceList
     cg_handle_t *device_list,
     size_t       device_count,
     size_t      &num_devices,
-    size_t      &num_contexts,
     int         &result
 )
 {
@@ -4378,8 +4341,7 @@ cgCreateExecutionGroupDeviceList
     size_t         num_explicit = 0;
 
     // initialize output parameters:
-    num_contexts = 0;
-    num_devices  = 0;
+    num_devices = 0;
     result = CG_SUCCESS;
 
     // count the number of devices to be included in the list.
@@ -4391,8 +4353,8 @@ cgCreateExecutionGroupDeviceList
         {   // increment per-type counts:
             switch (check->Type)
             {
-            case CL_DEVICE_TYPE_CPU:         num_cpu++; break;
-            case CL_DEVICE_TYPE_GPU:         num_gpu++; break;
+            case CL_DEVICE_TYPE_CPU        : num_cpu++; break;
+            case CL_DEVICE_TYPE_GPU        : num_gpu++; break;
             case CL_DEVICE_TYPE_ACCELERATOR: num_acl++; break;
             default: break;
             }
@@ -4400,6 +4362,11 @@ cgCreateExecutionGroupDeviceList
     }
     if (num_explicit != device_count)
     {   // the explicit device list contains one or more invalid handles.
+        result = CG_INVALID_VALUE;
+        goto error_return;
+    }
+    if (num_gpu > 1 && (create_flags & CG_EXECUTION_GROUP_DISPLAY_OUTPUT))
+    {   // only one GPU device allowed in groups used for display output.
         result = CG_INVALID_VALUE;
         goto error_return;
     }
@@ -4425,10 +4392,6 @@ cgCreateExecutionGroupDeviceList
         {   // save the handle for the caller.
             devices[num_devices++] = hand;
         }
-    }
-    if (num_contexts < num_devices)
-    {   // there's one shared context for the remaining devices.
-        num_contexts++;
     }
     return devices;
 
@@ -5495,7 +5458,6 @@ cgCreateExecutionGroup
     int                        &result
 )
 {
-    size_t      context_count = 0;
     size_t       device_count = 0;
     size_t        queue_index = 0;
     cg_handle_t *devices      = NULL;
@@ -5517,97 +5479,67 @@ cgCreateExecutionGroup
     }
 
     // construct the complete list of devices in the execution group.
-    if ((devices = cgCreateExecutionGroupDeviceList(ctx, config->RootDevice, flags, config->DeviceList, config->DeviceCount, device_count, context_count, result)) == NULL)
+    if ((devices = cgCreateExecutionGroupDeviceList(ctx, config->RootDevice, flags, config->DeviceList, config->DeviceCount, device_count, result)) == NULL)
     {   // result has been set to the reason for the failure.
         return CG_INVALID_HANDLE;
     }
 
     // initialize the execution group object.
     CG_EXEC_GROUP group;
-    if ((result = cgAllocExecutionGroup(ctx, &group, config->RootDevice, devices, device_count, context_count)) != CG_SUCCESS)
+    if ((result = cgAllocExecutionGroup(ctx, &group, config->RootDevice, devices, device_count)) != CG_SUCCESS)
     {   // result has been set to the reason for the failure.
         cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
         return CG_INVALID_HANDLE;
     }
 
-    // create OpenCL contexts for resource sharing.
-    context_count = 0; // reset count; updated below.
-    if (flags & CG_EXECUTION_GROUP_CONTEXT_PER_CPU)
-    {   // high throughput devices have one context per CPU device with no sharing.
+    // if the group is to be used for display output, retrieve the rendering context.
+    if (flags & CG_EXECUTION_GROUP_DISPLAY_OUTPUT)
+    {   // find the GPU device and save off the rendering context.
         for (size_t i = 0; i < device_count; ++i)
         {
-            CG_DEVICE *device = cgObjectTableGet(&ctx->DeviceTable, devices[i]);
-            if (device->Type == CL_DEVICE_TYPE_CPU)
+            if (group.DeviceList[i]->Type == CL_DEVICE_TYPE_GPU && group.DeviceList[i]->DisplayRC != NULL)
             {
-                cl_context_properties props[] =
-                {
-                    (cl_context_properties) CL_CONTEXT_PLATFORM,
-                    (cl_context_properties) group.PlatformId,
-                    (cl_context_properties) 0
-                };
-                cl_int     cl_error = CL_SUCCESS;
-                cl_context cl_ctx   = clCreateContext(props, 1, &device->DeviceId, NULL, NULL, &cl_error);
-                if (cl_ctx == NULL)
-                {   cgDeleteExecutionGroup(ctx, &group);
-                    cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
-                    switch (cl_error)
-                    {
-                    case CL_DEVICE_NOT_AVAILABLE: result = CG_NO_CLCONTEXT;  break;
-                    case CL_OUT_OF_HOST_MEMORY  : result = CG_OUT_OF_MEMORY; break;
-                    default:                      result = CG_INVALID_VALUE; break;
-                    }
-                    return CG_INVALID_HANDLE;
-                }
-                clRetainContext(cl_ctx);
-                group.ContextList[context_count++] = cl_ctx;
-                group.ComputeContexts[i] = cl_ctx;
+                group.RenderingContext = group.DeviceList[i]->DisplayRC;
+                group.AttachedDisplay  = group.DeviceList[i]->AttachedDisplays[0];
+                break;
             }
         }
-    }
-    if (context_count < device_count)
-    {   // create a single context that's shared between all remaining devices.
-        cl_uint       ndevs      = 0;
-        cl_device_id *device_ids = group.DeviceIds;
-        // build a list of all device IDs that share this context.
-        // use the execution group's device ID list as storage.
-        for (size_t i = 0; i < device_count; ++i)
-        {
-            if (group.ComputeContexts[i] == NULL)
-                device_ids[ndevs++] = group.DeviceList[i]->DeviceId;
-        }
-        cl_context_properties props[] =
-        {
-            (cl_context_properties) CL_CONTEXT_PLATFORM,
-            (cl_context_properties) group.PlatformId,
-            (cl_context_properties) 0
-        };
-        cl_int     cl_error = CL_SUCCESS;
-        cl_context cl_ctx   = clCreateContext(props, ndevs, device_ids, NULL, NULL, &cl_error);
-        if (cl_ctx == NULL)
-        {   cgDeleteExecutionGroup(ctx, &group);
+        if (group.RenderingContext == NULL)
+        {   // display output is not available because there's no OpenGL context in the group.
+            result = CG_NO_OPENGL;
+            cgDeleteExecutionGroup(ctx, &group);
             cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
-            switch (cl_error)
-            {
-            case CL_DEVICE_NOT_AVAILABLE: result = CG_NO_CLCONTEXT;  break;
-            case CL_OUT_OF_HOST_MEMORY  : result = CG_OUT_OF_MEMORY; break;
-            default:                      result = CG_INVALID_VALUE; break;
-            }
             return CG_INVALID_HANDLE;
         }
-        // save the global context reference:
-        group.ContextList[context_count++] = cl_ctx;
-        // save references to the shared context for each device.
-        // also, restore the group's device ID list to a valid state.
-        for (size_t i = 0; i < device_count; ++i)
-        {
-            group.DeviceIds[i] = group.DeviceList[i]->DeviceId;
-            if (group.ComputeContexts[i] == NULL)
-            {
-                clRetainContext(cl_ctx);
-                group.ComputeContexts[i]  = cl_ctx;
-            }
-        }
     }
+    else
+    {   // if not used for display output, only OpenCL kernels may be executed.
+        group.RenderingContext = NULL;
+    }
+
+    // create a single context that's shared between all devices.
+    cl_context_properties props[] =
+    {
+        (cl_context_properties) CL_CONTEXT_PLATFORM,
+        (cl_context_properties) group.PlatformId,
+        (cl_context_properties) 0
+    };
+    cl_int     cl_error = CL_SUCCESS;
+    cl_context cl_ctx   = clCreateContext(props, group.DeviceCount, group.DeviceIds, NULL, NULL, &cl_error);
+    if (cl_ctx == NULL)
+    {   cgDeleteExecutionGroup(ctx, &group);
+        cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
+        switch (cl_error)
+        {
+        case CL_DEVICE_NOT_AVAILABLE: result = CG_NO_CLCONTEXT;  break;
+        case CL_OUT_OF_HOST_MEMORY  : result = CG_OUT_OF_MEMORY; break;
+        default:                      result = CG_INVALID_VALUE; break;
+        }
+        return CG_INVALID_HANDLE;
+    }
+    
+    // save the global OpenCL resource context reference:
+    group.ComputeContext = cl_ctx;
 
     // create compute and transfer queues. each device gets its own unique
     // compute queue, and each GPU or accelerator device that doesn't have
@@ -5615,7 +5547,6 @@ cgCreateExecutionGroup
     for (size_t i = 0; i < device_count; ++i)
     {   // create the command queue used for submitting compute dispatch operations.
         cl_int       cl_err = CL_SUCCESS;
-        cl_context   cl_ctx = group.ComputeContexts[i];
         cl_device_id cl_dev = group.DeviceIds[i];
         cl_command_queue cq = NULL; // compute queue
         cl_command_queue tq = NULL; // transfer queue
@@ -6016,6 +5947,18 @@ cgGetExecutionGroupInfo
                 if (group->QueueList[i]->QueueType == CG_QUEUE_TYPE_GRAPHICS)
                     handles[o++] = cgMakeHandle(group->QueueList[i]->ObjectId, CG_OBJECT_QUEUE, CG_QUEUE_TABLE_ID);
             }
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_CL_CONTEXT:
+        {   BUFFER_CHECK_TYPE(cl_context);
+            BUFFER_SET_SCALAR(cl_context, group->ComputeContext);
+        }
+        return CG_SUCCESS;
+
+    case CG_EXEC_GROUP_WINDOWS_HGLRC:
+        {   BUFFER_CHECK_TYPE(HGLRC);
+            BUFFER_SET_SCALAR(HGLRC, group->RenderingContext);
         }
         return CG_SUCCESS;
 
@@ -6553,24 +6496,24 @@ cgCreateKernel
     case CG_KERNEL_TYPE_GRAPHICS_VERTEX:
     case CG_KERNEL_TYPE_GRAPHICS_FRAGMENT:
     case CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE:
-        {   // only compilation from source code is supported.
+        {
             if ((code->Flags & CG_KERNEL_FLAGS_SOURCE) == 0)
-            {
+            {   // constructing a shader from binary is not supported.
+                result = CG_UNSUPPORTED;
+                return CG_INVALID_HANDLE;
+            }
+            if (group->RenderingContext == NULL)
+            {   // there's no OpenGL available on this execution group.
                 result = CG_UNSUPPORTED;
                 return CG_INVALID_HANDLE;
             }
             // allocate storage for the shader object handles.
-            kernel.KernelType = code->Type;
-            kernel.Graphics.DisplayCount = group->DisplayCount;
-            kernel.Graphics.DisplayList  = group->AttachedDisplays;
-            kernel.Graphics.Shader = (GLuint*) cgAllocateHostMemory(&ctx->HostAllocator, group->DisplayCount * sizeof(GLuint), 0, CG_ALLOCATION_TYPE_OBJECT);
-            if (kernel.Graphics.Shader == NULL)
-            {   // unable to allocate the required memory.
-                result = CG_OUT_OF_MEMORY;
-                return CG_INVALID_HANDLE;
-            }
-            // zero out all of the shader object handles.
-            memset(kernel.Graphics.Shader, 0, group->DisplayCount * sizeof(GLuint));
+            kernel.KernelType       = code->Type;
+            kernel.ComputeContext   = NULL;
+            kernel.ComputeProgram   = NULL;
+            kernel.AttachedDisplay  = group->AttachedDisplay;
+            kernel.RenderingContext = group->RenderingContext;
+            kernel.GraphicsShader   = 0;
 
             // convert from CG_KERNEL_GRAPHICS_xxx => OpenGL shader type.
             GLenum shader_type   = 0;
@@ -6578,97 +6521,78 @@ cgCreateKernel
             else if (code->Type == CG_KERNEL_TYPE_GRAPHICS_FRAGMENT ) shader_type = GL_FRAGMENT_SHADER;
             else if (code->Type == CG_KERNEL_TYPE_GRAPHICS_PRIMITIVE) shader_type = GL_GEOMETRY_SHADER;
 
-            // compile the kernel for each OpenGL rendering context.
-            for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
-            {
-                CG_DEVICE *dev = group->DeviceList[device_index];
-                if (dev->DisplayRC != NULL && dev->DisplayCount > 0)
-                {   // GL entry points are the same for all attached displays.
-                    CG_DISPLAY *display  = dev->AttachedDisplays[0];
-                    GLuint      shader   = glCreateShader(shader_type);
-                    GLint       clres    = GL_FALSE;
-                    GLsizei     log_size = 0;
+            // compile the kernel for the OpenGL rendering context.
+            CG_DISPLAY *display  = group->AttachedDisplay;
+            GLuint      shader   = glCreateShader(shader_type);
+            GLint       clres    = GL_FALSE;
+            GLsizei     log_size = 0;
 
-                    // compile the shader source code.
-                    if (shader == 0)
-                    {   // unable to create the shader object.
-                        cgDeleteKernel(ctx, &kernel);
-                        result = CG_BAD_GLCONTEXT;
-                        return CG_INVALID_HANDLE;
-                    }
-                    glShaderSource (shader, 1, (GLchar const* const*) &code->Code, (GLint const*) &code->CodeSize);
-                    glCompileShader(shader);
-                    glGetShaderiv  (shader, GL_COMPILE_STATUS , &clres);
-                    glGetShaderiv  (shader, GL_INFO_LOG_LENGTH, &log_size);
-                    glGetError();
-                    if (clres != GL_TRUE)
-                    {
-#ifdef _DEBUG
-                        GLsizei len = 0;
-                        GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
-                        glGetShaderInfoLog(shader, log_size+1, &len, buf);
-                        buf[len] = '\0';
-                        OutputDebugString(_T("OpenGL shader compilation failed: \n"));
-                        OutputDebugString(_T("**** Source Code: \n"));
-                        OutputDebugStringA((char const*) code->Code);
-                        OutputDebugString(_T("**** Compile Log: \n"));
-                        OutputDebugStringA(buf);
-                        OutputDebugString(_T("\n\n"));
-                        cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
-#endif
-                        glDeleteShader(shader);
-                        cgDeleteKernel(ctx, &kernel);
-                        result = CG_COMPILE_FAILED;
-                        return CG_INVALID_HANDLE;
-                    }
-
-                    // set the shader object handles for each attached display.
-                    for (size_t display_index = 0, display_count = group->DisplayCount; display_index < display_count; ++display_index)
-                    {
-                        if (group->AttachedDisplays[display_index]->DisplayDevice == dev)
-                            kernel.Graphics.Shader[display_index] = shader;
-                    }
-                }
+            // compile the shader source code.
+            if (shader == 0)
+            {   // unable to create the shader object.
+                cgDeleteKernel(ctx, &kernel);
+                result = CG_BAD_GLCONTEXT;
+                return CG_INVALID_HANDLE;
             }
+            glShaderSource (shader, 1, (GLchar const* const*) &code->Code, (GLint const*) &code->CodeSize);
+            glCompileShader(shader);
+            glGetShaderiv  (shader, GL_COMPILE_STATUS , &clres);
+            glGetShaderiv  (shader, GL_INFO_LOG_LENGTH, &log_size);
+            glGetError();
+            if (clres != GL_TRUE)
+            {
+#ifdef _DEBUG
+                GLsizei len = 0;
+                GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                glGetShaderInfoLog(shader, log_size+1, &len, buf);
+                buf[len] = '\0';
+                OutputDebugString(_T("OpenGL shader compilation failed: \n"));
+                OutputDebugString(_T("**** Source Code: \n"));
+                OutputDebugStringA((char const*) code->Code);
+                OutputDebugString(_T("**** Compile Log: \n"));
+                OutputDebugStringA(buf);
+                OutputDebugString(_T("\n\n"));
+                cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+#endif
+                glDeleteShader(shader);
+                cgDeleteKernel(ctx, &kernel);
+                result = CG_COMPILE_FAILED;
+                return CG_INVALID_HANDLE;
+            }
+
+            // set the shader object handles for each attached display.
+            kernel.GraphicsShader = shader;
         }
         break;
 
     case CG_KERNEL_TYPE_COMPUTE:
         {   // allocate storage for the program object handles.
-            kernel.KernelType = code->Type;
-            kernel.Compute.ContextCount = group->ContextCount;
-            kernel.Compute.ContextList  = group->ContextList;
-            kernel.Compute.Program = (cl_program*) cgAllocateHostMemory(&ctx->HostAllocator, group->ContextCount * sizeof(cl_program), 0, CG_ALLOCATION_TYPE_OBJECT);
-            if (kernel.Compute.Program == NULL)
-            {   // unable to allocate the required memory.
-                result = CG_OUT_OF_MEMORY;
-                return CG_INVALID_HANDLE;
-            }
-            // zero out all of the program object handles.
-            memset(kernel.Compute.Program, 0, group->ContextCount * sizeof(cl_program));
+            kernel.KernelType       = code->Type;
+            kernel.ComputeContext   = group->ComputeContext;
+            kernel.ComputeProgram   = NULL;
+            kernel.AttachedDisplay  = NULL;
+            kernel.RenderingContext = NULL;
+            kernel.GraphicsShader   = 0;
 
             // OpenCL drivers support kernel program loading from source or binary.
             if (code->Flags & CG_KERNEL_FLAGS_SOURCE)
             {   // compile the program for each OpenCL context.
-                for (size_t context_index = 0, context_count = group->ContextCount; context_index < context_count; ++context_index)
+                cl_int clres = CL_SUCCESS;
+                cl_program p = clCreateProgramWithSource(group->ComputeContext, 1, (char const**) &code->Code, &code->CodeSize, &clres);
+                if (p == NULL)
                 {
-                    cl_int clres = CL_SUCCESS;
-                    cl_program p = clCreateProgramWithSource(group->ContextList[context_index], 1, (char const**) &code->Code, &code->CodeSize, &clres);
-                    if (p == NULL)
+                    switch (clres)
                     {
-                        switch (clres)
-                        {
-                        case CL_INVALID_CONTEXT   : result = CG_BAD_CLCONTEXT; break;
-                        case CL_INVALID_VALUE     : result = CG_INVALID_VALUE; break;
-                        case CL_OUT_OF_RESOURCES  : result = CG_OUT_OF_MEMORY; break;
-                        case CL_OUT_OF_HOST_MEMORY: result = CG_OUT_OF_MEMORY; break;
-                        default: result = CG_ERROR; break;
-                        }
-                        cgDeleteKernel(ctx, &kernel);
-                        return CG_INVALID_HANDLE;
+                    case CL_INVALID_CONTEXT   : result = CG_BAD_CLCONTEXT; break;
+                    case CL_INVALID_VALUE     : result = CG_INVALID_VALUE; break;
+                    case CL_OUT_OF_RESOURCES  : result = CG_OUT_OF_MEMORY; break;
+                    case CL_OUT_OF_HOST_MEMORY: result = CG_OUT_OF_MEMORY; break;
+                    default: result = CG_ERROR; break;
                     }
-                    else kernel.Compute.Program[context_index] = p;
+                    cgDeleteKernel(ctx, &kernel);
+                    return CG_INVALID_HANDLE;
                 }
+                else kernel.ComputeProgram = p;
             }
             else
             {   // TODO(rlk): support loading of binaries.
@@ -6866,68 +6790,52 @@ cgCreateComputePipeline
     CG_PIPELINE          pipe;
     CG_COMPUTE_PIPELINE &cp= pipe.Compute;
     memset(&pipe.Compute, 0, sizeof(CG_COMPUTE_PIPELINE));
-    pipe.PipelineType = CG_PIPELINE_TYPE_COMPUTE;
-    cp.ContextCount   = group->ContextCount;
-    cp.ContextList    = group->ContextList;
-    cp.KernelList     =(cl_kernel*) cgAllocateHostMemory(&ctx->HostAllocator, group->ContextCount * sizeof(cl_kernel), 0, CG_ALLOCATION_TYPE_OBJECT);
-    if (cp.KernelList == NULL)
-    {   // unable to allocate required memory.
-        result = CG_OUT_OF_MEMORY;
-        return CG_INVALID_HANDLE;
-    }
-    memset(cp.KernelList, 0, group->ContextCount * sizeof(cl_kernel));
+    pipe.PipelineType   = CG_PIPELINE_TYPE_COMPUTE;
+    cp.ComputeContext   = group->ComputeContext;
+    cp.ComputeKernel    = NULL;
 
-    cp.DeviceCount         = group->DeviceCount;
-    cp.DeviceList          = group->DeviceList;
-    cp.DeviceIds           = group->DeviceIds;
-    cp.ComputeQueues       = group->ComputeQueues;
-    cp.DeviceKernels       =(cl_kernel           *) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(cl_kernel), 0, CG_ALLOCATION_TYPE_OBJECT);
-    cp.DeviceKernelInfo    =(CG_CL_WORKGROUP_INFO*) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
-    if (cp.DeviceKernels  == NULL || cp.DeviceKernelInfo == NULL)
+    cp.DeviceCount      = group->DeviceCount;
+    cp.DeviceList       = group->DeviceList;
+    cp.DeviceIds        = group->DeviceIds;
+    cp.ComputeQueues    = group->ComputeQueues;
+    cp.DeviceKernelInfo =(CG_CL_WORKGROUP_INFO*) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(CG_CL_WORKGROUP_INFO), 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (cp.DeviceKernelInfo == NULL)
     {   // unable to allocate required memory.
         result = CG_OUT_OF_MEMORY;
         goto error_cleanup;
     }
-    memset(cp.DeviceKernels   , 0, group->DeviceCount  * sizeof(cl_kernel));
     memset(cp.DeviceKernelInfo, 0, group->DeviceCount  * sizeof(CG_CL_WORKGROUP_INFO));
 
     // create the cl_kernel object for each context:
-    for (size_t i = 0, n = kernel->Compute.ContextCount; i < n; ++i)
-    {
-        cl_int clres = 0;
-        cl_kernel  k = clCreateKernel(kernel->Compute.Program[i], create->KernelName, &clres);
-        if (k == NULL)
-        {   // the kernel couldn't be created.
-            switch (clres)
-            {
-            case CL_INVALID_PROGRAM           : result = CG_ERROR; break;
-            case CL_INVALID_PROGRAM_EXECUTABLE: result = CG_ERROR; break;
-            case CL_INVALID_KERNEL_NAME       : result = CG_ERROR; break;
-            case CL_INVALID_KERNEL_DEFINITION : result = CG_ERROR; break;
-            case CL_INVALID_VALUE             : result = CG_ERROR; break;
-            case CL_OUT_OF_HOST_MEMORY        : result = CG_OUT_OF_MEMORY; break;
-            default: result = CG_ERROR;  break;
-            }
-            goto error_cleanup;
+    cl_int clres = 0;
+    cl_kernel  k = clCreateKernel(kernel->ComputeProgram, create->KernelName, &clres);
+    if (k == NULL)
+    {   // the kernel couldn't be created.
+        switch (clres)
+        {
+        case CL_INVALID_PROGRAM           : result = CG_ERROR; break;
+        case CL_INVALID_PROGRAM_EXECUTABLE: result = CG_ERROR; break;
+        case CL_INVALID_KERNEL_NAME       : result = CG_ERROR; break;
+        case CL_INVALID_KERNEL_DEFINITION : result = CG_ERROR; break;
+        case CL_INVALID_VALUE             : result = CG_ERROR; break;
+        case CL_OUT_OF_HOST_MEMORY        : result = CG_OUT_OF_MEMORY; break;
+        default: result = CG_ERROR;  break;
         }
-        else
-        {   // link the kernel to all devices that share the context.
-            for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
-            {
-                if (kernel->Compute.ContextList[i] == group->ComputeContexts[device_index])
-                {   // store the kernel reference and retrieve workgroup information.
-                    clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_WORK_GROUP_SIZE        , sizeof(size_t) * 1, &cp.DeviceKernelInfo[device_index].WorkGroupSize , NULL);
-                    clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(size_t) * 3,  cp.DeviceKernelInfo[device_index].FixedGroupSize, NULL);
-                    clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_LOCAL_MEM_SIZE         , sizeof(cl_ulong)  , &cp.DeviceKernelInfo[device_index].LocalMemory   , NULL);
-                    cp.DeviceKernels[device_index] = k;
-                }
-            }
-            cp.KernelList[i] = k;
+        goto error_cleanup;
+    }
+    else
+    {   // link the kernel to all devices that share the context.
+        for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
+        {
+            clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_WORK_GROUP_SIZE        , sizeof(size_t) * 1, &cp.DeviceKernelInfo[device_index].WorkGroupSize , NULL);
+            clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(size_t) * 3,  cp.DeviceKernelInfo[device_index].FixedGroupSize, NULL);
+            clGetKernelWorkGroupInfo(k, group->DeviceIds[device_index], CL_KERNEL_LOCAL_MEM_SIZE         , sizeof(cl_ulong)  , &cp.DeviceKernelInfo[device_index].LocalMemory   , NULL);
         }
+        cp.ComputeKernel = k;
     }
 
     // retrieve argument information. this is consistent across kernels.
-    clGetKernelInfo(cp.KernelList[0], CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &arg_count, NULL);
+    clGetKernelInfo(cp.ComputeKernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &arg_count, NULL);
     cp.ArgumentCount = size_t(arg_count);
     cp.ArgumentNames =(uint32_t        *) cgAllocateHostMemory(&ctx->HostAllocator, arg_count * sizeof(uint32_t)        , 0, CG_ALLOCATION_TYPE_OBJECT);
     cp.Arguments     =(CG_CL_KERNEL_ARG*) cgAllocateHostMemory(&ctx->HostAllocator, arg_count * sizeof(CG_CL_KERNEL_ARG), 0, CG_ALLOCATION_TYPE_OBJECT);
@@ -6938,12 +6846,12 @@ cgCreateComputePipeline
     }
     for (size_t i = 0; i < size_t(arg_count); ++i)
     {
-        char          *name = cgClKernelArgName(ctx, cp.KernelList[0], cl_uint(i), CG_ALLOCATION_TYPE_TEMP);
+        char          *name = cgClKernelArgName(ctx, cp.ComputeKernel, cl_uint(i), CG_ALLOCATION_TYPE_TEMP);
         cp.ArgumentNames[i] = cgHashName(name);
         cp.Arguments[i].Index  = cl_uint(i);
-        clGetKernelArgInfo(cp.KernelList[0], cl_uint(i), CL_KERNEL_ARG_ACCESS_QUALIFIER , sizeof(cl_kernel_arg_access_qualifier) , &cp.Arguments[i].ImageAccess  , NULL);
-        clGetKernelArgInfo(cp.KernelList[0], cl_uint(i), CL_KERNEL_ARG_ADDRESS_QUALIFIER, sizeof(cl_kernel_arg_address_qualifier), &cp.Arguments[i].MemoryType   , NULL);
-        clGetKernelArgInfo(cp.KernelList[0], cl_uint(i), CL_KERNEL_ARG_TYPE_QUALIFIER   , sizeof(cl_kernel_arg_type_qualifier)   , &cp.Arguments[i].TypeQualifier, NULL);
+        clGetKernelArgInfo(cp.ComputeKernel, cl_uint(i), CL_KERNEL_ARG_ACCESS_QUALIFIER , sizeof(cl_kernel_arg_access_qualifier) , &cp.Arguments[i].ImageAccess  , NULL);
+        clGetKernelArgInfo(cp.ComputeKernel, cl_uint(i), CL_KERNEL_ARG_ADDRESS_QUALIFIER, sizeof(cl_kernel_arg_address_qualifier), &cp.Arguments[i].MemoryType   , NULL);
+        clGetKernelArgInfo(cp.ComputeKernel, cl_uint(i), CL_KERNEL_ARG_TYPE_QUALIFIER   , sizeof(cl_kernel_arg_type_qualifier)   , &cp.Arguments[i].TypeQualifier, NULL);
         cgClFreeString(ctx, name, CG_ALLOCATION_TYPE_TEMP);
     }
 
@@ -7010,151 +6918,122 @@ cgCreateGraphicsPipeline
     }
 
     // allocate resources for the graphics pipeline description:
-    CG_PIPELINE           pipe;
+    CG_DISPLAY      *display= group->AttachedDisplay;
+    CG_PIPELINE         pipe;
     CG_GRAPHICS_PIPELINE &gp= pipe.Graphics;
     memset(&pipe.Graphics, 0, sizeof(CG_GRAPHICS_PIPELINE));
-    pipe.PipelineType = CG_PIPELINE_TYPE_GRAPHICS;
+    pipe.PipelineType       = CG_PIPELINE_TYPE_GRAPHICS;
+    gp.AttachedDisplay      = group->AttachedDisplay;
+    gp.DeviceCount          = group->DeviceCount;
+    gp.DeviceList           = group->DeviceList;
+    gp.DisplayCount         = group->DisplayCount;
+    gp.AttachedDisplays     = group->AttachedDisplays;
+    gp.GraphicsQueues       = group->GraphicsQueues;
 
-    gp.DeviceCount    = group->DeviceCount;
-    gp.DeviceList     = group->DeviceList;
-    gp.DevicePrograms =(CG_GLSL_PROGRAM*) cgAllocateHostMemory(&ctx->HostAllocator, group->DeviceCount * sizeof(CG_GLSL_PROGRAM), 0, CG_ALLOCATION_TYPE_OBJECT);
-    if (gp.DevicePrograms == NULL)
-    {   // unable to allocate the requested memory.
-        result = CG_OUT_OF_MEMORY;
-        return CG_INVALID_HANDLE;
+    // link all of the shaders into a program object.
+    CG_GLSL_PROGRAM  &glsl  = gp.ShaderProgram;
+    GLuint         program  = glCreateProgram();
+    GLuint              vs  = vs_kernel->GraphicsShader; // vertex shader object
+    GLuint              fs  = fs_kernel->GraphicsShader; // fragment shader object
+    GLuint              gs  = gs_kernel->GraphicsShader; // geometry shader object
+    GLint          linkres  = GL_FALSE;
+    GLsizei       log_size  = 0;
+    GLint            a_max  = 0; // length of longest active vertex attribute name
+    GLint            u_max  = 0; // length of longest active uniform name
+    size_t        name_max  = 0; // length of longest string name
+    size_t     num_attribs  = 0;
+    size_t    num_samplers  = 0;
+    size_t    num_uniforms  = 0;
+    char         *name_buf  = NULL;
+
+    if (program == 0)
+    {   // unable to create the program object.
+        result = CG_BAD_GLCONTEXT;
+        goto error_cleanup;
     }
-    memset(gp.DevicePrograms, 0, group->DeviceCount * sizeof(CG_GLSL_PROGRAM));
+    if (vs == 0 || fs == 0) // gs is optional.
+    {   // required shaders are missing.
+        glDeleteProgram(program);
+        result = CG_LINK_FAILED;
+        goto error_cleanup;
+    }
 
-    gp.DisplayCount     = group->DisplayCount;
-    gp.AttachedDisplays = group->AttachedDisplays;
-    gp.GraphicsQueues   = group->GraphicsQueues;
-    gp.DisplayPrograms  =(CG_GLSL_PROGRAM**) cgAllocateHostMemory(&ctx->HostAllocator, group->DisplayCount * sizeof(CG_GLSL_PROGRAM*), 0, CG_ALLOCATION_TYPE_OBJECT);
-    if (gp.DisplayPrograms == NULL)
-    {   // unable to allocate the requested memory.
+    // attach the shader objects to the program object.
+    if (vs) glAttachShader(program, vs);
+    if (gs) glAttachShader(program, gs);
+    if (fs) glAttachShader(program, fs);
+
+    // set vertex attribute locations pre-link.
+    for (size_t i = 0, n = create->AttributeCount; i < n; ++i)
+    {
+        cg_shader_binding_t const &binding = create->AttributeBindings[i];
+        glBindAttribLocation(program, (GLuint) binding.Location, (GLchar const*) binding.Name);
+    }
+    // set fragment output locations pre-link.
+    for (size_t i = 0, n = create->OutputCount; i < n; ++i)
+    {
+        cg_shader_binding_t const &binding = create->OutputBindings[i];
+        glBindFragDataLocation(program, (GLuint) binding.Location, (GLchar const*) binding.Name);
+    }
+
+    // link the shaders into an executable program.
+    glLinkProgram (program);
+    glGetProgramiv(program, GL_LINK_STATUS , &linkres);
+    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_size);
+    if (linkres != GL_TRUE)
+    {
+#ifdef _DEBUG
+        GLsizei len = 0;
+        GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+        glGetProgramInfoLog(program, log_size+1, &len, buf);
+        buf[len] = '\0';
+        OutputDebugString(_T("OpenGL shader linking failed: \n"));
+        OutputDebugString(_T("**** Linker Log: \n"));
+        OutputDebugStringA(buf);
+        OutputDebugString(_T("\n\n"));
+        cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+#endif
+        glDeleteProgram(program);
+        result = CG_LINK_FAILED;
+        goto error_cleanup;
+    }
+
+    // grab the length of the longest attribute and uniform name.
+    // we'll use these values to allocate a single temp buffer for strings.
+    glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH  , &u_max);
+    glGetProgramiv(program, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &a_max);
+    name_max = (size_t) (u_max > a_max ? u_max + 1 : a_max + 1);
+    name_buf = (char *)  cgAllocateHostMemory(&ctx->HostAllocator, name_max, 0, CG_ALLOCATION_TYPE_TEMP);
+    if (name_buf == NULL)
+    {   // unable to allocate the required memory.
+        glDeleteProgram(program);
         result = CG_OUT_OF_MEMORY;
         goto error_cleanup;
     }
-    memset(gp.DisplayPrograms, 0, group->DisplayCount * sizeof(CG_GLSL_PROGRAM*));
+    cgGlslReflectProgramCounts(display, program, name_buf, name_max, false, num_attribs, num_samplers, num_uniforms);
 
-    // for each device, link all of the shaders into a program object.
-    for (size_t device_index = 0, device_count = group->DeviceCount; device_index < device_count; ++device_index)
-    {
-        CG_GLSL_PROGRAM &glsl = gp.DevicePrograms[device_index];
-        CG_DEVICE *dev = group->DeviceList[device_index];
-        if (dev->DisplayRC != NULL && dev->DisplayCount > 0)
-        {   // GL entry points are the same for all attached displays.
-            CG_DISPLAY *display  = dev->AttachedDisplays[0];
-            GLuint      program  = glCreateProgram();
-            GLuint      vs       = cgResolveGraphicsShader(vs_kernel, dev); // vertex shader object
-            GLuint      fs       = cgResolveGraphicsShader(fs_kernel, dev); // fragment shader object
-            GLuint      gs       = cgResolveGraphicsShader(gs_kernel, dev); // geometry shader object
-            GLint       linkres  = GL_FALSE;
-            GLsizei     log_size = 0;
-            GLint       a_max    = 0; // length of longest active vertex attribute name
-            GLint       u_max    = 0; // length of longest active uniform name
-            size_t      name_max = 0; // length of longest string name
-            size_t  num_attribs  = 0;
-            size_t  num_samplers = 0;
-            size_t  num_uniforms = 0;
-            char       *name_buf = NULL;
-
-            if (program == 0)
-            {   // unable to create the program object.
-                result = CG_BAD_GLCONTEXT;
-                goto error_cleanup;
-            }
-            if (vs == 0 || fs == 0) // gs is optional.
-            {   // required shaders are missing.
-                glDeleteProgram(program);
-                result = CG_LINK_FAILED;
-                goto error_cleanup;
-            }
-
-            // attach the shader objects to the program object.
-            if (vs) glAttachShader(program, vs);
-            if (gs) glAttachShader(program, gs);
-            if (fs) glAttachShader(program, fs);
-
-            // set vertex attribute locations pre-link.
-            for (size_t i = 0, n = create->AttributeCount; i < n; ++i)
-            {
-                cg_shader_binding_t const &binding = create->AttributeBindings[i];
-                glBindAttribLocation(program, (GLuint) binding.Location, (GLchar const*) binding.Name);
-            }
-            // set fragment output locations pre-link.
-            for (size_t i = 0, n = create->OutputCount; i < n; ++i)
-            {
-                cg_shader_binding_t const &binding = create->OutputBindings[i];
-                glBindFragDataLocation(program, (GLuint) binding.Location, (GLchar const*) binding.Name);
-            }
-
-            // link the shaders into an executable program.
-            glLinkProgram (program);
-            glGetProgramiv(program, GL_LINK_STATUS , &linkres);
-            glGetProgramiv(program, GL_INFO_LOG_LENGTH, &log_size);
-            if (linkres != GL_TRUE)
-            {
-#ifdef _DEBUG
-                GLsizei len = 0;
-                GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
-                glGetProgramInfoLog(program, log_size+1, &len, buf);
-                buf[len] = '\0';
-                OutputDebugString(_T("OpenGL shader linking failed: \n"));
-                OutputDebugString(_T("**** Linker Log: \n"));
-                OutputDebugStringA(buf);
-                OutputDebugString(_T("\n\n"));
-                cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
-#endif
-                glDeleteProgram(program);
-                result = CG_LINK_FAILED;
-                goto error_cleanup;
-            }
-
-            // grab the length of the longest attribute and uniform name.
-            // we'll use these values to allocate a single temp buffer for strings.
-            glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH  , &u_max);
-            glGetProgramiv(program, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &a_max);
-            name_max = (size_t) (u_max > a_max ? u_max + 1 : a_max + 1);
-            name_buf = (char *)  cgAllocateHostMemory(&ctx->HostAllocator, name_max, 0, CG_ALLOCATION_TYPE_TEMP);
-            if (name_buf == NULL)
-            {   // unable to allocate the required memory.
-                glDeleteProgram(program);
-                result = CG_OUT_OF_MEMORY;
-                goto error_cleanup;
-            }
-            cgGlslReflectProgramCounts(display, program, name_buf, name_max, false, num_attribs, num_samplers, num_uniforms);
-
-            // allocate storage for the attribute, sampler and uniform metadata.
-            glsl.AttributeCount = num_attribs;
-            glsl.AttributeNames =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-            glsl.Attributes     =(CG_GLSL_ATTRIBUTE*) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
-            glsl.SamplerCount   = num_samplers;
-            glsl.SamplerNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_samplers * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-            glsl.Samplers       =(CG_GLSL_SAMPLER  *) cgAllocateHostMemory(&ctx->HostAllocator, num_samplers * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-            glsl.UniformCount   = num_uniforms;
-            glsl.UniformNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
-            glsl.Uniforms       =(CG_GLSL_UNIFORM  *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
-            if (glsl.AttributeNames == NULL || glsl.Attributes == NULL ||
-                glsl.SamplerNames   == NULL || glsl.Samplers   == NULL ||
-                glsl.UniformNames   == NULL || glsl.Uniforms   == NULL)
-            {   // unable to allocate the required memory.
-                glDeleteProgram(program);
-                result = CG_OUT_OF_MEMORY;
-                goto error_cleanup;
-            }
-            cgGlslReflectProgramMetadata(display, program, name_buf, name_max, false, &glsl);
-
-            // all data has been retrieved, so store the program reference.
-            glsl.Program = program;
-
-            // set the program references for each attached display.
-            for (size_t display_index = 0, display_count = group->DisplayCount; display_index < display_count; ++display_index)
-            {
-                if (group->AttachedDisplays[display_index]->DisplayDevice == dev)
-                    gp.DisplayPrograms[display_index] = &gp.DevicePrograms[device_index];
-            }
-        }
+    // allocate storage for the attribute, sampler and uniform metadata.
+    glsl.AttributeCount = num_attribs;
+    glsl.AttributeNames =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+    glsl.Attributes     =(CG_GLSL_ATTRIBUTE*) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs  * sizeof(CG_GLSL_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+    glsl.SamplerCount   = num_samplers;
+    glsl.SamplerNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_samplers * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+    glsl.Samplers       =(CG_GLSL_SAMPLER  *) cgAllocateHostMemory(&ctx->HostAllocator, num_samplers * sizeof(CG_GLSL_SAMPLER)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    glsl.UniformCount   = num_uniforms;
+    glsl.UniformNames   =(uint32_t         *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(uint32_t)         , 0, CG_ALLOCATION_TYPE_OBJECT);
+    glsl.Uniforms       =(CG_GLSL_UNIFORM  *) cgAllocateHostMemory(&ctx->HostAllocator, num_uniforms * sizeof(CG_GLSL_UNIFORM)  , 0, CG_ALLOCATION_TYPE_OBJECT);
+    if (glsl.AttributeNames == NULL || glsl.Attributes == NULL ||
+        glsl.SamplerNames   == NULL || glsl.Samplers   == NULL ||
+        glsl.UniformNames   == NULL || glsl.Uniforms   == NULL)
+    {   // unable to allocate the required memory.
+        glDeleteProgram(program);
+        result = CG_OUT_OF_MEMORY;
+        goto error_cleanup;
     }
+    cgGlslReflectProgramMetadata(display, program, name_buf, name_max, false, &glsl);
+
+    // all data has been retrieved, so store the program reference.
+    glsl.Program = program;
 
     // convert the fixed-function state from CGFX enums to their OpenGL equivalents.
     CG_DEPTH_STENCIL_STATE &dss = pipe.Graphics.DepthStencilState;

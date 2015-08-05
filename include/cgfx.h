@@ -258,6 +258,8 @@ enum cg_execution_group_info_param_e : int
     CG_EXEC_GROUP_TRANSFER_QUEUES      =  15,       /// Retrieve the handles of all transfer queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_TRANSFER_QUEUE_COUNT].
     CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT =  16,       /// Retrieve the number of graphics queues in the execution group. Data is size_t.
     CG_EXEC_GROUP_GRAPHICS_QUEUES      =  17,       /// Retrieve the handles of all graphics queues in the execution group. Data is cg_handle_t[CG_EXEC_GROUP_GRAPHICS_QUEUE_COUNT].
+    CG_EXEC_GROUP_CL_CONTEXT           =  18,       /// Retrieve the OpenCL resource context for the execution group. Data is cl_context.
+    CG_EXEC_GROUP_WINDOWS_HGLRC        =  19,       /// Retrieve the OpenGL rendering context for the execution group. Data is HGLRC.
 };
 
 enum cg_data_buffer_info_param_e : int
@@ -419,7 +421,7 @@ enum cg_execution_group_flags_e : uint32_t
     CG_EXECUTION_GROUP_CPUS            = (1 << 0),  /// Include all CPUs in the sharegroup of the master device.
     CG_EXECUTION_GROUP_GPUS            = (1 << 1),  /// Include all GPUs in the sharegroup of the master device.
     CG_EXECUTION_GROUP_ACCELERATORS    = (1 << 2),  /// Include all accelerators in the sharegroup of the master device.
-    CG_EXECUTION_GROUP_CONTEXT_PER_CPU = (1 << 3),  /// Create a separate OpenCL context for each CPU device.
+    CG_EXECUTION_GROUP_DISPLAY_OUTPUT  = (1 << 3),  /// The execution group will use OpenGL for display output. The RootDevice must specify the GPU attached to the output display(s).
 };
 
 /// @summary Define flags that can be specified with kernel code.

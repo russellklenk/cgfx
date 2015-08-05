@@ -335,7 +335,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     exec_info.DeviceList      = NULL;
     exec_info.ExtensionCount  = 0;
     exec_info.ExtensionNames  = NULL;
-    exec_info.CreateFlags     = CG_EXECUTION_GROUP_CPUS;
+    exec_info.CreateFlags     = CG_EXECUTION_GROUP_CPUS | CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
     exec_info.ValidationLevel = 0;
     if ((exec_ctx = cgCreateExecutionGroup(context, &exec_info, cgres)) == CG_INVALID_HANDLE)
     {

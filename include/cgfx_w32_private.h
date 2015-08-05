@@ -435,19 +435,22 @@ struct CG_EXEC_GROUP
 {
     uint32_t                     ObjectId;             /// The internal CGFX object identifier.
     cl_platform_id               PlatformId;           /// The OpenCL platform ID for all devices in the group.
+    cl_context                   ComputeContext;       /// The OpenCL compute context shared by all devices in the group.
+    HGLRC                        RenderingContext;     /// The OpenGL rendering context shared by all devices in the group. May be NULL.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display associated with the OpenGL rendering context. Will be NULL if RenderingContext is NULL.
+
     size_t                       DeviceCount;          /// The number of devices in the execution group.
     CG_DEVICE                  **DeviceList;           /// The devices making up the execution group.
     cl_device_id                *DeviceIds;            /// The OpenCL device ID for each device in the group.
-    cl_context                  *ComputeContexts;      /// The compute context for each device in the group, which may reference the same context.
     CG_QUEUE                   **ComputeQueues;        /// The command queue used to submit compute kernel dispatch operations for each device in the group.
     CG_QUEUE                   **TransferQueues;       /// The command queue used to submit data transfer operations for each device in the group.
+
     size_t                       DisplayCount;         /// The number of displays attached to the group.
     CG_DISPLAY                 **AttachedDisplays;     /// The displays the execution group can output to.
     CG_QUEUE                   **GraphicsQueues;       /// The command queue used to submit graphics dispatch operations for each display in the group. 
+
     size_t                       QueueCount;           /// The number of unique queue objects associated with the group.
     CG_QUEUE                   **QueueList;            /// The set of references to queue objects owned by this execution group.
-    size_t                       ContextCount;         /// The number of unique OpenCL context objects associated with the group.
-    cl_context                  *ContextList;          /// The set of unique OpenCL context objects owned by this execution group.
 };
 
 /// @summary Define state associated with a graphics shader or compute kernel.
@@ -455,21 +458,11 @@ struct CG_KERNEL
 {
     uint32_t                     ObjectId;             /// The internal CGFX object identifier.
     int                          KernelType;           /// One of cg_kernel_type_e specifying the shader stage.
-    union
-    {
-        struct
-        {
-            size_t               DisplayCount;         /// The number of displays the kernel is compiled for.
-            CG_DISPLAY         **DisplayList;          /// The set of OpenGL displays the kernel is compiled for.
-            GLuint              *Shader;               /// The OpenGL shader object for each OpenGL display.
-        }                        Graphics;             /// State valid if KernelType is CG_KERNEL_TYPE_GRAPHICS_*.
-        struct
-        {
-            size_t               ContextCount;         /// The number of OpenCL contexts the kernel is compiled for.
-            cl_context          *ContextList;          /// The set of OpenCL contexts the kernel is compiled for.
-            cl_program          *Program;              /// The OpenCL program object for each OpenCL context.
-        }                        Compute;              /// State valid if KernelType is CG_KERNEL_TYPE_COMPUTE.
-    };
+    cl_context                   ComputeContext;       /// The OpenCL resource context for compute kernels, or NULL.
+    cl_program                   ComputeProgram;       /// The OpenCL program object for compute kernels, or NULL.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display associated with the OpenGL rendering context.
+    HGLRC                        RenderingContext;     /// The OpenGL rendering context for graphics kernels, or NULL.
+    GLuint                       GraphicsShader;       /// The OpenGL shader object name for graphics kernels, or 0.
 };
 
 /// @summary Describes fixed-function state configuration for the blending unit.
@@ -578,15 +571,13 @@ struct CG_CL_WORKGROUP_INFO
 /// @summary Defines the data associated with an execution-ready compute pipeline.
 struct CG_COMPUTE_PIPELINE
 {
-    size_t                       ContextCount;         /// The number of OpenCL contexts the kernel is compiled for.
-    cl_context                  *ContextList;          /// The set of OpenCL contexts the kernel is compiled for. Reference to CG_EXEC_GROUP.
-    cl_kernel                   *KernelList;           /// The set of OpenCL kernel objects, one per-context. Local.
+    cl_context                   ComputeContext;       /// The OpenCL context the kernel is compiled for.
+    cl_kernel                    ComputeKernel;        /// The OpenCL kernel object.
 
     size_t                       DeviceCount;          /// The number of OpenCL devices the kernel can execute on.
     CG_DEVICE                  **DeviceList;           /// The set of OpenCL devices the kernel can execute on. Reference to CG_EXEC_GROUP.
     cl_device_id                *DeviceIds;            /// The set of OpenCL device IDs the kernel can execute on. Reference to CG_EXEC_GROUP.
     CG_QUEUE                   **ComputeQueues;        /// The handle of the command queue for each device the kernel can execute on. Reference to CG_EXEC_GROUP.
-    cl_kernel                   *DeviceKernels;        /// The handle of the kernel program for each device the kernel can execute on. Local.
     CG_CL_WORKGROUP_INFO        *DeviceKernelInfo;     /// The work group and memory usage information for the kernel program on each device. Local.
 
     size_t                       ArgumentCount;        /// The number of kernel arguments.
@@ -601,15 +592,15 @@ struct CG_GRAPHICS_PIPELINE
     CG_RASTER_STATE              RasterizerState;      /// The fixed-function rasterizer state to apply.
     CG_BLEND_STATE               BlendState;           /// The fixed-function blending unit state to apply.
     GLenum                       Topology;             /// The primitive topology, for example, GL_TRIANGLES.
+    CG_GLSL_PROGRAM              ShaderProgram;        /// The OpenGL program handle and reflection data.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
 
     size_t                       DeviceCount;          /// The number of devices the pipeline can execute on.
     CG_DEVICE                  **DeviceList;           /// The set of devices the pipeline can execute on. Reference to CG_EXEC_GROUP.
-    CG_GLSL_PROGRAM             *DevicePrograms;       /// The OpenGL program handle and reflection data for each device. Local.
 
     size_t                       DisplayCount;         /// The number of displays the pipeline can execute on.
     CG_DISPLAY                 **AttachedDisplays;     /// The set of displays the pipeline can execute on. Reference to CG_EXEC_GROUP.
     CG_QUEUE                   **GraphicsQueues;       /// The set of queues the pipeline can be bound on. Reference to CG_EXEC_GROUP.
-    CG_GLSL_PROGRAM            **DisplayPrograms;      /// The set of program handle and reflection data for each display. Local.
 };
 
 /// @summary Defines the data associated with a pipeline object, which combines fixed-function and programmable state.
