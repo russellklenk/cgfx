@@ -968,6 +968,28 @@ cgDeletePipeline
     }
 }
 
+/// @summary Frees all resources associated with a buffer memory object.
+/// @param ctx The CGFX context that owns the buffer object.
+/// @param buffer The buffer object to delete.
+internal_function void
+cgDeleteBuffer
+(
+    CG_CONTEXT *ctx, 
+    CG_BUFFER  *buffer
+)
+{
+    if (buffer->ComputeBuffer != NULL)
+    {
+        clReleaseMemObject(buffer->ComputeBuffer);
+    }
+    if (buffer->GraphicsBuffer != 0)
+    {
+        CG_DISPLAY *display = buffer->AttachedDisplay;
+        glDeleteBuffers(1, &buffer->GraphicsBuffer);
+    }
+    memset(buffer, 0, sizeof(CG_BUFFER));
+}
+
 /// @summary Allocates memory for and initializes an empty CGFX context object.
 /// @param app_info Information about the application associated with the context.
 /// @param alloc_cb User-supplied host memory allocator callbacks, or NULL.
@@ -1002,6 +1024,7 @@ cgCreateContext
     cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
     cgObjectTableInit(&ctx->KernelTable   , CG_OBJECT_KERNEL         , CG_KERNEL_TABLE_ID);
     cgObjectTableInit(&ctx->PipelineTable , CG_OBJECT_PIPELINE       , CG_PIPELINE_TABLE_ID);
+    cgObjectTableInit(&ctx->BufferTable   , CG_OBJECT_BUFFER         , CG_BUFFER_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -1018,6 +1041,12 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all buffer objects:
+    for (size_t i = 0, n = ctx->BufferTable.ObjectCount; i < n; ++i)
+    {
+        CG_BUFFER *obj = &ctx->BufferTable.Objects[i];
+        cgDeleteBuffer(ctx, obj);
+    }
     // free all pipeline objects:
     for (size_t i = 0, n = ctx->PipelineTable.ObjectCount; i < n; ++i)
     {
@@ -1174,6 +1203,7 @@ cgClGetHeapInformation
         // all devices define a local heap.
         size_t   index        = heap_count;
         CG_HEAP &local        = heaps[heap_count];
+        local.Ordinal         = index;
         local.ParentDeviceId  = did;
         local.Type            = CG_HEAP_TYPE_LOCAL;
         local.Flags           = 0;
@@ -1210,6 +1240,82 @@ cgClGetHeapInformation
         else heap_count++;
     }
     return heap_count;
+}
+
+/// @summary Locate the heap corresponding to a particular memory object placement hint.
+/// @param ctx The CGFX context maintaining the heap list.
+/// @param group The execution group that owns the memory object.
+/// @param placement_hint One of cg_memory_object_placement_e specifying the desired location for the memory object.
+/// @return A pointer to the source heap.
+internal_function CG_HEAP*
+cgFindHeapForPlacement
+(
+    CG_CONTEXT    *ctx, 
+    CG_EXEC_GROUP *group, 
+    int            placement_hint
+)
+{
+    for (size_t i = 0, n = ctx->HeapCount; i < n; ++i)
+    {
+        CG_HEAP *heap  = &ctx->HeapList[i];
+        if ((placement_hint == CG_MEMORY_PLACEMENT_PINNED) && (heap->Flags & CG_HEAP_HOLDS_PINNED))
+            return heap;
+        if ((placement_hint == CG_MEMORY_PLACEMENT_HOST  ) && (heap->DeviceType == CL_DEVICE_TYPE_CPU))
+            return heap;
+        if ((placement_hint == CG_MEMORY_PLACEMENT_DEVICE) && (heap->DeviceType != CL_DEVICE_TYPE_CPU))
+            return heap;
+    }
+    return &ctx->HeapList[0];
+}
+
+/// @summary Locate the heap corresponding to OpenGL buffer usage flags.
+/// @param ctx The CGFX context maintaining the heap list.
+/// @param group The execution group that owns the memory object.
+/// @param usage The OpenGL buffer usage hint, for example, GL_STREAM_DRAW.
+/// @return A pointer to the source heap.
+internal_function CG_HEAP*
+cgGlFindHeapForUsage
+(
+    CG_CONTEXT    *ctx, 
+    CG_EXEC_GROUP *group, 
+    GLenum         usage
+)
+{   // convert the OpenGL usage hints to a CGFX placement hint.
+    int placement_hint = 0;
+    switch (usage)
+    {
+    case GL_STATIC_DRAW:
+        placement_hint = CG_MEMORY_PLACEMENT_DEVICE;
+        break;
+    case GL_STATIC_READ:
+        placement_hint = CG_MEMORY_PLACEMENT_PINNED;
+        break;
+    case GL_STATIC_COPY:
+        placement_hint = CG_MEMORY_PLACEMENT_DEVICE;
+        break;
+    case GL_STREAM_DRAW:
+        placement_hint = CG_MEMORY_PLACEMENT_PINNED;
+        break;
+    case GL_STREAM_READ:
+        placement_hint = CG_MEMORY_PLACEMENT_PINNED;
+        break;
+    case GL_STREAM_COPY:
+        placement_hint = CG_MEMORY_PLACEMENT_DEVICE;
+        break;
+    case GL_DYNAMIC_DRAW:
+        placement_hint = CG_MEMORY_PLACEMENT_PINNED;
+        break;
+    case GL_DYNAMIC_READ:
+        placement_hint = CG_MEMORY_PLACEMENT_PINNED;
+        break;
+    case GL_DYNAMIC_COPY:
+        placement_hint = CG_MEMORY_PLACEMENT_DEVICE;
+        break;
+    default:
+        placement_hint = CG_MEMORY_PLACEMENT_HOST;
+        break;
+    }
+    return cgFindHeapForPlacement(ctx, group, placement_hint);
 }
 
 /// @summary Check the device table for a context to determine if a given device is already known.
@@ -6118,7 +6224,7 @@ cgDeleteObject
     cg_handle_t object
 )
 {
-    CG_CONTEXT *ctx =(CG_CONTEXT*) context;
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
     switch (cgGetObjectType(object))
     {
     case CG_OBJECT_COMMAND_BUFFER:
@@ -6138,6 +6244,28 @@ cgDeleteObject
             if (cgObjectTableRemove(&ctx->KernelTable, object, kernel))
             {
                 cgDeleteKernel(ctx, &kernel);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
+    case CG_OBJECT_PIPELINE:
+        {
+            CG_PIPELINE pipeline;
+            if (cgObjectTableRemove(&ctx->PipelineTable, object, pipeline))
+            {
+                cgDeletePipeline(ctx, &pipeline);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
+    case CG_OBJECT_BUFFER:
+        {
+            CG_BUFFER buffer;
+            if (cgObjectTableRemove(&ctx->BufferTable, object, buffer))
+            {
+                cgDeleteBuffer(ctx, &buffer);
                 return CG_SUCCESS;
             }
         }
@@ -6619,141 +6747,6 @@ cgCreateKernel
     return handle;
 }
 
-/// @summary Initialize a blend state descriptor such that alpha blending is disabled.
-/// @param state The fixed-function blend state descriptor to configure.
-/// @return CG_SUCCESS.
-library_function int
-cgBlendStateInitNone
-(
-    cg_blend_state_t &state
-)
-{
-    state.BlendEnabled       = false;
-    state.SrcBlendColor      = CG_BLEND_FACTOR_ONE;
-    state.DstBlendColor      = CG_BLEND_FACTOR_ZERO;
-    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.SrcBlendAlpha      = CG_BLEND_FACTOR_ONE;
-    state.DstBlendAlpha      = CG_BLEND_FACTOR_ZERO;
-    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.ConstantRGBA[0]    = 0.0f; // R
-    state.ConstantRGBA[1]    = 0.0f; // G
-    state.ConstantRGBA[2]    = 0.0f; // B
-    state.ConstantRGBA[3]    = 0.0f; // A
-    return CG_SUCCESS;
-}
-
-/// @summary Initialize a blend state descriptor such that standard texture transparency is enabled.
-/// @param state The fixed-function blend state descriptor to configure.
-/// @return CG_SUCCESS.
-library_function int
-cgBlendStateInitAlpha
-(
-    cg_blend_state_t &state
-)
-{
-    state.BlendEnabled       = true;
-    state.SrcBlendColor      = CG_BLEND_FACTOR_SRC_COLOR;
-    state.DstBlendColor      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
-    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.SrcBlendAlpha      = CG_BLEND_FACTOR_SRC_ALPHA;
-    state.DstBlendAlpha      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
-    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.ConstantRGBA[0]    = 0.0f; // R
-    state.ConstantRGBA[1]    = 0.0f; // G
-    state.ConstantRGBA[2]    = 0.0f; // B
-    state.ConstantRGBA[3]    = 0.0f; // A
-    return CG_SUCCESS;
-}
-
-/// @summary Initialize a blend state descriptor such that additive alpha blending is enabled.
-/// @param state The fixed-function blend state descriptor to configure.
-/// @return CG_SUCCESS.
-library_function int
-cgBlendStateInitAdditive
-(
-    cg_blend_state_t &state
-)
-{
-    state.BlendEnabled       = true;
-    state.SrcBlendColor      = CG_BLEND_FACTOR_SRC_COLOR;
-    state.DstBlendColor      = CG_BLEND_FACTOR_ONE;
-    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.SrcBlendAlpha      = CG_BLEND_FACTOR_SRC_ALPHA;
-    state.DstBlendAlpha      = CG_BLEND_FACTOR_ONE;
-    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.ConstantRGBA[0]    = 0.0f; // R
-    state.ConstantRGBA[1]    = 0.0f; // G
-    state.ConstantRGBA[2]    = 0.0f; // B
-    state.ConstantRGBA[3]    = 0.0f; // A
-    return CG_SUCCESS;
-}
-
-/// @sumary Initialize a blend state descriptor such that premultiplied alpha blending is enabled.
-/// @param state The fixed-function blend state descriptor to configure.
-/// @return CG_SUCCESS.
-library_function int
-cgBlendStateInitPremultiplied
-(
-    cg_blend_state_t &state
-)
-{
-    state.BlendEnabled       = true;
-    state.SrcBlendColor      = CG_BLEND_FACTOR_ONE;
-    state.DstBlendColor      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
-    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.SrcBlendAlpha      = CG_BLEND_FACTOR_ONE;
-    state.DstBlendAlpha      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
-    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
-    state.ConstantRGBA[0]    = 0.0f; // R
-    state.ConstantRGBA[1]    = 0.0f; // G
-    state.ConstantRGBA[2]    = 0.0f; // B
-    state.ConstantRGBA[3]    = 0.0f; // A
-    return CG_SUCCESS;
-}
-
-/// @summary Initialize a rasterizer state descriptor to the default values.
-/// @param state The fixed-function rasterizer state descriptor to configure.
-/// @return CG_SUCCESS.
-library_function int
-cgRasterStateInitDefault
-(
-    cg_raster_state_t &state
-)
-{
-    state.FillMode  = CG_FILL_SOLID;
-    state.CullMode  = CG_CULL_BACK;
-    state.FrontFace = CG_WINDING_CCW;
-    state.DepthBias = 0;
-    state.SlopeScaledDepthBias = 0.0f;
-    return CG_SUCCESS;
-}
-
-/// @summary Initialize a depth-stencil state descriptor to the default values.
-/// @param state The fixed-function depth and stencil test state descriptor to configure.
-/// @return CG_SUCCESS.
-library_function int
-cgDepthStencilStateInitDefault
-(
-    cg_depth_stencil_state_t &state
-)
-{
-    state.DepthTestEnable     = false;
-    state.DepthWriteEnable    = false;
-    state.DepthBoundsEnable   = false;
-    state.DepthTestFunction   = CG_COMPARE_LESS;
-    state.DepthMin            = 0.0f;
-    state.DepthMax            = 1.0f;
-    state.StencilTestEnable   = false;
-    state.StencilTestFunction = CG_COMPARE_ALWAYS;
-    state.StencilFailOp       = CG_STENCIL_OP_KEEP;
-    state.StencilPassZPassOp  = CG_STENCIL_OP_KEEP;
-    state.StencilPassZFailOp  = CG_STENCIL_OP_KEEP;
-    state.StencilReadMask     = 0xFF;
-    state.StencilWriteMask    = 0xFF;
-    state.StencilReference    = 0x00;
-    return CG_SUCCESS;
-}
-
 /// @summary Create a new compute pipeline object to execute an OpenCL compute kernel.
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group defining the devices the kernel may execute on.
@@ -7090,6 +7083,528 @@ cgCreateGraphicsPipeline
 error_cleanup:
     cgDeleteGraphicsPipeline(ctx, &pipe.Graphics);
     return CG_INVALID_HANDLE;
+}
+
+/// @summary Creates a new buffer object and allocates, but does not initialize, the backing memory.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The execution group that will read or write the data buffer.
+/// @param buffer_size The desired size of the data buffer, in bytes.
+/// @param kernel_types One or more of cg_memory_object_kernel_e specifying the types of kernels that will access the buffer.
+/// @param kernel_access One or more of cg_memory_access_e specifying how the kernel(s) will access the buffer.
+/// @param host_access One or more of cg_memory_access_e specifying how the host will access the buffer.
+/// @param placement_hint One of cg_memory_placement_e specifying the heap the buffer should be allocated from. This is only a hint.
+/// @param frequency_hint One of cg_memory_update_frequency_e specifying the expected buffer update frequency.
+/// @param result On return, set to CG_SUCCESS, CG_NO_OPENGL, CG_BAD_GLCONTEXT, CG_BAD_CLCONTEXT, CG_OUT_OF_MEMORY, CG_INVALID_VALUE or CG_ERROR.
+/// @return A handle to the new buffer object, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgCreateDataBuffer
+(
+    uintptr_t    context,
+    cg_handle_t  exec_group,
+    size_t       buffer_size,
+    uint32_t     kernel_types,
+    uint32_t     kernel_access,
+    uint32_t     host_access,
+    int          placement_hint,
+    int          frequency_hint,
+    int         &result
+)
+{
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // invalid execution group handle.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if ((group->RenderingContext == NULL) && (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS))
+    {   // want OpenGL interop, but group has no OpenGL capability.
+        result = CG_NO_OPENGL;
+        return CG_INVALID_VALUE;
+    }
+
+    if (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS)
+    {   // the buffer must be created in OpenGL first. the OpenGL driver 
+        // determines the buffer placement based on hints we provide. 
+        GLenum  gl_flags = 0;
+        switch (frequency_hint)
+        {
+        case CG_MEMORY_UPDATE_ONCE:
+            {   // the data stored in the buffer is largely static.
+                     if (host_access == CG_MEMORY_ACCESS_NONE ) gl_flags = GL_STATIC_COPY;
+                else if (host_access  & CG_MEMORY_ACCESS_WRITE) gl_flags = GL_STATIC_DRAW;
+                else if (host_access  & CG_MEMORY_ACCESS_READ ) gl_flags = GL_STATIC_READ;
+                else
+                {   // invalid host access flags specified.
+                    result = CG_INVALID_VALUE;
+                    return CG_INVALID_HANDLE;
+                }
+            }
+            break;
+
+        case CG_MEMORY_UPDATE_PER_FRAME:
+            {   // the data stored in the buffer is updated on the order of once per-frame.
+                     if (host_access == CG_MEMORY_ACCESS_NONE ) gl_flags = GL_DYNAMIC_COPY;
+                else if (host_access  & CG_MEMORY_ACCESS_WRITE) gl_flags = GL_DYNAMIC_DRAW;
+                else if (host_access  & CG_MEMORY_ACCESS_READ ) gl_flags = GL_DYNAMIC_READ;
+                else
+                {   // invalid host access flags specified.
+                    result = CG_INVALID_VALUE;
+                    return CG_INVALID_HANDLE;
+                }
+            }
+            break;
+
+        case CG_MEMORY_UPDATE_PER_DISPATCH:
+            {   // the data stored in the buffer is updated very frequently.
+                     if (host_access == CG_MEMORY_ACCESS_NONE ) gl_flags = GL_STREAM_COPY;
+                else if (host_access  & CG_MEMORY_ACCESS_WRITE) gl_flags = GL_STREAM_DRAW;
+                else if (host_access  & CG_MEMORY_ACCESS_READ ) gl_flags = GL_STREAM_READ;
+                else
+                {   // invalid host access flags specified.
+                    result = CG_INVALID_VALUE;
+                    return CG_INVALID_HANDLE;
+                }
+            }
+            break;
+
+        default:
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+
+        CG_DISPLAY *display   = group->AttachedDisplay;
+        GLuint      gl_buffer = 0;
+        glGenBuffers(1, &gl_buffer);
+        if (gl_buffer == 0)
+        {
+            result = CG_BAD_GLCONTEXT;
+            return CG_INVALID_HANDLE;
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, gl_buffer);
+        glBufferData(GL_ARRAY_BUFFER, buffer_size, NULL, gl_flags);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        CG_BUFFER   buffer;
+        buffer.KernelTypes     = kernel_types;
+        buffer.KernelAccess    = kernel_access;
+        buffer.HostAccess      = host_access;
+        buffer.AttachedDisplay = group->AttachedDisplay;
+        buffer.SourceHeap      = cgGlFindHeapForUsage(ctx, group, gl_flags);
+        buffer.ComputeContext  = NULL;
+        buffer.ComputeBuffer   = NULL;
+        buffer.ComputeUsage    = 0;
+        buffer.AllocatedSize   = align_up(buffer_size, buffer.SourceHeap->DeviceAlignment);
+        buffer.RequestedSize   = buffer_size;
+        buffer.ExecutionGroup  = exec_group;
+        buffer.GraphicsBuffer  = gl_buffer;
+        buffer.GraphicsUsage   = gl_flags;
+
+        // set up OpenCL sharing, if requested.
+        if (kernel_types & CG_MEMORY_OBJECT_KERNEL_COMPUTE)
+        {
+            cl_mem_flags cl_flags = 0;
+            cl_mem       clmem    = NULL;
+            cl_int       clres    = CL_SUCCESS;
+            uint32_t     access   =(kernel_access & ~CG_MEMORY_ACCESS_PRESERVE);
+
+            // convert kernel access flags into cl_mem_flags.
+            // because OpenGL is responsible for allocating the buffer, 
+            // we never specifying anything like CL_MEM_ALLOC_HOST_PTR.
+                 if (access == CG_MEMORY_ACCESS_READ      ) cl_flags = CL_MEM_READ_ONLY;
+            else if (access == CG_MEMORY_ACCESS_WRITE     ) cl_flags = CL_MEM_WRITE_ONLY;
+            else if (access == CG_MEMORY_ACCESS_READ_WRITE) cl_flags = CL_MEM_READ_WRITE;
+            else
+            {   // CG_MEMORY_ACCESS_NONE is not valid.
+                glDeleteBuffers(1, &gl_buffer);
+                result = CG_INVALID_VALUE;
+                return CG_INVALID_HANDLE;
+            }
+            if ((clmem = clCreateFromGLBuffer(group->ComputeContext, cl_flags, gl_buffer, &clres)) == NULL)
+            {
+                switch (clres)
+                {
+                case CL_INVALID_CONTEXT   : result = CG_BAD_CLCONTEXT; break;
+                case CL_INVALID_VALUE     : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_GL_OBJECT : result = CG_INVALID_VALUE; break;
+                case CL_OUT_OF_HOST_MEMORY: result = CG_OUT_OF_MEMORY; break;
+                default: result = CG_ERROR; break;
+                }
+                glDeleteBuffers(1, &gl_buffer);
+                return CG_INVALID_HANDLE;
+            }
+            buffer.ComputeContext = group->ComputeContext;
+            buffer.ComputeBuffer  = clmem;
+            buffer.ComputeUsage   = cl_flags;
+        }
+
+        cg_handle_t handle = cgObjectTableAdd(&ctx->BufferTable, buffer);
+        if (handle == CG_INVALID_HANDLE)
+        {
+            if (buffer.ComputeBuffer  != NULL) clReleaseMemObject(buffer.ComputeBuffer);
+            glDeleteBuffers(1, &buffer.GraphicsBuffer);
+            result = CG_OUT_OF_OBJECTS;
+            return CG_INVALID_HANDLE;
+        }
+        // TODO(rlk): update CG_HEAP::HeapSizeUsed and CG_HEAP::PinnedUsed.
+        result = CG_SUCCESS;
+        return handle;
+    }
+    else if (kernel_types & CG_MEMORY_OBJECT_KERNEL_COMPUTE)
+    {   // compute kernel data only.
+        cl_mem_flags cl_flags = 0;
+        cl_mem       clmem    = NULL;
+        cl_int       clres    = CL_SUCCESS;
+        uint32_t     access   =(kernel_access & ~CG_MEMORY_ACCESS_PRESERVE);
+
+        // convert kernel access flags into cl_mem_flags.
+        // because OpenGL is responsible for allocating the buffer, 
+        // we never specifying anything like CL_MEM_ALLOC_HOST_PTR.
+             if (access == CG_MEMORY_ACCESS_READ      ) cl_flags = CL_MEM_READ_ONLY;
+        else if (access == CG_MEMORY_ACCESS_WRITE     ) cl_flags = CL_MEM_WRITE_ONLY;
+        else if (access == CG_MEMORY_ACCESS_READ_WRITE) cl_flags = CL_MEM_READ_WRITE;
+        else
+        {   // CG_MEMORY_ACCESS_NONE is not valid.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+        if (placement_hint != CG_MEMORY_PLACEMENT_DEVICE)
+        {   // prefer to allocate the buffer in host or pinned memory.
+            // there are limitations on buffer size with pinned memory.
+            cl_flags |= CL_MEM_ALLOC_HOST_PTR;
+        }
+        if ((clmem = clCreateBuffer(group->ComputeContext, cl_flags, buffer_size, NULL, &clres)) == NULL)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_CONTEXT              : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_VALUE                : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_BUFFER_SIZE          : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_HOST_PTR             : result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE: result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY           : result = CG_OUT_OF_MEMORY; break;
+            default                              : result = CG_ERROR;         break;
+            }
+            return CG_INVALID_HANDLE;
+        }
+
+        CG_BUFFER   buffer;
+        buffer.KernelTypes     = kernel_types;
+        buffer.KernelAccess    = kernel_access;
+        buffer.HostAccess      = host_access;
+        buffer.AttachedDisplay = NULL;
+        buffer.SourceHeap      = cgFindHeapForPlacement(ctx, group, placement_hint);
+        buffer.ComputeContext  = group->ComputeContext;
+        buffer.ComputeBuffer   = clmem;
+        buffer.ComputeUsage    = cl_flags;
+        buffer.AllocatedSize   = align_up(buffer_size, buffer.SourceHeap->DeviceAlignment);
+        buffer.RequestedSize   = buffer_size;
+        buffer.ExecutionGroup  = exec_group;
+        buffer.GraphicsBuffer  = 0;
+        buffer.GraphicsUsage   = 0;
+
+        cg_handle_t handle     = cgObjectTableAdd(&ctx->BufferTable, buffer);
+        if (handle == CG_INVALID_HANDLE)
+        {
+            clReleaseMemObject(buffer.ComputeBuffer);
+            result = CG_OUT_OF_OBJECTS;
+            return CG_INVALID_HANDLE;
+        }
+        // TODO(rlk): update CG_HEAP::HeapSizeUsed and CG_HEAP::PinnedUsed.
+        result = CG_SUCCESS;
+        return handle;
+    }
+    else
+    {   // invalid kernel_types.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+}
+
+/// @summary Query data buffer information.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param buffer_handle The handle of the execution group to query.
+/// @param param One of cg_data_buffer_info_param_e specifying the data to return.
+/// @param buffer A caller-managed buffer to receive the data.
+/// @param buffer_size The maximum number of bytes that can be written to @a buffer.
+/// @param bytes_needed On return, stores the number of bytes copied to the buffer, or the number of bytes required to store the data.
+/// @return CG_SUCCESS, CG_BUFFER_TOO_SMALL, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+library_function int
+cgGetDataBufferInfo
+(
+    uintptr_t                     context,
+    cg_handle_t                   buffer_handle,
+    int                           param,
+    void                         *buffer,
+    size_t                        buffer_size,
+    size_t                       *bytes_needed
+)
+{
+    CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
+    CG_BUFFER  *object =  NULL;
+
+    if ((object = cgObjectTableGet(&ctx->BufferTable, buffer_handle)) == NULL)
+    {
+        if (bytes_needed != NULL) *bytes_needed = 0;
+        return CG_INVALID_HANDLE;
+    }
+
+    // reduce the amount of boilerplate code using these macros.
+#define BUFFER_CHECK_TYPE(type) \
+    if (buffer == NULL || buffer_size < sizeof(type)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = sizeof(type); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = sizeof(type); \
+    }
+#define BUFFER_CHECK_SIZE(size) \
+    if (buffer == NULL || buffer_size < (size)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = (size); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = (size); \
+    }
+#define BUFFER_SET_SCALAR(type, value) \
+    *((type*)buffer) = (value)
+    // ==========================================================
+    // ==========================================================
+
+    // retrieve parameter data:
+    switch (param)
+    {
+    case CG_DATA_BUFFER_HEAP_ORDINAL:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, object->SourceHeap->Ordinal);
+        }
+        return CG_SUCCESS;
+
+    case CG_DATA_BUFFER_HEAP_TYPE:
+        {   BUFFER_CHECK_TYPE(int);
+            BUFFER_SET_SCALAR(int, object->SourceHeap->Type);
+        }
+        return CG_SUCCESS;
+
+    case CG_DATA_BUFFER_HEAP_FLAGS:
+        {   BUFFER_CHECK_TYPE(uint32_t);
+            BUFFER_SET_SCALAR(uint32_t, object->SourceHeap->Flags);
+        }
+        return CG_SUCCESS;
+
+    case CG_DATA_BUFFER_ALLOCATED_SIZE:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, object->AllocatedSize);
+        }
+        return CG_SUCCESS;
+
+    default:
+        {
+            if (bytes_needed != NULL) *bytes_needed = 0;
+            return CG_INVALID_VALUE;
+        }
+    }
+
+#undef  BUFFER_SET_SCALAR
+#undef  BUFFER_CHECK_SIZE
+#undef  BUFFER_CHECK_TYPE
+}
+
+library_function void*
+cgMapDataBuffer
+(
+    uintptr_t   context,
+    cg_handle_t buffer_handle,
+    size_t      offset,
+    size_t      amount,
+    uint32_t    flags,
+    int         &result
+)
+{   // TODO(rlk): needs to take a command queue on which to enqueue the map command.
+    /*CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
+    CG_BUFFER  *object =  NULL;
+
+    if ((object = cgObjectTableGet(&ctx->BufferTable, buffer_handle)) == NULL)
+    {   // invalid buffer object handle.
+        result = CG_INVALID_VALUE;
+        return NULL;
+    }
+    if (object->GraphicsBuffer)
+    {   // always map through OpenGL.
+        CG_DISPLAY  *display = object->AttachedDisplay;
+        GLbitfield map_flags = GL_MAP_FLUSH_EXPLICIT_BIT | GL_MAP_UNSYNCHRONIZED_BIT;
+
+        if (flags & CG_MEMORY_ACCESS_READ)
+            map_flags |= GL_MAP_READ_BIT;
+        if (flags & CG_MEMORY_ACCESS_WRITE)
+            map_flags |= GL_MAP_WRITE_BIT;
+        if ((flags & CG_MEMORY_ACCESS_READ) == 0 && (flags & CG_MEMORY_ACCESS_PRESERVE) == 0)
+        {
+            if (offset + amount > object->RequestedSize)
+            {
+                map_flags  |= GL_MAP_INVALIDATE_BUFFER_BIT;
+                offset      = 0;
+            }
+            else map_flags |= GL_MAP_INVALIDATE_RANGE_BIT;
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, object->GraphicsBuffer);
+        return glMapBufferRange(GL_ARRAY_BUFFER, (GLintptr) offset, amount, map_flags);
+    }
+    else
+    {   // always map through OpenCL.
+        cl_mem_flags flags = 0;
+        // gah, this needs a command queue, which implies it needs a device.
+    }*/
+}
+
+library_function int
+cgUnmapDataBuffer
+(
+    uintptr_t   context,
+    cg_handle_t buffer_handle,
+    size_t      modified_offset,
+    size_t      modified_amount
+)
+{   // TODO(rlk): needs to take a command queue on which to enqueue the unmap command.
+}
+
+/// @summary Initialize a blend state descriptor such that alpha blending is disabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitNone
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = false;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendColor      = CG_BLEND_FACTOR_ZERO;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_ZERO;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a blend state descriptor such that standard texture transparency is enabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitAlpha
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = true;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_SRC_COLOR;
+    state.DstBlendColor      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_SRC_ALPHA;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a blend state descriptor such that additive alpha blending is enabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitAdditive
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = true;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_SRC_COLOR;
+    state.DstBlendColor      = CG_BLEND_FACTOR_ONE;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_SRC_ALPHA;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_ONE;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @sumary Initialize a blend state descriptor such that premultiplied alpha blending is enabled.
+/// @param state The fixed-function blend state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgBlendStateInitPremultiplied
+(
+    cg_blend_state_t &state
+)
+{
+    state.BlendEnabled       = true;
+    state.SrcBlendColor      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendColor      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.ColorBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.SrcBlendAlpha      = CG_BLEND_FACTOR_ONE;
+    state.DstBlendAlpha      = CG_BLEND_FACTOR_INV_SRC_ALPHA;
+    state.AlphaBlendFunction = CG_BLEND_FUNCTION_ADD;
+    state.ConstantRGBA[0]    = 0.0f; // R
+    state.ConstantRGBA[1]    = 0.0f; // G
+    state.ConstantRGBA[2]    = 0.0f; // B
+    state.ConstantRGBA[3]    = 0.0f; // A
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a rasterizer state descriptor to the default values.
+/// @param state The fixed-function rasterizer state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgRasterStateInitDefault
+(
+    cg_raster_state_t &state
+)
+{
+    state.FillMode  = CG_FILL_SOLID;
+    state.CullMode  = CG_CULL_BACK;
+    state.FrontFace = CG_WINDING_CCW;
+    state.DepthBias = 0;
+    state.SlopeScaledDepthBias = 0.0f;
+    return CG_SUCCESS;
+}
+
+/// @summary Initialize a depth-stencil state descriptor to the default values.
+/// @param state The fixed-function depth and stencil test state descriptor to configure.
+/// @return CG_SUCCESS.
+library_function int
+cgDepthStencilStateInitDefault
+(
+    cg_depth_stencil_state_t &state
+)
+{
+    state.DepthTestEnable     = false;
+    state.DepthWriteEnable    = false;
+    state.DepthBoundsEnable   = false;
+    state.DepthTestFunction   = CG_COMPARE_LESS;
+    state.DepthMin            = 0.0f;
+    state.DepthMax            = 1.0f;
+    state.StencilTestEnable   = false;
+    state.StencilTestFunction = CG_COMPARE_ALWAYS;
+    state.StencilFailOp       = CG_STENCIL_OP_KEEP;
+    state.StencilPassZPassOp  = CG_STENCIL_OP_KEEP;
+    state.StencilPassZFailOp  = CG_STENCIL_OP_KEEP;
+    state.StencilReadMask     = 0xFF;
+    state.StencilWriteMask    = 0xFF;
+    state.StencilReference    = 0x00;
+    return CG_SUCCESS;
 }
 
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.

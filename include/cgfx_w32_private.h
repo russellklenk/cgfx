@@ -372,6 +372,7 @@ struct CG_DISPLAY
 /// @summary Define the state associated with a device memory heap.
 struct CG_HEAP
 {
+    size_t                       Ordinal;              /// The index of the heap within the context's heap list.
     cl_device_id                 ParentDeviceId;       /// The OpenCL device identifier of the device that owns the heap.
     int                          Type;                 /// One of cg_heap_type_e specifying the type of heap, relative to the device.
     uint32_t                     Flags;                /// A combination of cg_heap_flags_e specifying heap attributes.
@@ -620,14 +621,18 @@ struct CG_BUFFER
 {
     uint32_t                     ObjectId;             /// The CGFX internal object identifier.
     uint32_t                     KernelTypes;          /// One or more of cg_memory_object_kernel_e specifying the types of kernels that can access the buffer.
+    uint32_t                     KernelAccess;         /// One or more of cg_memory_object_access_e specifying how the kernel(s) will access the buffer.
+    uint32_t                     HostAccess;           /// One or more of cg_memory_object_access_e specifying how the host will access the buffer.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
     CG_HEAP                     *SourceHeap;           /// The heap from which buffer memory is allocated.
-    cl_context                   SourceContext;        /// The OpenCL context in which the object is allocated.
-    cl_mem                       Compute;              /// The handle of the associated compute memory object, or NULL.
-    size_t                       WriteOffset;          /// The current write offset, in bytes.
+    cl_context                   ComputeContext;       /// The OpenCL context in which the object is allocated.
+    cl_mem                       ComputeBuffer;        /// The handle of the associated compute memory object, or NULL.
+    cl_mem_flags                 ComputeUsage;         /// The OpenCL buffer usage values.
     size_t                       AllocatedSize;        /// The number of bytes actually allocated for the buffer.
     size_t                       RequestedSize;        /// The number of bytes requested for the buffer.
     cg_handle_t                  ExecutionGroup;       /// The handle of the execution group that owns the buffer.
-    GLuint                       Graphics;             /// The handle of the OpenGL buffer object, or 0.
+    GLuint                       GraphicsBuffer;       /// The handle of the OpenGL buffer object, or 0.
+    GLenum                       GraphicsUsage;        /// The OpenGL buffer usage hints.
 };
 
 /// @summary Typedef the object tables held by a context object.

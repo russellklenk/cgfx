@@ -203,7 +203,7 @@ enum cg_object_e : uint32_t
     CG_OBJECT_BUFFER                   = (1 << 12), /// The object type identifier for a data buffer.
 };
 
-/// @summary Define the queryable or settable data on a CGFX context.
+/// @summary Define the queryable data on a CGFX context object.
 enum cg_context_info_param_e : int
 {
     CG_CONTEXT_CPU_COUNTS              =  0,        /// Retrieve the number of CPU resources in the system. Data is cg_cpu_counts_t.
@@ -211,7 +211,7 @@ enum cg_context_info_param_e : int
     CG_CONTEXT_DISPLAY_COUNT           =  2,        /// Retrieve the number of capable display devices attached to the system. Data is size_t. 
 };
 
-/// @summary Define the queryable or settable data on a CGFX device.
+/// @summary Define the queryable data on a CGFX device object.
 enum cg_device_info_param_e : int
 {
     CG_DEVICE_CL_PLATFORM_ID           =  0,        /// Retrieve the OpenCL platform ID of the device. Data is cl_platform_id.
@@ -223,7 +223,7 @@ enum cg_device_info_param_e : int
     CG_DEVICE_PRIMARY_DISPLAY          =  6,        /// Retrieve the primary display attached to the device. Data is cg_handle_t.
 };
 
-/// @summary Define the queryable or settable data on a CGFX display.
+/// @summary Define the queryable data on a CGFX display object.
 enum cg_display_info_param_e : int
 {
     CG_DISPLAY_DEVICE                  =  0,        /// Retrieve the CGFX handle of the compute device driving the display. Data is cg_handle_t.
@@ -237,7 +237,7 @@ enum cg_display_info_param_e : int
     CG_DISPLAY_REFRESH_RATE            =  8,        /// Retrieve the vertical refresh rate of the display, in hertz. Data is float.
 };
 
-/// @summary Define the queryable or settable data on a CGFX execution group.
+/// @summary Define the queryable data on a CGFX execution group object.
 enum cg_execution_group_info_param_e : int
 {
     CG_EXEC_GROUP_DEVICE_COUNT         =  0,        /// Retrieve the number of devices in the execution group. Data is size_t.
@@ -262,6 +262,7 @@ enum cg_execution_group_info_param_e : int
     CG_EXEC_GROUP_WINDOWS_HGLRC        =  19,       /// Retrieve the OpenGL rendering context for the execution group. Data is HGLRC.
 };
 
+/// @summary Define the queryable data on a CGFX data buffer object.
 enum cg_data_buffer_info_param_e : int
 {
     CG_DATA_BUFFER_HEAP_ORDINAL        =  0,        /// Retrieve the ordinal of the heap on which the buffer was allocated.
@@ -398,11 +399,20 @@ enum cg_stencil_operation_e : int
     CG_STENCIL_OP_DEC_WRAP             =  8,        /// Decrement the existing stencil value by one, wrapping to maximum if the result exceeds the minimum value.
 };
 
-/// @summary Define the possible types of memory object access.
-enum cg_memory_access_e : int
+/// @summary Define the possible types of memory object placement. Placement hints help determine where a memory object is allocated.
+enum cg_memory_placement_e : int
 {
-    CG_MEMORY_ACCESS_HOST              =  1,        /// The memory object will be primarily accessed by the host.
-    CG_MEMORY_ACCESS_DEVICE            =  2,        /// The memory object will be primarily accessed by the device.
+    CG_MEMORY_PLACEMENT_HOST           =  1,        /// The memory object will be primarily accessed by the host.
+    CG_MEMORY_PLACEMENT_PINNED         =  2,        /// The memory object will be accessed equally by both host and device.
+    CG_MEMORY_PLACEMENT_DEVICE         =  3,        /// The memory object will be primarily accessed by the device.
+};
+
+/// @summary Define categories for the update frequency of a memory object.
+enum cg_memory_update_frequency_e : int
+{
+    CG_MEMORY_UPDATE_ONCE              =  1,        /// The memory object will be written once or very infrequently.
+    CG_MEMORY_UPDATE_PER_FRAME         =  2,        /// The memory object will be written once per-frame.
+    CG_MEMORY_UPDATE_PER_DISPATCH      =  3,        /// The memory object will be written on the order of once per work dispatch.
 };
 
 /// @summary Define the supported types of CPU device paritioning.
@@ -448,12 +458,16 @@ enum cg_memory_object_kernel_e : uint32_t
     CG_MEMORY_OBJECT_KERNEL_GRAPHICS   = (1 << 1),  /// The memory object will be used with graphics kernels.
 };
 
-/// @summary Define the flags specifying how data will be accessed by the host.
+/// @summary Define the flags specifying how data will be accessed.
 enum cg_memory_access_flags_e : uint32_t
 {
+    CG_MEMORY_ACCESS_NONE              = (0 << 0),  /// The memory object will not be read or written.
     CG_MEMORY_ACCESS_READ              = (1 << 0),  /// The memory object will be read.
     CG_MEMORY_ACCESS_WRITE             = (1 << 1),  /// The memory object will be written.
     CG_MEMORY_ACCESS_PRESERVE          = (1 << 2),  /// The memory contents should be preserved.
+    CG_MEMORY_ACCESS_READ_WRITE        =            /// The memory object will be both read and written.
+        CG_MEMORY_ACCESS_READ          | 
+        CG_MEMORY_ACCESS_WRITE
 };
 
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
@@ -946,8 +960,10 @@ cgCreateDataBuffer                                  /// Create a new data buffer
     cg_handle_t                   exec_group,       /// The handle of the execution group defining the devices that will operate on the buffer.
     size_t                        buffer_size,      /// The desired size of the data buffer, in bytes.
     uint32_t                      kernel_types,     /// One or more of cg_memory_object_kernel_e specifying the type(s) of kernels requiring access to the buffer.
-    int                           primary_reader,   /// One of cg_memory_access_e specifying whether the host or a device is the primary reader of data in the buffer.
-    int                           primary_writer,   /// One of cg_memory_access_e specifying whether the host or a device is the primary writer of data in the buffer.
+    uint32_t                      kernel_access,    /// One or more of cg_memory_object_access_e specifying how kernels will access the memory.
+    uint32_t                      host_access,      /// One or more of cg_memory_object_access_e specifying how the host will access the memory.
+    int                           placement_hint,   /// One of cg_memory_placement_e specifying the placement preference for the memory.
+    int                           frequency_hint,   /// One of cg_memory_update_frequency_e specifying how often the memory contents will be updated.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
 );
 
@@ -967,6 +983,7 @@ cgMapDataBuffer                                     /// Map a portion of a data 
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   buffer,           /// The handle of the buffer to map.
+    size_t                        offset,           /// The byte offset of the start of the buffer range to map.
     size_t                        amount,           /// The number of bytes of the buffer that will be accessed.
     uint32_t                      flags,            /// A combination of cg_memory_access_flags_e specifying how the buffer will be accessed.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
