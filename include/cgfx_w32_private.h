@@ -134,7 +134,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_EXEC_GROUPS                       (CG_MAX_DEVICES)
 #define CG_MAX_KERNELS                           (8192)
 #define CG_MAX_PIPELINES                         (4096)
-#define CG_MAX_BUFFERS                           (65536)
+#define CG_MAX_BUFFERS                           (16384)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")

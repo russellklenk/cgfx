@@ -123,14 +123,18 @@ typedef int          (CG_API *cgEndCommandBuffer_fn            )(uintptr_t, cg_h
 typedef int          (CG_API *cgCommandBufferCanRead_fn        )(uintptr_t, cg_handle_t, size_t &);
 typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn      )(uintptr_t, cg_handle_t, size_t &, int &);
 typedef cg_handle_t  (CG_API *cgCreateKernel_fn                )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
+typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, int &);
+typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, int &);
+typedef cg_handle_t  (CG_API *cgCreateDataBuffer_fn            )(uintptr_t, cg_handle_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
+typedef int          (CG_API *cgGetDataBufferInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
+typedef int          (CG_API *cgUnmapDataBuffer_fn             )(uintptr_t, cg_handle_t, cg_handle_t, void *);
 typedef int          (CG_API *cgBlendStateInitNone_fn          )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAlpha_fn         )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAdditive_fn      )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitPremultiplied_fn )(cg_blend_state_t &);
 typedef int          (CG_API *cgRasterStateInitDefault_fn      )(cg_raster_state_t &);
 typedef int          (CG_API *cgDepthStencilStateInitDefault_fn)(cg_depth_stencil_state_t &);
-typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, int &);
-typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, int &);
 
 /*//////////////////
 //   Data Types   //
@@ -982,6 +986,7 @@ void*
 cgMapDataBuffer                                     /// Map a portion of a data buffer into the host address space. This may initiate a blocking device to host data transfer operation.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   queue,            /// The handle of the transfer or display queue.
     cg_handle_t                   buffer,           /// The handle of the buffer to map.
     size_t                        offset,           /// The byte offset of the start of the buffer range to map.
     size_t                        amount,           /// The number of bytes of the buffer that will be accessed.
@@ -993,9 +998,9 @@ int
 cgUnmapDataBuffer                                   /// Unmap a portion of a data buffer from the host address space. This may initiate a non-blocking host to device data transfer operation.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   queue,            /// The handle of the transfer or display queue passed to cgMapDataBuffer.
     cg_handle_t                   buffer,           /// The handle of the buffer to unmap.
-    size_t                        modified_offset,  /// The offset of the first byte of the range that was modified by the host, with 0 indicating the start of the mapped range.
-    size_t                        modified_amount   /// The number of bytes that were modified.
+    void                         *mapped_region     /// The pointer to the mapped region returned by cgMapDataBuffer.
 );
 
 int

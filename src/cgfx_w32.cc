@@ -977,7 +977,7 @@ cgDeleteBuffer
     CG_CONTEXT *ctx, 
     CG_BUFFER  *buffer
 )
-{
+{   UNREFERENCED_PARAMETER(ctx);
     if (buffer->ComputeBuffer != NULL)
     {
         clReleaseMemObject(buffer->ComputeBuffer);
@@ -1244,15 +1244,13 @@ cgClGetHeapInformation
 
 /// @summary Locate the heap corresponding to a particular memory object placement hint.
 /// @param ctx The CGFX context maintaining the heap list.
-/// @param group The execution group that owns the memory object.
 /// @param placement_hint One of cg_memory_object_placement_e specifying the desired location for the memory object.
 /// @return A pointer to the source heap.
 internal_function CG_HEAP*
 cgFindHeapForPlacement
 (
-    CG_CONTEXT    *ctx, 
-    CG_EXEC_GROUP *group, 
-    int            placement_hint
+    CG_CONTEXT *ctx, 
+    int         placement_hint
 )
 {
     for (size_t i = 0, n = ctx->HeapCount; i < n; ++i)
@@ -1270,15 +1268,13 @@ cgFindHeapForPlacement
 
 /// @summary Locate the heap corresponding to OpenGL buffer usage flags.
 /// @param ctx The CGFX context maintaining the heap list.
-/// @param group The execution group that owns the memory object.
 /// @param usage The OpenGL buffer usage hint, for example, GL_STREAM_DRAW.
 /// @return A pointer to the source heap.
 internal_function CG_HEAP*
 cgGlFindHeapForUsage
 (
-    CG_CONTEXT    *ctx, 
-    CG_EXEC_GROUP *group, 
-    GLenum         usage
+    CG_CONTEXT *ctx, 
+    GLenum      usage
 )
 {   // convert the OpenGL usage hints to a CGFX placement hint.
     int placement_hint = 0;
@@ -1315,7 +1311,7 @@ cgGlFindHeapForUsage
         placement_hint = CG_MEMORY_PLACEMENT_HOST;
         break;
     }
-    return cgFindHeapForPlacement(ctx, group, placement_hint);
+    return cgFindHeapForPlacement(ctx, placement_hint);
 }
 
 /// @summary Check the device table for a context to determine if a given device is already known.
@@ -7120,7 +7116,7 @@ cgCreateDataBuffer
     if ((group->RenderingContext == NULL) && (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS))
     {   // want OpenGL interop, but group has no OpenGL capability.
         result = CG_NO_OPENGL;
-        return CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
     }
 
     if (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS)
@@ -7190,7 +7186,7 @@ cgCreateDataBuffer
         buffer.KernelAccess    = kernel_access;
         buffer.HostAccess      = host_access;
         buffer.AttachedDisplay = group->AttachedDisplay;
-        buffer.SourceHeap      = cgGlFindHeapForUsage(ctx, group, gl_flags);
+        buffer.SourceHeap      = cgGlFindHeapForUsage(ctx, gl_flags);
         buffer.ComputeContext  = NULL;
         buffer.ComputeBuffer   = NULL;
         buffer.ComputeUsage    = 0;
@@ -7293,7 +7289,7 @@ cgCreateDataBuffer
         buffer.KernelAccess    = kernel_access;
         buffer.HostAccess      = host_access;
         buffer.AttachedDisplay = NULL;
-        buffer.SourceHeap      = cgFindHeapForPlacement(ctx, group, placement_hint);
+        buffer.SourceHeap      = cgFindHeapForPlacement(ctx, placement_hint);
         buffer.ComputeContext  = group->ComputeContext;
         buffer.ComputeBuffer   = clmem;
         buffer.ComputeUsage    = cl_flags;
@@ -7414,62 +7410,172 @@ cgGetDataBufferInfo
 #undef  BUFFER_CHECK_TYPE
 }
 
+/// @summary Map a region of a buffer object into the host address space. If the host is reading the data, a data transfer from device to host may be performed. Map operations always block until the required data is available.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param queue_handle The queue on which the transfer will be performed.
+/// @param buffer_handle The handle of the buffer object to map.
+/// @param offset The zero-based byte offset defining the start of the region to map.
+/// @param amount The number of bytes to map into the host address space.
+/// @param flags A combination of cg_memory_access_e specifying mapping options. CG_MEMORY_ACCESS_NONE is not valid.
+/// @param result On return, set to CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_OUT_OF_MEMORY, CG_BAD_CLCONTEXT or CG_ERROR.
 library_function void*
 cgMapDataBuffer
 (
     uintptr_t   context,
+    cg_handle_t queue_handle,
     cg_handle_t buffer_handle,
     size_t      offset,
     size_t      amount,
     uint32_t    flags,
     int         &result
 )
-{   // TODO(rlk): needs to take a command queue on which to enqueue the map command.
-    /*CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
-    CG_BUFFER  *object =  NULL;
-
-    if ((object = cgObjectTableGet(&ctx->BufferTable, buffer_handle)) == NULL)
-    {   // invalid buffer object handle.
+{
+    CG_CONTEXT *ctx   = (CG_CONTEXT*) context;
+    CG_QUEUE   *queue = (CG_QUEUE  *) cgObjectTableGet(&ctx->QueueTable , queue_handle);
+    CG_BUFFER  *obj   = (CG_BUFFER *) cgObjectTableGet(&ctx->BufferTable, buffer_handle);
+    if (obj == NULL || queue == NULL || flags == CG_MEMORY_ACCESS_NONE)
+    {   // one or more of the supplied handles is invalid.
         result = CG_INVALID_VALUE;
         return NULL;
     }
-    if (object->GraphicsBuffer)
-    {   // always map through OpenGL.
-        CG_DISPLAY  *display = object->AttachedDisplay;
-        GLbitfield map_flags = GL_MAP_FLUSH_EXPLICIT_BIT | GL_MAP_UNSYNCHRONIZED_BIT;
+    // mapping the buffer for read access performs a blocking transfer to the host.
+    // mapping the buffer for write access returns a pointer to pinned memory.
+    if (queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
+    {   // map the buffer using OpenCL.
+        cl_map_flags map_flags = 0;
+        cl_int       clres     = CL_SUCCESS;
+        void        *mapped    = NULL;
 
         if (flags & CG_MEMORY_ACCESS_READ)
-            map_flags |= GL_MAP_READ_BIT;
+            map_flags |= CL_MAP_READ;
         if (flags & CG_MEMORY_ACCESS_WRITE)
-            map_flags |= GL_MAP_WRITE_BIT;
+            map_flags |= CL_MAP_WRITE;
         if ((flags & CG_MEMORY_ACCESS_READ) == 0 && (flags & CG_MEMORY_ACCESS_PRESERVE) == 0)
-        {
-            if (offset + amount > object->RequestedSize)
+            map_flags  = CL_MAP_WRITE_INVALIDATE_REGION;
+
+        if (obj->GraphicsBuffer != 0)
+        {   // the buffer first needs to be acquired by OpenCL for use.
+            if ((clres = clEnqueueAcquireGLObjects(queue->CommandQueue, 1, &obj->ComputeBuffer, 0, NULL, NULL)) != CL_SUCCESS)
             {
-                map_flags  |= GL_MAP_INVALIDATE_BUFFER_BIT;
-                offset      = 0;
+                switch (clres)
+                {
+                case CL_INVALID_VALUE          : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_MEM_OBJECT     : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_COMMAND_QUEUE  : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_CONTEXT        : result = CG_BAD_CLCONTEXT; break;
+                case CL_INVALID_GL_OBJECT      : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+                case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+                case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+                default                        : result = CG_ERROR;         break;
+                }
+                return NULL;
             }
-            else map_flags |= GL_MAP_INVALIDATE_RANGE_BIT;
         }
-        glBindBuffer(GL_ARRAY_BUFFER, object->GraphicsBuffer);
-        return glMapBufferRange(GL_ARRAY_BUFFER, (GLintptr) offset, amount, map_flags);
+
+        if ((mapped = clEnqueueMapBuffer(queue->CommandQueue, obj->ComputeBuffer, CL_TRUE, map_flags, offset, amount, 0, NULL, NULL, &clres)) == NULL)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_COMMAND_QUEUE                    : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_CONTEXT                          : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_MEM_OBJECT                       : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_VALUE                            : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_EVENT_WAIT_LIST                  : result = CG_INVALID_VALUE; break;
+            case CL_MISALIGNED_SUB_BUFFER_OFFSET             : result = CG_INVALID_VALUE; break;
+            case CL_MAP_FAILURE                              : result = CG_ERROR;         break;
+            case CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST: result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE            : result = CG_OUT_OF_MEMORY; break;
+            case CL_INVALID_OPERATION                        : result = CG_INVALID_STATE; break;
+            case CL_OUT_OF_RESOURCES                         : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY                       : result = CG_OUT_OF_MEMORY; break;
+            default                                          : result = CG_ERROR;         break;
+            }
+            return NULL;
+        }
+        result = CG_SUCCESS;
+        return mapped;
     }
     else
-    {   // always map through OpenCL.
-        cl_mem_flags flags = 0;
-        // gah, this needs a command queue, which implies it needs a device.
-    }*/
+    {   // the queue type is not valid.
+        result = CG_INVALID_VALUE;
+        return NULL;
+    }
 }
 
+/// @summary Unmap a region of a mapped buffer. If the host was writing data to the buffer, a data transfer from host to device may be performed. Unmap operations are always non-blocking.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param queue_handle The queue on which the transfer will be performed. This must be the same queue that was supplied to cgMapDataBuffer.
+/// @param buffer_handle The handle of the buffer object to map.
+/// @param mapped_region The pointer returned by a call to cgMapDataBuffer.
 library_function int
 cgUnmapDataBuffer
 (
     uintptr_t   context,
+    cg_handle_t queue_handle,
     cg_handle_t buffer_handle,
-    size_t      modified_offset,
-    size_t      modified_amount
+    void       *mapped_region
 )
-{   // TODO(rlk): needs to take a command queue on which to enqueue the unmap command.
+{
+    CG_CONTEXT *ctx   = (CG_CONTEXT*) context;
+    CG_QUEUE   *queue = (CG_QUEUE  *) cgObjectTableGet(&ctx->QueueTable , queue_handle);
+    CG_BUFFER  *obj   = (CG_BUFFER *) cgObjectTableGet(&ctx->BufferTable, buffer_handle);
+    int        result =  CG_SUCCESS;
+    if (obj == NULL || queue == NULL)
+    {   // one or more of the supplied handles is invalid.
+        return CG_INVALID_VALUE;
+    }
+
+    if (queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
+    {   
+        cl_int  clres = CL_SUCCESS;
+        cl_event  evt = NULL;
+        
+        // unmap the buffer from the host address space. if the buffer was mapped for write access, 
+        // a data transfer from host to device may be performed (hopefully asynchronously.)
+        if ((clres = clEnqueueUnmapMemObject(queue->CommandQueue, obj->ComputeBuffer, mapped_region, 0, NULL, &evt)) != CL_SUCCESS)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_VALUE          : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_MEM_OBJECT     : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_COMMAND_QUEUE  : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_CONTEXT        : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+            case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+            default                        : result = CG_ERROR;         break;
+            }
+        }
+        if (clres == CL_SUCCESS && obj->GraphicsBuffer != 0)
+        {   // release the buffer so it can be used by OpenGL again. this must wait for the data 
+            // transfer, possibly performed by the unmap operation, to complete. also, to ensure
+            // the data is visible in the rendering context, it is necessary to bind or re-bind 
+            // the buffer object from the rendering thread.
+            if ((clres = clEnqueueReleaseGLObjects(queue->CommandQueue, 1, &obj->ComputeBuffer, 1, &evt, NULL)) != CL_SUCCESS)
+            {
+                switch (clres)
+                {
+                case CL_INVALID_VALUE          : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_MEM_OBJECT     : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_COMMAND_QUEUE  : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_CONTEXT        : result = CG_BAD_CLCONTEXT; break;
+                case CL_INVALID_GL_OBJECT      : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+                case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+                case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+                default                        : result = CG_ERROR;         break;
+                }
+            }
+        }
+        // TODO(rlk): need to be able to return the event back to the application.
+        // but for that, we first need a CG_EVENT object.
+        return result;
+    }
+    else
+    {   // the queue type is not valid.
+        return CG_INVALID_VALUE;
+    }
 }
 
 /// @summary Initialize a blend state descriptor such that alpha blending is disabled.
