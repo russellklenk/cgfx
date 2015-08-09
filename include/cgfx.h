@@ -128,7 +128,7 @@ typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_h
 typedef cg_handle_t  (CG_API *cgCreateDataBuffer_fn            )(uintptr_t, cg_handle_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
 typedef int          (CG_API *cgGetDataBufferInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
-typedef int          (CG_API *cgUnmapDataBuffer_fn             )(uintptr_t, cg_handle_t, cg_handle_t, void *);
+typedef int          (CG_API *cgUnmapDataBuffer_fn             )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
 typedef int          (CG_API *cgBlendStateInitNone_fn          )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAlpha_fn         )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAdditive_fn      )(cg_blend_state_t &);
@@ -472,6 +472,13 @@ enum cg_memory_access_flags_e : uint32_t
     CG_MEMORY_ACCESS_READ_WRITE        =            /// The memory object will be both read and written.
         CG_MEMORY_ACCESS_READ          | 
         CG_MEMORY_ACCESS_WRITE
+};
+
+/// @summary Define flags used to specify whether an event will be used for compute, graphics or both.
+enum cg_event_usage_e : uint32_t
+{
+    CG_EVENT_USAGE_COMPUTE             = (1 << 0),  /// The event object will be used to synchronize compute operations.
+    CG_EVENT_USAGE_GRAPHICS            = (1 << 1),  /// The event object will be used to synchronize graphics operations.
 };
 
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
@@ -1000,7 +1007,8 @@ cgUnmapDataBuffer                                   /// Unmap a portion of a dat
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   queue,            /// The handle of the transfer or display queue passed to cgMapDataBuffer.
     cg_handle_t                   buffer,           /// The handle of the buffer to unmap.
-    void                         *mapped_region     /// The pointer to the mapped region returned by cgMapDataBuffer.
+    void                         *mapped_region,    /// The pointer to the mapped region returned by cgMapDataBuffer.
+    cg_handle_t                  *event_handle      /// On return, if not NULL, stores the handle to an event signaled when the transfer is complete.
 );
 
 int
@@ -1038,10 +1046,6 @@ cgDepthStencilStateInitDefault                      /// Initialize fixed-functio
 (
     cg_depth_stencil_state_t     &state             /// The depth and stencil testing configuration to update.
 );
-
-// when creating a buffer, need to know if it will be used for display.
-// if so, the buffer needs to be created from the GL side first, and then
-// use clCreateFromGLBuffer to create the corresponding CL object.
 
 #ifdef __cplusplus
 };     /* extern "C"  */

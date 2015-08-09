@@ -124,6 +124,7 @@ struct CG_EXEC_GROUP;
 #define CG_KERNEL_TABLE_ID                       (5)
 #define CG_PIPELINE_TABLE_ID                     (6)
 #define CG_BUFFER_TABLE_ID                       (7)
+#define CG_EVENT_TABLE_ID                        (8)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -135,6 +136,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_KERNELS                           (8192)
 #define CG_MAX_PIPELINES                         (4096)
 #define CG_MAX_BUFFERS                           (16384)
+#define CG_MAX_EVENTS                            (32768)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -395,6 +397,7 @@ struct CG_QUEUE
     int                          QueueType;            /// One of cg_queue_type_e.
     cl_context                   ComputeContext;       /// The OpenCL resource context associated with the queue.
     cl_command_queue             CommandQueue;         /// The OpenCL command queue for COMPUTE and TRANSFER queues. NULL for GRAPHICS queues.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display attached to the rendering context. This may be NULL of the execution group has no rendering context.
     HDC                          DisplayDC;            /// The Windows GDI device context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
     HGLRC                        DisplayRC;            /// The Windows OpenGL rendering context for GRAPHICS queues. NULL for COMPUTE and TRANSFER queues.
 };
@@ -635,6 +638,16 @@ struct CG_BUFFER
     GLenum                       GraphicsUsage;        /// The OpenGL buffer usage hints.
 };
 
+/// @summary Defines the data associated with an event object.
+struct CG_EVENT
+{
+    uint32_t                     ObjectId;             /// The CGFX internal object identifier.
+    uint32_t                     EventUsage;           /// One or more of cg_event_usage_e specifying where the event may be used.
+    cl_event                     ComputeSync;          /// The OpenCL sync object handle, or NULL.
+    GLsync                       GraphicsSync;         /// The OpenGL sync object handle, or NULL.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
+};
+
 /// @summary Typedef the object tables held by a context object.
 typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
 typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
@@ -644,6 +657,7 @@ typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
 typedef CG_OBJECT_TABLE<CG_PIPELINE  , CG_MAX_PIPELINES  > CG_PIPELINE_TABLE;
 typedef CG_OBJECT_TABLE<CG_BUFFER    , CG_MAX_BUFFERS    > CG_BUFFER_TABLE;
+typedef CG_OBJECT_TABLE<CG_EVENT     , CG_MAX_EVENTS     > CG_EVENT_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -663,6 +677,7 @@ struct CG_CONTEXT
     CG_KERNEL_TABLE              KernelTable;          /// The object table of all compiled kernels.
     CG_PIPELINE_TABLE            PipelineTable;        /// The object table of all compiled pipelines.
     CG_BUFFER_TABLE              BufferTable;          /// The object table of all data buffers.
+    CG_EVENT_TABLE               EventTable;           /// The object table of all synchronization events.
 };
 
 /*/////////////////

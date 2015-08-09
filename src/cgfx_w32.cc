@@ -990,6 +990,28 @@ cgDeleteBuffer
     memset(buffer, 0, sizeof(CG_BUFFER));
 }
 
+/// @summary Frees all resources associated with an event object.
+/// @param ctx The CGFX context that owns the event object.
+/// @param event The event object to delete.
+internal_function void
+cgDeleteEvent
+(
+    CG_CONTEXT *ctx, 
+    CG_EVENT   *event
+)
+{   UNREFERENCED_PARAMETER(ctx);
+    if (event->ComputeSync != NULL)
+    {
+        clReleaseEvent(event->ComputeSync);
+    }
+    if (event->GraphicsSync != NULL)
+    {
+        CG_DISPLAY *display  = event->AttachedDisplay;
+        glDeleteSync(event->GraphicsSync);
+    }
+    memset(event, 0, sizeof(CG_EVENT));
+}
+
 /// @summary Allocates memory for and initializes an empty CGFX context object.
 /// @param app_info Information about the application associated with the context.
 /// @param alloc_cb User-supplied host memory allocator callbacks, or NULL.
@@ -1025,6 +1047,7 @@ cgCreateContext
     cgObjectTableInit(&ctx->KernelTable   , CG_OBJECT_KERNEL         , CG_KERNEL_TABLE_ID);
     cgObjectTableInit(&ctx->PipelineTable , CG_OBJECT_PIPELINE       , CG_PIPELINE_TABLE_ID);
     cgObjectTableInit(&ctx->BufferTable   , CG_OBJECT_BUFFER         , CG_BUFFER_TABLE_ID);
+    cgObjectTableInit(&ctx->EventTable    , CG_OBJECT_EVENT          , CG_EVENT_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -1041,6 +1064,12 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all event objects:
+    for (size_t i = 0, n = ctx->EventTable.ObjectCount; i < n; ++i)
+    {
+        CG_EVENT *obj = &ctx->EventTable.Objects[i];
+        cgDeleteEvent(ctx, obj);
+    }
     // free all buffer objects:
     for (size_t i = 0, n = ctx->BufferTable.ObjectCount; i < n; ++i)
     {
@@ -5679,6 +5708,7 @@ cgCreateExecutionGroup
             queue.QueueType       = CG_QUEUE_TYPE_COMPUTE;
             queue.ComputeContext  = cl_ctx;
             queue.CommandQueue    = cq;
+            queue.AttachedDisplay = group.AttachedDisplay;
             queue.DisplayDC       = NULL;
             queue.DisplayRC       = NULL;
             cq_hnd = cgObjectTableAdd(&ctx->QueueTable, queue);
@@ -5712,6 +5742,7 @@ cgCreateExecutionGroup
                 queue.QueueType       = CG_QUEUE_TYPE_TRANSFER;
                 queue.ComputeContext  = cl_ctx;
                 queue.CommandQueue    = tq;
+                queue.AttachedDisplay = group.AttachedDisplay;
                 queue.DisplayDC       = NULL;
                 queue.DisplayRC       = NULL;
                 tq_hnd = cgObjectTableAdd(&ctx->QueueTable, queue);
@@ -5737,6 +5768,7 @@ cgCreateExecutionGroup
             queue.QueueType       = CG_QUEUE_TYPE_GRAPHICS;
             queue.ComputeContext  = NULL;
             queue.CommandQueue    = NULL;
+            queue.AttachedDisplay = group.AttachedDisplay;
             queue.DisplayDC       = group.AttachedDisplays[i]->DisplayDC;
             queue.DisplayRC       = group.AttachedDisplays[i]->DisplayRC;
             handle    = cgObjectTableAdd(&ctx->QueueTable, queue);
@@ -6262,6 +6294,17 @@ cgDeleteObject
             if (cgObjectTableRemove(&ctx->BufferTable, object, buffer))
             {
                 cgDeleteBuffer(ctx, &buffer);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
+    case CG_OBJECT_EVENT:
+        {
+            CG_EVENT event;
+            if (cgObjectTableRemove(&ctx->EventTable, object, event))
+            {
+                cgDeleteEvent(ctx, &event);
                 return CG_SUCCESS;
             }
         }
@@ -7508,13 +7551,15 @@ cgMapDataBuffer
 /// @param queue_handle The queue on which the transfer will be performed. This must be the same queue that was supplied to cgMapDataBuffer.
 /// @param buffer_handle The handle of the buffer object to map.
 /// @param mapped_region The pointer returned by a call to cgMapDataBuffer.
+/// @param event_handle On return, if non-NULL, stores a handle to an event object that can be used to block the host or device until the data transfer has completed.
 library_function int
 cgUnmapDataBuffer
 (
-    uintptr_t   context,
-    cg_handle_t queue_handle,
-    cg_handle_t buffer_handle,
-    void       *mapped_region
+    uintptr_t    context,
+    cg_handle_t  queue_handle,
+    cg_handle_t  buffer_handle,
+    void        *mapped_region,
+    cg_handle_t *event_handle
 )
 {
     CG_CONTEXT *ctx   = (CG_CONTEXT*) context;
@@ -7523,17 +7568,26 @@ cgUnmapDataBuffer
     int        result =  CG_SUCCESS;
     if (obj == NULL || queue == NULL)
     {   // one or more of the supplied handles is invalid.
+        if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
         return CG_INVALID_VALUE;
     }
 
     if (queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
     {   
-        cl_int  clres = CL_SUCCESS;
-        cl_event  evt = NULL;
+        cl_int        clres = CL_SUCCESS;
+        cl_event  evt_unmap = NULL;
+        cl_event  evt_relgl = NULL;
+        CG_EVENT  event;
+
+        // fill out basic event object properties.
+        event.EventUsage      = CG_EVENT_USAGE_COMPUTE;
+        event.ComputeSync     = NULL;
+        event.GraphicsSync    = NULL;
+        event.AttachedDisplay = queue->AttachedDisplay;
         
         // unmap the buffer from the host address space. if the buffer was mapped for write access, 
         // a data transfer from host to device may be performed (hopefully asynchronously.)
-        if ((clres = clEnqueueUnmapMemObject(queue->CommandQueue, obj->ComputeBuffer, mapped_region, 0, NULL, &evt)) != CL_SUCCESS)
+        if ((clres = clEnqueueUnmapMemObject(queue->CommandQueue, obj->ComputeBuffer, mapped_region, 0, NULL, &evt_unmap)) != CL_SUCCESS)
         {
             switch (clres)
             {
@@ -7547,12 +7601,17 @@ cgUnmapDataBuffer
             default                        : result = CG_ERROR;         break;
             }
         }
+
+        // set the compute event handle to the unmap completion event.
+        event.ComputeSync = evt_unmap;
+
         if (clres == CL_SUCCESS && obj->GraphicsBuffer != 0)
         {   // release the buffer so it can be used by OpenGL again. this must wait for the data 
             // transfer, possibly performed by the unmap operation, to complete. also, to ensure
             // the data is visible in the rendering context, it is necessary to bind or re-bind 
             // the buffer object from the rendering thread.
-            if ((clres = clEnqueueReleaseGLObjects(queue->CommandQueue, 1, &obj->ComputeBuffer, 1, &evt, NULL)) != CL_SUCCESS)
+            CG_DISPLAY  *display = queue->AttachedDisplay;
+            if ((clres = clEnqueueReleaseGLObjects(queue->CommandQueue, 1, &obj->ComputeBuffer, 1, &evt_unmap, &evt_relgl)) != CL_SUCCESS)
             {
                 switch (clres)
                 {
@@ -7567,13 +7626,21 @@ cgUnmapDataBuffer
                 default                        : result = CG_ERROR;         break;
                 }
             }
+            else if (GL_ARB_cl_event)
+            {   // setup the graphics sync object.
+                if ((event.GraphicsSync = glCreateSyncFromCLeventARB(queue->ComputeContext, evt_relgl, 0)) != NULL)
+                    event.EventUsage   |= CG_EVENT_USAGE_GRAPHICS;
+            }
         }
-        // TODO(rlk): need to be able to return the event back to the application.
-        // but for that, we first need a CG_EVENT object.
+        if (event_handle != NULL)
+        {   // return the event object handle to the caller.
+            *event_handle = cgObjectTableAdd(&ctx->EventTable, event);
+        }
         return result;
     }
     else
     {   // the queue type is not valid.
+        if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
         return CG_INVALID_VALUE;
     }
 }
