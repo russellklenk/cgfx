@@ -30,7 +30,7 @@
     <ClInclude Include="..\..\..\include\cgfx_w32_private.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\include\cgfx_test_cl.h">
+    <ClInclude Include="..\..\..\include\cgfx_kernel_compute.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -41,7 +41,7 @@
     <ClCompile Include="..\..\..\src\cgfx_ext_win.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\src\cgfx_test_cl.cc">
+    <ClCompile Include="..\..\..\src\cgfx_kernel_compute.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

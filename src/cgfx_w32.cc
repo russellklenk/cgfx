@@ -6770,19 +6770,22 @@ cgCreateKernel
                 if ((clres = clBuildProgram(p, group->DeviceCount, group->DeviceIds, NULL, NULL, NULL)) != CL_SUCCESS)
                 {
 #ifdef _DEBUG
-                    size_t log_size = 0;
-                    clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-                    size_t len = 0;
-                    char  *buf = (char*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
-                    clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, log_size+1, buf, &len);
-                    buf[len] = '\0';
-                    OutputDebugString(_T("OpenCL program compilation failed: \n"));
-                    OutputDebugString(_T("**** Source Code: \n"));
-                    OutputDebugStringA((char const*) code->Code);
-                    OutputDebugString(_T("**** Compile Log: \n"));
-                    OutputDebugStringA(buf);
-                    OutputDebugString(_T("\n\n"));
-                    cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                    if (clres == CL_BUILD_PROGRAM_FAILURE)
+                    {
+                        size_t log_size = 0;
+                        clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+                        size_t len = 0;
+                        char  *buf = (char*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                        clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, log_size+1, buf, &len);
+                        buf[len] = '\0';
+                        OutputDebugString(_T("OpenCL program compilation failed: \n"));
+                        OutputDebugString(_T("**** Source Code: \n"));
+                        OutputDebugStringA((char const*) code->Code);
+                        OutputDebugString(_T("**** Compile Log: \n"));
+                        OutputDebugStringA(buf);
+                        OutputDebugString(_T("\n\n"));
+                        cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                    }
 #endif
                     switch (clres)
                     {
