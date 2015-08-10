@@ -81,6 +81,7 @@
 #include <stdio.h>
 
 #include "cgfx.h"
+#include "cgfx_kernel_compute.h"
 
 /*/////////////////
 //   Constants   //
@@ -358,6 +359,46 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     cg_handle_t device_dma_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_TRANSFER, cgres);
     assert(display_dma_queue == device_dma_queue);
     assert(display_dma_queue != CG_INVALID_HANDLE);
+
+    cg_handle_t pipeline = cgCreateComputePipelineTest01(context, exec_ctx, cgres);
+    assert(pipeline != NULL);
+
+    cg_handle_t inp_buf = cgCreateDataBuffer(context, exec_ctx, 32, CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_PINNED, CG_MEMORY_UPDATE_ONCE, cgres);
+    cg_handle_t out_buf = cgCreateDataBuffer(context, exec_ctx, 32, CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_ACCESS_READ, CG_MEMORY_PLACEMENT_PINNED, CG_MEMORY_UPDATE_ONCE, cgres);
+    assert(inp_buf != CG_INVALID_HANDLE);
+    assert(out_buf != CG_INVALID_HANDLE);
+
+    cg_handle_t cmd_buf = cgCreateCommandBuffer(context, CG_QUEUE_TYPE_COMPUTE, cgres);
+    assert(cmd_buf != CG_INVALID_HANDLE);
+
+    cg_handle_t done_evt = cgCreateEvent(context, exec_ctx, CG_EVENT_USAGE_COMPUTE, cgres);
+    assert(done_evt != CG_INVALID_HANDLE);
+
+    cgBeginCommandBuffer(context, cmd_buf, 0);
+    {
+        cgEnqueueComputeDispatchTest01(context, cmd_buf, pipeline, out_buf, done_evt);
+    }
+    cgEndCommandBuffer  (context, cmd_buf);
+
+    // dispatch {
+    //     cg_handle_t pipeline
+    //     cg_handle_t event;
+    //     size_t      args_size;
+    //     ...         args;
+    // }
+
+    cg_memory_ref_t refs[2] = 
+    {
+        { inp_buf, CG_MEMORY_ACCESS_READ  }, 
+        { out_buf, CG_MEMORY_ACCESS_WRITE }
+    };
+    cgExecuteCommandBuffer(context, device_cpu_queue, cmd_buf, 2, refs);
+    cgHostWaitForEvent(context, done_evt);
+
+    char* ptr = (char*) cgMapDataBuffer(context, device_dma_queue, out_buf, 0, 32, CG_MEMORY_ACCESS_READ, cgres);
+    OutputDebugStringA(ptr);
+    OutputDebugString(_T("\n"));
+    cgUnmapDataBuffer(context, device_dma_queue, out_buf, ptr, NULL);
 
     cgDestroyContext(context);
 

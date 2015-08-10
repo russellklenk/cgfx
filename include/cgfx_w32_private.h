@@ -89,6 +89,7 @@ struct CG_DEVICE;
 struct CG_KERNEL;
 struct CG_DISPLAY;
 struct CG_CONTEXT;
+struct CG_PIPELINE;
 struct CG_CMD_BUFFER;
 struct CG_EXEC_GROUP;
 
@@ -224,6 +225,7 @@ struct CG_EXEC_GROUP;
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
+typedef void (CG_API *cgComputeDispatch_fn)(CG_CONTEXT *, CG_QUEUE *, CG_PIPELINE *, cg_command_t *);
 
 /*//////////////////
 //   Data Types   //
@@ -648,6 +650,14 @@ struct CG_EVENT
     CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
 };
 
+/// @summary Defines the basic structure of a compute pipeline dispatch within a command buffer.
+struct CG_COMPUTE_DISPATCH_CMD
+{
+    uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id_e.
+    uint16_t                     ArgsDataSize;         /// The size of the pipeline argument data blob, in bytes.
+    uint8_t                      Args[1];              /// Variable-length invocation data.
+};
+
 /// @summary Typedef the object tables held by a context object.
 typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
 typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
@@ -980,6 +990,111 @@ cgMakeHandle
 {
     return cgMakeHandle(table->Objects[object_index].ObjectId, table->ObjectType, table->TableIndex);
 }
+
+/// @summary Retrieves the current state of a command buffer.
+/// @param cmdbuf The command buffer to query.
+/// @return One of CG_CMD_BUFFER::state_e.
+internal_function inline uint32_t
+cgCmdBufferGetState
+(
+    CG_CMD_BUFFER *cmdbuf
+)
+{
+    return ((cmdbuf->TypeAndState & CG_CMD_BUFFER::STATE_MASK_P) >> CG_CMD_BUFFER::STATE_SHIFT);
+}
+
+/// @summary Updates the current state of a command buffer.
+/// @param cmdbuf The command buffer to update.
+/// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
+internal_function inline void
+cgCmdBufferSetState
+(
+    CG_CMD_BUFFER *cmdbuf,
+    uint32_t       state
+)
+{
+    cmdbuf->TypeAndState &= ~CG_CMD_BUFFER::STATE_MASK_P;
+    cmdbuf->TypeAndState |= (state << CG_CMD_BUFFER::STATE_SHIFT);
+}
+
+/// @summary Retrieves the target queue type of a command buffer.
+/// @param cmdbuf The command buffer to query.
+/// @return One of cg_queue_type_e.
+internal_function inline int
+cgCmdBufferGetQueueType
+(
+    CG_CMD_BUFFER *cmdbuf
+)
+{
+    return int((cmdbuf->TypeAndState & CG_CMD_BUFFER::TYPE_MASK_P) >> CG_CMD_BUFFER::TYPE_SHIFT);
+}
+
+/// @summary Updates the current state and target queue type of a command buffer.
+/// @param cmdbuf The command buffer to update.
+/// @param queue_type One of cg_queue_type_e specifying the target queue type.
+/// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
+internal_function inline void
+cgCmdBufferSetTypeAndState
+(
+    CG_CMD_BUFFER *cmdbuf,
+    int            queue_type,
+    uint32_t       state
+)
+{
+    cmdbuf->TypeAndState =
+        ((uint32_t(queue_type) & CG_CMD_BUFFER::TYPE_MASK_U ) << CG_CMD_BUFFER::TYPE_SHIFT) |
+        ((uint32_t(state     ) & CG_CMD_BUFFER::STATE_MASK_U) << CG_CMD_BUFFER::STATE_SHIFT);
+}
+
+/// @summary Determine whether a command buffer is in a readable state.
+/// @param cmdbuf The handle of the command buffer to query.
+/// @param bytes_total On return, set to the number of bytes used in the command buffer.
+/// @return CG_SUCCESS, CG_INVALID_VALUE or CG_INVALID_STATE.
+internal_function inline int
+cgCmdBufferCanRead
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    size_t        &bytes_total
+)
+{
+    uint32_t state = cgCmdBufferGetState(cmdbuf);
+    if (state != CG_CMD_BUFFER::SUBMIT_READY)
+    {   // the command buffer is in an invalid state for this call.
+        bytes_total = 0;
+        return CG_INVALID_STATE;
+    }
+    bytes_total = cmdbuf->BytesUsed;
+    return CG_SUCCESS;
+}
+
+/// @summary Retrieve the command located at a specified byte offset.
+/// @param cmdbuf The command buffer to read.
+/// @param cmd_offset The byte offset of the command to read. On return, this is set to the byte offset of the next command.
+/// @param result On return, set to CG_SUCCESS or CG_END_OF_BUFFER.
+/// @return A pointer to the command, or NULL.
+internal_function inline cg_command_t*
+cgCmdBufferCommandAt
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    size_t        &cmd_offset, 
+    int           &result
+)
+{
+    if (cmd_offset >= cmdbuf->BytesUsed)
+    {   // the offset is invalid.
+        result = CG_END_OF_BUFFER;
+        return NULL;
+    }
+    cg_command_t *cmd = (cg_command_t*) (cmdbuf->CommandData + cmd_offset);
+    cmd_offset += cmd->DataSize + CG_CMD_BUFFER::CMD_HEADER_SIZE;
+    result = CG_SUCCESS;
+    return cmd;
+}
+
+/// @summary Internal function to register a callback to perform all clSetKernelArg and call clEnqueueNDRangeKernel for a pre-defined compute pipeline.
+/// @param pipeline_id The pre-defined compute pipeline ID, one of cg_compute_pipeline_id_e.
+/// @param dispatch_func The function 
+extern void cgRegisterComputeDispatch(uint16_t pipeline_id, cgComputeDispatch_fn dispatch_func);
 
 #undef  CGFX_WIN32_INTERNALS_DEFINED
 #define CGFX_WIN32_INTERNALS_DEFINED

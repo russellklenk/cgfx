@@ -68,6 +68,13 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #error   Need to define __ImageBase for your compiler in cgfx_w32.cc!
 #endif
 
+/// @summary A global table used for looking up a compute kernel dispatch function based on pipeline ID.
+global_variable cgComputeDispatch_fn 
+COMPUTE_DISPATCH_TABLE[CG_COMPUTE_PIPELINE_COUNT] = 
+{
+    NULL
+};
+
 /*///////////////////////
 //   Local Functions   //
 ///////////////////////*/
@@ -4546,61 +4553,6 @@ cgFreeExecutionGroupDeviceList
     cgFreeHostMemory(&ctx->HostAllocator, devices, num_devices * sizeof(cg_handle_t), 0, CG_ALLOCATION_TYPE_TEMP);
 }
 
-/// @summary Retrieves the current state of a command buffer.
-/// @param cmdbuf The command buffer to query.
-/// @return One of CG_CMD_BUFFER::state_e.
-internal_function inline uint32_t
-cgCmdBufferGetState
-(
-    CG_CMD_BUFFER *cmdbuf
-)
-{
-    return ((cmdbuf->TypeAndState & CG_CMD_BUFFER::STATE_MASK_P) >> CG_CMD_BUFFER::STATE_SHIFT);
-}
-
-/// @summary Updates the current state of a command buffer.
-/// @param cmdbuf The command buffer to update.
-/// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
-internal_function inline void
-cgCmdBufferSetState
-(
-    CG_CMD_BUFFER *cmdbuf,
-    uint32_t       state
-)
-{
-    cmdbuf->TypeAndState &= ~CG_CMD_BUFFER::STATE_MASK_P;
-    cmdbuf->TypeAndState |= (state << CG_CMD_BUFFER::STATE_SHIFT);
-}
-
-/// @summary Retrieves the target queue type of a command buffer.
-/// @param cmdbuf The command buffer to query.
-/// @return One of cg_queue_type_e.
-internal_function inline int
-cgCmdBufferGetQueueType
-(
-    CG_CMD_BUFFER *cmdbuf
-)
-{
-    return int((cmdbuf->TypeAndState & CG_CMD_BUFFER::TYPE_MASK_P) >> CG_CMD_BUFFER::TYPE_SHIFT);
-}
-
-/// @summary Updates the current state and target queue type of a command buffer.
-/// @param cmdbuf The command buffer to update.
-/// @param queue_type One of cg_queue_type_e specifying the target queue type.
-/// @param state The new state of the command buffer, one of CG_CMD_BUFFER::state_e.
-internal_function inline void
-cgCmdBufferSetTypeAndState
-(
-    CG_CMD_BUFFER *cmdbuf,
-    int            queue_type,
-    uint32_t       state
-)
-{
-    cmdbuf->TypeAndState =
-        ((uint32_t(queue_type) & CG_CMD_BUFFER::TYPE_MASK_U ) << CG_CMD_BUFFER::TYPE_SHIFT) |
-        ((uint32_t(state     ) & CG_CMD_BUFFER::STATE_MASK_U) << CG_CMD_BUFFER::STATE_SHIFT);
-}
-
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
@@ -6629,7 +6581,7 @@ cgCommandBufferCommandAt
         return NULL;
     }
     cg_command_t *cmd = (cg_command_t*) (cmdbuf->CommandData + cmd_offset);
-    cmd_offset += cmd->DataSize;
+    cmd_offset += cmd->DataSize + CG_CMD_BUFFER::CMD_HEADER_SIZE;
     result = CG_SUCCESS;
     return cmd;
 }
@@ -6815,7 +6767,40 @@ cgCreateKernel
                     cgDeleteKernel(ctx, &kernel);
                     return CG_INVALID_HANDLE;
                 }
-                else kernel.ComputeProgram = p;
+                if ((clres = clBuildProgram(p, group->DeviceCount, group->DeviceIds, NULL, NULL, NULL)) != CL_SUCCESS)
+                {
+#ifdef _DEBUG
+                    size_t log_size = 0;
+                    clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+                    size_t len = 0;
+                    char  *buf = (char*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+                    clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, log_size+1, buf, &len);
+                    buf[len] = '\0';
+                    OutputDebugString(_T("OpenCL program compilation failed: \n"));
+                    OutputDebugString(_T("**** Source Code: \n"));
+                    OutputDebugStringA((char const*) code->Code);
+                    OutputDebugString(_T("**** Compile Log: \n"));
+                    OutputDebugStringA(buf);
+                    OutputDebugString(_T("\n\n"));
+                    cgFreeHostMemory(&ctx->HostAllocator, buf, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
+#endif
+                    switch (clres)
+                    {
+                    case CL_INVALID_PROGRAM       : result = CG_BAD_CLCONTEXT; break;
+                    case CL_INVALID_VALUE         : result = CG_INVALID_VALUE; break;
+                    case CL_INVALID_DEVICE        : result = CG_BAD_CLCONTEXT; break;
+                    case CL_INVALID_BINARY        : result = CG_INVALID_VALUE; break;
+                    case CL_INVALID_BUILD_OPTIONS : result = CG_INVALID_VALUE; break;
+                    case CL_INVALID_OPERATION     : result = CG_INVALID_STATE; break;
+                    case CL_COMPILER_NOT_AVAILABLE: result = CG_UNSUPPORTED;   break;
+                    case CL_BUILD_PROGRAM_FAILURE : result = CG_ERROR;         break;
+                    case CL_OUT_OF_HOST_MEMORY    : result = CG_OUT_OF_MEMORY; break;
+                    default: result = CG_ERROR; break;
+                    }
+                    cgDeleteKernel(ctx, &kernel);
+                    return CG_INVALID_HANDLE;
+                }
+                kernel.ComputeProgram = p;
             }
             else
             {   // TODO(rlk): support loading of binaries.
@@ -7539,7 +7524,8 @@ cgMapDataBuffer
     }
     // mapping the buffer for read access performs a blocking transfer to the host.
     // mapping the buffer for write access returns a pointer to pinned memory.
-    if (queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
+    if (queue->QueueType == CG_QUEUE_TYPE_COMPUTE || 
+        queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
     {   // map the buffer using OpenCL.
         cl_map_flags map_flags = 0;
         cl_int       clres     = CL_SUCCESS;
@@ -7628,7 +7614,8 @@ cgUnmapDataBuffer
         return CG_INVALID_VALUE;
     }
 
-    if (queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
+    if (queue->QueueType == CG_QUEUE_TYPE_COMPUTE || 
+        queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
     {   
         cl_int        clres = CL_SUCCESS;
         cl_event  evt_unmap = NULL;
@@ -7699,6 +7686,106 @@ cgUnmapDataBuffer
         if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
         return CG_INVALID_VALUE;
     }
+}
+
+internal_function int
+cgExecuteTransferCommandBuffer
+(
+    CG_CONTEXT            *ctx, 
+    CG_QUEUE              *queue, 
+    CG_CMD_BUFFER         *cmdbuf,
+    size_t                 num_mem_refs, 
+    cg_memory_ref_t const *mem_ref_list
+)
+{
+    return CG_SUCCESS;
+}
+
+internal_function int
+cgExecuteComputeCommandBuffer
+(
+    CG_CONTEXT            *ctx, 
+    CG_QUEUE              *queue, 
+    CG_CMD_BUFFER         *cmdbuf,
+    size_t                 num_mem_refs, 
+    cg_memory_ref_t const *mem_ref_list
+)
+{
+    cg_command_t *cmd = NULL;
+    size_t        ofs = 0;
+    int           res = CG_SUCCESS;
+    while ((cmd = cgCmdBufferCommandAt(cmdbuf, ofs, res)) != NULL)
+    {
+        switch (cmd->CommandId)
+        {
+        case CG_COMMAND_COMPUTE_DISPATCH:
+            {
+                cg_compute_dispatch_cmd_data_t *bdp = (cg_compute_dispatch_cmd_data_t*) cmd->Data;
+                cgComputeDispatch_fn  dispatch_func =  COMPUTE_DISPATCH_TABLE[bdp->PipelineId];
+                CG_PIPELINE               *pipeline =  cgObjectTableGet(&ctx->PipelineTable, bdp->Pipeline);
+                dispatch_func(ctx, queue , pipeline, cmd);
+            }
+            break;
+        }
+    }
+    if (res == CG_END_OF_BUFFER)
+        res  = CG_SUCCESS;
+
+    return res;
+}
+
+internal_function int
+cgExecuteGraphicsCommandBuffer
+(
+    CG_CONTEXT            *ctx, 
+    CG_QUEUE              *queue, 
+    CG_CMD_BUFFER         *cmdbuf,
+    size_t                 num_mem_refs, 
+    cg_memory_ref_t const *mem_ref_list
+)
+{
+    return CG_SUCCESS;
+}
+
+library_function int
+cgExecuteCommandBuffer
+(
+    uintptr_t              context,  
+    cg_handle_t            queue_handle, 
+    cg_handle_t            cmd_buffer, 
+    size_t                 num_mem_refs, 
+    cg_memory_ref_t const *mem_ref_list
+)
+{
+    CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
+    CG_QUEUE      *fifo   = cgObjectTableGet(&ctx->QueueTable, queue_handle);
+    CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    size_t         nbytes = 0;
+    if (fifo == NULL || cmdbuf == NULL || num_mem_refs == 0 || mem_ref_list == NULL)
+    {
+        return CG_INVALID_VALUE;
+    }
+    int queue_type  = cgCmdBufferGetQueueType(cmdbuf);
+    if (queue_type != fifo->QueueType)
+    {
+        return CG_INVALID_VALUE;
+    }
+    if (cgCmdBufferCanRead(cmdbuf, nbytes) != CG_SUCCESS)
+    {
+        return CG_INVALID_STATE;
+    }
+    switch (queue_type)
+    {
+    case CG_QUEUE_TYPE_COMPUTE:
+        return cgExecuteComputeCommandBuffer(ctx, fifo, cmdbuf, num_mem_refs, mem_ref_list);
+    case CG_QUEUE_TYPE_GRAPHICS:
+        return cgExecuteGraphicsCommandBuffer(ctx, fifo, cmdbuf, num_mem_refs, mem_ref_list);
+    case CG_QUEUE_TYPE_TRANSFER:
+        return cgExecuteTransferCommandBuffer(ctx, fifo, cmdbuf, num_mem_refs, mem_ref_list);
+    default:
+        break;
+    }
+    return CG_UNSUPPORTED;
 }
 
 /// @summary Initialize a blend state descriptor such that alpha blending is disabled.
@@ -7834,6 +7921,19 @@ cgDepthStencilStateInitDefault
     state.StencilWriteMask    = 0xFF;
     state.StencilReference    = 0x00;
     return CG_SUCCESS;
+}
+
+/// @summary Registers a compute pipeline dispatch function.
+/// @param pipeline_id One of cg_compute_pipeline_id.
+/// @param dispatch_func The callback function to invoke for kernel invocation.
+library_function void
+cgRegisterComputeDispatch
+(
+    uint16_t             pipeline_id, 
+    cgComputeDispatch_fn dispatch_func
+)
+{
+    COMPUTE_DISPATCH_TABLE[pipeline_id] = dispatch_func;
 }
 
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.

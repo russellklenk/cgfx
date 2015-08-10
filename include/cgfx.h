@@ -483,6 +483,26 @@ enum cg_event_usage_e : uint32_t
     CG_EVENT_USAGE_GRAPHICS            = (1 << 1),  /// The event object will be used to synchronize graphics operations.
 };
 
+/// @summary The pre-defined compute pipeline identifiers. These pipelines are provided by the CGFX implementation.
+enum cg_compute_pipeline_id_e : uint16_t
+{
+    CG_COMPUTE_PIPELINE_TEST01         =       0 ,  /// See cgfx_test_cl.h
+    CG_COMPUTE_PIPELINE_COUNT
+};
+
+/// @summary The pre-defined graphics pipeline identifiers. These pipelines are provided by the CGFX implementation.
+enum cg_graphics_pipeline_id_e : uint16_t
+{
+    CG_GRAPHICS_PIPELINE_TEST01        =       0 ,  /// See cgfx_test_gl.h
+    CG_GRAPHICS_PIPELINE_COUNT
+};
+
+/// @summary Define the recognized command buffer command identifiers.
+enum cg_command_id_e : uint16_t
+{
+    CG_COMMAND_COMPUTE_DISPATCH        =       0 ,  /// Dispatch a compute pipeline invocation.
+};
+
 /// @summary Data used to describe the application to the system. Strings are NULL-terminated, ASCII only.
 struct cg_application_info_t
 {
@@ -644,6 +664,24 @@ struct cg_compute_pipeline_t
 {
     char const                  *KernelName;           /// A NULL-terminated ASCII string specifying the name of the kernel function in the program code.
     cg_handle_t                  KernelProgram;        /// The handle of the kernel code to execute.
+};
+
+/// @summary Defines the basic data passed with a compute dispatch command in a command buffer.
+struct cg_compute_dispatch_cmd_base_t
+{
+    uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id specifying the pipeline type.
+    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
+    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
+    cg_handle_t                  DoneEvent;            /// The handle of the event to signal when kernel execution is complete.
+    size_t                       WorkDimension;        /// The number of valid entries in LocalWorkSize and GlobalWorkSize.
+    size_t                       LocalWorkSize[3];     /// The size of each work group in each dimension.
+    size_t                       GlobalWorkSize[3];    /// The number of work items in each dimension.
+};
+
+/// @summary Define the runtime data view of a compute dispatch command in a command buffer.
+struct cg_compute_dispatch_cmd_data_t : public cg_compute_dispatch_cmd_base_t
+{
+    uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
 };
 
 /*/////////////////
@@ -1027,6 +1065,16 @@ cgUnmapDataBuffer                                   /// Unmap a portion of a dat
     cg_handle_t                   buffer,           /// The handle of the buffer to unmap.
     void                         *mapped_region,    /// The pointer to the mapped region returned by cgMapDataBuffer.
     cg_handle_t                  *event_handle      /// On return, if not NULL, stores the handle to an event signaled when the transfer is complete.
+);
+
+int
+cgExecuteCommandBuffer                              /// Execute a command buffer on a device.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   queue,            /// The command queue for the target device.
+    cg_handle_t                   cmd_buffer,       /// The command buffer to execute.
+    size_t                        num_mem_refs,     /// The number of memory objects referenced by the command buffer.
+    cg_memory_ref_t const        *mem_ref_list      /// An array of num_mem_refs memory object references.
 );
 
 int

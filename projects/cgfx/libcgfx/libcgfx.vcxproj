@@ -177,12 +177,14 @@
   <ItemGroup>
     <ClInclude Include="..\..\..\include\atomicfifo.h" />
     <ClInclude Include="..\..\..\include\cgfx_ext_win.h" />
+    <ClInclude Include="..\..\..\include\cgfx_test_cl.h" />
     <ClInclude Include="..\..\..\include\cgfx_w32_private.h" />
     <ClInclude Include="..\..\..\include\intrinsics.h" />
     <ClInclude Include="..\..\..\include\cgfx.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\cgfx_ext_win.cc" />
+    <ClCompile Include="..\..\..\src\cgfx_test_cl.cc" />
     <ClCompile Include="..\..\..\src\cgfx_w32.cc" />
   </ItemGroup>
   <ItemGroup>
