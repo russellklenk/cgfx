@@ -35,22 +35,24 @@ EXPORTS
     cgEndCommandBuffer             @33
     cgCommandBufferCanRead         @34
     cgCommandBufferCommandAt       @35
-    cgCreateKernel                 @36
-    cgCreateComputePipeline        @37
-    cgCreateGraphicsPipeline       @38
-    cgCreateDataBuffer             @39
-    cgGetDataBufferInfo            @40
-    cgMapDataBuffer                @41
-    cgUnmapDataBuffer              @42
-    cgBlendStateInitNone           @43
-    cgBlendStateInitAlpha          @44
-    cgBlendStateInitAdditive       @45
-    cgBlendStateInitPremultiplied  @46
-    cgRasterStateInitDefault       @47
-    cgDepthStencilStateInitDefault @48
-    cgDisplayForWindowEXT          @49
-    cgMakeWindowOnDisplayEXT       @50
-    cgAttachWindowToDisplayEXT     @51
-    cgSetDisplayDrawableEXT        @52
-    cgSetActiveDrawableEXT         @53
-    cgPresentDrawableEXT           @54
+    cgCreateEvent                  @36
+    cgHostWaitForEvent             @37
+    cgCreateKernel                 @38
+    cgCreateComputePipeline        @39
+    cgCreateGraphicsPipeline       @40
+    cgCreateDataBuffer             @41
+    cgGetDataBufferInfo            @42
+    cgMapDataBuffer                @43
+    cgUnmapDataBuffer              @44
+    cgBlendStateInitNone           @45
+    cgBlendStateInitAlpha          @46
+    cgBlendStateInitAdditive       @47
+    cgBlendStateInitPremultiplied  @48
+    cgRasterStateInitDefault       @49
+    cgDepthStencilStateInitDefault @50
+    cgDisplayForWindowEXT          @51
+    cgMakeWindowOnDisplayEXT       @52
+    cgAttachWindowToDisplayEXT     @53
+    cgSetDisplayDrawableEXT        @54
+    cgSetActiveDrawableEXT         @55
+    cgPresentDrawableEXT           @56

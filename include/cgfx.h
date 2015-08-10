@@ -122,6 +122,8 @@ typedef int          (CG_API *cgCommandBufferUnmapAppend_fn    )(uintptr_t, cg_h
 typedef int          (CG_API *cgEndCommandBuffer_fn            )(uintptr_t, cg_handle_t);
 typedef int          (CG_API *cgCommandBufferCanRead_fn        )(uintptr_t, cg_handle_t, size_t &);
 typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn      )(uintptr_t, cg_handle_t, size_t &, int &);
+typedef cg_handle_t  (CG_API *cgCreateEvent_fn                 )(uintptr_t, cg_handle_t, uint32_t, int &);
+typedef int          (CG_API *cgHostWaitForEvent_fn            )(uintptr_t, cg_handle_t);
 typedef cg_handle_t  (CG_API *cgCreateKernel_fn                )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, int &);
@@ -935,6 +937,22 @@ cgCommandBufferCommandAt                            /// Read a command buffer at
     cg_handle_t                   cmd_buffer,       /// The command buffer handle.
     size_t                       &cmd_offset,       /// The byte offset of the command to map for reading. On return, updated to point to the start of the next command.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+cg_handle_t
+cgCreateEvent                                       /// Create a new event object in the unsignaled state.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group that will signal the event.
+    uint32_t                      usage,            /// One or more of cg_event_usage_e specifying whether graphics, compute, or both will use the event.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgHostWaitForEvent                                  /// Blocks the calling thread until the device signals an event.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on.
 );
 
 cg_handle_t

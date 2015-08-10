@@ -6634,6 +6634,62 @@ cgCommandBufferCommandAt
     return cmd;
 }
 
+/// @summary Create a new event object in the unsignaled state.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The execution group that will signal the event.
+/// @param usage One or more of cg_event_usage_e specifying whether the event will be signaled from or waited on by compute, graphics or both.
+/// @param result On return, set to CG_SUCCESS, CG_INVALID_VALUE or CG_OUT_OF_OBJECTS.
+/// @return A handle to the new event object, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgCreateEvent
+(
+    uintptr_t   context, 
+    cg_handle_t exec_group,
+    uint32_t    usage, 
+    int        &result
+)
+{
+    CG_CONTEXT    *ctx = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group = cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // an invalid execution group was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    CG_EVENT evt;
+    evt.EventUsage      = usage;
+    evt.ComputeSync     = NULL;
+    evt.GraphicsSync    = NULL;
+    evt.AttachedDisplay = group->AttachedDisplay;
+    cg_handle_t handle  = cgObjectTableAdd(&ctx->EventTable, evt);
+    if (handle == CG_INVALID_HANDLE)
+    {   // the event object table is full.
+        result = CG_OUT_OF_OBJECTS;
+        return CG_INVALID_HANDLE;
+    }
+    return handle;
+}
+
+/// @summary Blocks the calling host thread until a device event becomes signaled.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param wait_handle The handle of the event object to wait on.
+/// @return CG_SUCCESS, CG_INVALID_VALUE or CG_INVALID_STATE.
+library_function int
+cgHostWaitForEvent
+(
+    uintptr_t   context, 
+    cg_handle_t wait_handle
+)
+{
+    CG_CONTEXT *ctx = (CG_CONTEXT*) context;
+    CG_EVENT   *evt =  cgObjectTableGet(&ctx->EventTable, wait_handle);
+    if (evt == NULL)   return CG_INVALID_VALUE;
+    if (evt->ComputeSync == NULL) return CG_INVALID_STATE;
+    cl_int clres = clWaitForEvents(1, &evt->ComputeSync);
+    return clres == CL_SUCCESS ? CG_SUCCESS : CG_INVALID_VALUE;
+}
+
 /// @summary Create a kernel object and load graphics or compute shader code into it.
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group that owns the kernel object.
@@ -7626,7 +7682,7 @@ cgUnmapDataBuffer
                 default                        : result = CG_ERROR;         break;
                 }
             }
-            else if (GL_ARB_cl_event)
+            else if (GLEW_ARB_cl_event)
             {   // setup the graphics sync object.
                 if ((event.GraphicsSync = glCreateSyncFromCLeventARB(queue->ComputeContext, evt_relgl, 0)) != NULL)
                     event.EventUsage   |= CG_EVENT_USAGE_GRAPHICS;
