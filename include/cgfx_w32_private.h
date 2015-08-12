@@ -660,9 +660,14 @@ struct CG_IMAGE
     size_t                       ImageWidth;           /// The width of the image, in pixels.
     size_t                       ImageHeight;          /// The height of the image, in pixels.
     size_t                       SliceCount;           /// The number of slices in the image. For 2D images, this value is 1.
+    size_t                       ArrayCount;           /// The number of array elements in the image.
+    size_t                       LevelCount;           /// The number of mipmap levels in the image.
+    size_t                       PaddedWidth;          /// The padded width of the image, in pixels.
+    size_t                       PaddedHeight;         /// The padded height of the image, in pixels.
     size_t                       RowPitch;             /// The number of bytes allocated to each row in the image.
     size_t                       SlicePitch;           /// The number of bytes allocated to each slice in the image.
     GLuint                       GraphicsImage;        /// The name of the OpenGL image object, or 0.
+    GLenum                       DefaultTarget;        /// The default texture target for the OpenGL texture object.
     GLenum                       InternalFormat;       /// The OpenGL internal format identifier.
     GLenum                       BaseFormat;           /// The OpenGL base format identifier.
     GLenum                       DataType;             /// The OpenGL data type identifier.

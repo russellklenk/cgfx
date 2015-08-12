@@ -346,6 +346,44 @@ cgHashName
     return hash;
 }
 
+/// @summary Generates a little-endian FOURCC.
+/// @param a...d The four characters comprising the code.
+/// @return The packed four-cc value, in little-endian format.
+internal_function inline uint32_t 
+cgFourCC_le
+(
+    char a, 
+    char b, 
+    char c, 
+    char d
+)
+{
+    uint32_t A = (uint32_t) a;
+    uint32_t B = (uint32_t) b;
+    uint32_t C = (uint32_t) c;
+    uint32_t D = (uint32_t) d;
+    return ((D << 24) | (C << 16) | (B << 8) | (A << 0));
+}
+
+/// @summary Generates a big-endian FOURCC.
+/// @param a...d The four characters comprising the code.
+/// @return The packed four-cc value, in big-endian format.
+internal_function inline uint32_t
+cgFourCC_be
+(
+    char a, 
+    char b, 
+    char c, 
+    char d
+)
+{
+    uint32_t A = (uint32_t) a;
+    uint32_t B = (uint32_t) b;
+    uint32_t C = (uint32_t) c;
+    uint32_t D = (uint32_t) d;
+    return ((A << 24) | (B << 16) | (C << 8) | (D << 0));
+}
+
 /// @summary Retrieve the length of an OpenCL platform string value, allocate a buffer and store a copy of the value.
 /// @param ctx The CGFX context requesting the string data.
 /// @param id The OpenCL platform identifier being queried.
@@ -1410,6 +1448,402 @@ cgGlFindHeapForUsage
         break;
     }
     return cgFindHeapForPlacement(ctx, placement_hint);
+}
+
+/// @summary Populate a cl_image_desc and cl_image_format to describe an image.
+/// @param cl_desc On return, stores the OpenCL image layout descriptor data.
+/// @param cl_format On return, stores the OpenCL pixel layout descriptor data.
+/// @param gl_target On return, stores the OpenGL texture target.
+/// @param pixel_width The image width, in pixels.
+/// @param pixel_height The image height, in pixels.
+/// @param slice_count The number of slices in the image. For 1D and 2D images, specify 1.
+/// @param array_count The number of array elements in the image. For cubemap images, specify 6. For non-array images, specify 1.
+/// @param level_count The number of mipmap levels in the image. For no mipmaps, specify 1. For all mipmaps, specify 0.
+/// @param row_pitch The number of bytes between each row of each slice in the image.
+/// @param slice_pitch The number of bytes between each slice of the image.
+/// @return true if the image attributes describe a logically valid combination. The device may or may not support the specified attributes.
+internal_function bool
+cgClMakeImageDesc
+(
+    cl_image_desc   &cl_desc,
+    cl_image_format &cl_format,
+    GLenum          &gl_target,
+    uint32_t         dxgi_format,
+    size_t           pixel_width, 
+    size_t           pixel_height, 
+    size_t           slice_count, 
+    size_t           array_count, 
+    size_t           level_count,
+    size_t           row_pitch, 
+    size_t           slice_pitch
+)
+{   // populate a cl_image_desc object.
+    if (array_count > 1)
+    {   // this is an array image, which may be 1D or 2D.
+        if (pixel_height > 1)
+        {
+            gl_target                 = GL_TEXTURE_2D_ARRAY;
+            cl_desc.image_type        = CL_MEM_OBJECT_IMAGE2D_ARRAY;
+            cl_desc.image_width       = pixel_width;
+            cl_desc.image_height      = pixel_height;
+            cl_desc.image_depth       = 0;
+            cl_desc.image_array_size  = array_count;
+            cl_desc.image_row_pitch   = row_pitch;
+            cl_desc.image_slice_pitch = slice_pitch;
+            cl_desc.num_mip_levels    = 0;
+            cl_desc.num_samples       = 0;
+        }
+        else
+        {
+            gl_target                 = GL_TEXTURE_1D_ARRAY;
+            cl_desc.image_type        = CL_MEM_OBJECT_IMAGE1D_ARRAY;
+            cl_desc.image_width       = pixel_width;
+            cl_desc.image_height      = 0;
+            cl_desc.image_depth       = 0;
+            cl_desc.image_array_size  = array_count;
+            cl_desc.image_row_pitch   = row_pitch;
+            cl_desc.image_slice_pitch = slice_pitch;
+            cl_desc.num_mip_levels    = 0;
+            cl_desc.num_samples       = 0;
+        }
+    }
+    else
+    {   // this is a non-array 1D, 2D or 3D image.
+        if (slice_count > 1)
+        {
+            gl_target                 = GL_TEXTURE_3D;
+            cl_desc.image_type        = CL_MEM_OBJECT_IMAGE3D;
+            cl_desc.image_width       = pixel_width;
+            cl_desc.image_height      = pixel_height;
+            cl_desc.image_depth       = slice_count;
+            cl_desc.image_array_size  = 0;
+            cl_desc.image_row_pitch   = row_pitch;
+            cl_desc.image_slice_pitch = slice_pitch;
+            cl_desc.num_mip_levels    = 0;
+            cl_desc.num_samples       = 0;
+        }
+        else if (pixel_height > 1)
+        {
+            gl_target                 = GL_TEXTURE_2D;
+            cl_desc.image_type        = CL_MEM_OBJECT_IMAGE2D;
+            cl_desc.image_width       = pixel_width;
+            cl_desc.image_height      = pixel_height;
+            cl_desc.image_depth       = 0;
+            cl_desc.image_array_size  = 0;
+            cl_desc.image_row_pitch   = row_pitch;
+            cl_desc.image_slice_pitch = slice_pitch;
+            cl_desc.num_mip_levels    = 0;
+            cl_desc.num_samples       = 0;
+        }
+        else
+        {
+            gl_target                 = GL_TEXTURE_1D;
+            cl_desc.image_type        = CL_MEM_OBJECT_IMAGE1D;
+            cl_desc.image_width       = pixel_width;
+            cl_desc.image_height      = 0;
+            cl_desc.image_depth       = 0;
+            cl_desc.image_array_size  = 0;
+            cl_desc.image_row_pitch   = row_pitch;
+            cl_desc.image_slice_pitch = slice_pitch;
+            cl_desc.num_mip_levels    = 0;
+            cl_desc.num_samples       = 0;
+        }
+    }
+
+    // populate the cl_image_format object.
+    // the following mappings are taken from pp.54-55 of:
+    // https://www.khronos.org/registry/cl/specs/opencl-1.2-extensions.pdf
+    switch (dxgi_format)
+    {
+        case DXGI_FORMAT_UNKNOWN:
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R1_UNORM:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+        case DXGI_FORMAT_AYUV:
+        case DXGI_FORMAT_Y410:
+        case DXGI_FORMAT_Y416:
+        case DXGI_FORMAT_NV12:
+        case DXGI_FORMAT_P010:
+        case DXGI_FORMAT_P016:
+        case DXGI_FORMAT_420_OPAQUE:
+        case DXGI_FORMAT_YUY2:
+        case DXGI_FORMAT_Y210:
+        case DXGI_FORMAT_Y216:
+        case DXGI_FORMAT_NV11:
+        case DXGI_FORMAT_AI44:
+        case DXGI_FORMAT_IA44:
+            return false;
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT32;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT32;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_RGB;
+            return true;
+        case DXGI_FORMAT_R32G32B32_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT32;
+            cl_format.image_channel_order     = CL_RGB;
+            return true;
+        case DXGI_FORMAT_R32G32B32_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT32;
+            cl_format.image_channel_order     = CL_RGB;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+            cl_format.image_channel_data_type = CL_HALF_FLOAT;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT16;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT16;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+            cl_format.image_channel_data_type = CL_SNORM_INT16;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT16;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R32G32_FLOAT:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R32G32_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT32;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R32G32_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT32;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_DEPTH;
+            return true;
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_Rx;
+            return true;
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT_101010;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_sRGBA;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT8;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+            cl_format.image_channel_data_type = CL_SNORM_INT8;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT8;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_R16G16_FLOAT:
+            cl_format.image_channel_data_type = CL_HALF_FLOAT;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R16G16_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT16;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R16G16_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT16;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R16G16_SNORM:
+            cl_format.image_channel_data_type = CL_SNORM_INT16;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R16G16_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT16;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_D32_FLOAT:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_DEPTH;
+            return true;
+        case DXGI_FORMAT_R32_FLOAT:
+            cl_format.image_channel_data_type = CL_FLOAT;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R32_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT32;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R32_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT32;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+            cl_format.image_channel_data_type = CL_UNORM_INT24;
+            cl_format.image_channel_order     = CL_DEPTH;
+            return true;
+        case DXGI_FORMAT_R8G8_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R8G8_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT8;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R8G8_SNORM:
+            cl_format.image_channel_data_type = CL_SNORM_INT8;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R8G8_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT8;
+            cl_format.image_channel_order     = CL_RG;
+            return true;
+        case DXGI_FORMAT_R16_FLOAT:
+            cl_format.image_channel_data_type = CL_HALF_FLOAT;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_D16_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT16;
+            cl_format.image_channel_order     = CL_DEPTH;
+            return true;
+        case DXGI_FORMAT_R16_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT16;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R16_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT16;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R16_SNORM:
+            cl_format.image_channel_data_type = CL_SNORM_INT16;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R16_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT16;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R8_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R8_UINT:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT8;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R8_SNORM:
+            cl_format.image_channel_data_type = CL_SNORM_INT8;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_R8_SINT:
+            cl_format.image_channel_data_type = CL_SIGNED_INT8;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_A8_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_A;
+            return true;
+        case DXGI_FORMAT_B5G6R5_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_SHORT_565;
+            cl_format.image_channel_order     = CL_BGRA;
+            return true;
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_SHORT_555;
+            cl_format.image_channel_order     = CL_BGRA;
+            return true;
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_BGRA;
+            return true;
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_BGRA;
+            return true;
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+            cl_format.image_channel_data_type = CL_UNORM_INT_101010;
+            cl_format.image_channel_order     = CL_RGBA;
+            return true;
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_sBGRA;
+            return true;
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            cl_format.image_channel_data_type = CL_UNORM_INT8;
+            cl_format.image_channel_order     = CL_sBGRA;
+            return true;
+        case DXGI_FORMAT_P8:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT8;
+            cl_format.image_channel_order     = CL_R;
+            return true;
+        case DXGI_FORMAT_A8P8:
+            cl_format.image_channel_data_type = CL_UNSIGNED_INT8;
+            cl_format.image_channel_order     = CL_RA;
+            return true;
+        default:
+            break;
+    }
+    return false;
 }
 
 /// @summary Check the device table for a context to determine if a given device is already known.
@@ -7495,7 +7929,7 @@ cgCreateDataBuffer
 
 /// @summary Query data buffer information.
 /// @param context A CGFX context returned by cgEnumerateDevices().
-/// @param buffer_handle The handle of the execution group to query.
+/// @param buffer_handle The handle of the data buffer to query.
 /// @param param One of cg_data_buffer_info_param_e specifying the data to return.
 /// @param buffer A caller-managed buffer to receive the data.
 /// @param buffer_size The maximum number of bytes that can be written to @a buffer.
@@ -7780,6 +8214,446 @@ cgUnmapDataBuffer
     }
 }
 
+/// @summary Creates a new image object and allocates, but does not initialize, the backing memory.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The execution group that will read or write the image.
+/// @param pixel_width The width of the image, in pixels.
+/// @param pixel_height The height of the image, in pixels.
+/// @param slice_count The number of slices in the image. For 1D and 2D images, specify 1.
+/// @param array_count The number of array elements in the image array. For non-array images, specify 1.
+/// @param level_count The number of mipmap levels. For no mipmaps, specify 1. For all mipmap levels, specify 0.
+/// @param pixel_format One of dxgi_format_e or DXGI_FORMAT specifying the data storage format.
+/// @param kernel_types One or more of cg_memory_object_kernel_e specifying the types of kernels that will access the image.
+/// @param kernel_access One or more of cg_memory_access_e specifying how the kernel(s) will access the image.
+/// @param host_access One or more of cg_memory_access_e specifying how the host will access the image.
+/// @param placement_hint One of cg_memory_placement_e specifying the heap the image should be allocated from. This is only a hint.
+/// @param frequency_hint One of cg_memory_update_frequency_e specifying the expected image update frequency.
+/// @param result On return, set to CG_SUCCESS, CG_NO_OPENGL, CG_BAD_GLCONTEXT, CG_BAD_CLCONTEXT, CG_OUT_OF_MEMORY, CG_INVALID_VALUE or CG_ERROR.
+/// @return A handle to the new buffer object, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgCreateImage
+(
+    uintptr_t    context,
+    cg_handle_t  exec_group, 
+    size_t       pixel_width, 
+    size_t       pixel_height, 
+    size_t       slice_count, 
+    size_t       array_count, 
+    size_t       level_count, 
+    uint32_t     pixel_format,
+    uint32_t     kernel_types,
+    uint32_t     kernel_access,
+    uint32_t     host_access,
+    int          placement_hint,
+    int          frequency_hint,
+    int         &result
+)
+{
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // invalid execution group handle.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if ((group->RenderingContext == NULL) && (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS))
+    {   // want OpenGL interop, but group has no OpenGL capability.
+        result = CG_NO_OPENGL;
+        return CG_INVALID_HANDLE;
+    }
+    if (slice_count < 1 || array_count < 1)
+    {   // both of these values must be at least 1.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if (slice_count > 1 && array_count > 1)
+    {   // arrays of 3D images are not supported.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if (pixel_format == DXGI_FORMAT_UNKNOWN)
+    {   // the pixel format must be specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    size_t max_mip_levels = cgGlLevelCount(pixel_width, pixel_height, slice_count, level_count);
+    if (level_count == 0)   level_count  = max_mip_levels;
+    if (level_count  > max_mip_levels)
+    {   // the number of mip-levels is not valid.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    GLenum internal_format = GL_NONE;
+    GLenum base_format     = GL_NONE;
+    GLenum data_type       = GL_NONE;
+    if (!cgGlDxgiFormatToGL(pixel_format, internal_format, base_format, data_type))
+    {   // the pixel format is not valid.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    cl_image_desc            cl_desc;
+    cl_image_format          cl_format;
+    GLenum default_target  = GL_NONE;
+    size_t padded_width    = cgGlImageDimension(internal_format, pixel_width);
+    size_t padded_height   = cgGlImageDimension(internal_format, pixel_height);
+    size_t row_pitch       = cgGlBytesPerRow(internal_format, data_type, padded_width, 4);
+    size_t slice_pitch     = cgGlBytesPerSlice(internal_format, data_type, padded_width, padded_height, 4);
+    if (!cgClMakeImageDesc(cl_desc, cl_format, default_target, pixel_format, padded_width, padded_height, slice_count, array_count, level_count, row_pitch, slice_pitch))
+    {   // one or more arguments are invalid.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    if (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS)
+    {   // the texture must be created in OpenGL first.
+        CG_DISPLAY *display = group->AttachedDisplay;
+        GLuint      texture = 0;
+        GLenum      glerror = 0;
+        size_t      nslices = 0;
+
+        if (array_count > 1)
+        {   // specify array_count as the slice_count argument to cgGlTextureStorage.
+            nslices = array_count;
+        }
+        else
+        {   // not an array texture, so use slice_count as-is.
+            nslices = slice_count;
+        }
+
+        // generate an OpenGL texture object name.
+        glGenTextures(1, &texture);
+        if (texture == 0)
+        {   // unable to allocate an OpenGL texture object name.
+            result = CG_BAD_GLCONTEXT;
+            return CG_INVALID_HANDLE;
+        }
+
+        // bind the texture to the default target, and allocate storage.
+        // the texture is always allocated in device memory for OpenGL.
+        glBindTexture(default_target, texture);
+        if (level_count > 1)
+        {   // default filtering with mipmaps.
+            cgGlTextureStorage(
+                display, default_target , internal_format, data_type, 
+                GL_NEAREST_MIPMAP_LINEAR, /* minification filter  */ 
+                GL_LINEAR_MIPMAP_LINEAR , /* magnification filter */
+                padded_width, padded_height, nslices, level_count);
+        }
+        else
+        {   // default filtering without mipmaps.
+            cgGlTextureStorage(
+                display, default_target, internal_format, data_type, 
+                GL_NEAREST, /* minification filter  */
+                GL_LINEAR , /* magnification filter */
+                padded_width, padded_height, nslices, level_count);
+        }
+        glBindTexture(default_target, 0);
+
+        // populate the image description with OpenGL data.
+        // OpenGL textures are always allocated in device memory.
+        CG_IMAGE image;
+        image.KernelTypes      = kernel_types;
+        image.KernelAccess     = kernel_access;
+        image.HostAccess       = host_access;
+        image.AttachedDisplay  = NULL;
+        image.SourceHeap       = cgFindHeapForPlacement(ctx, CG_MEMORY_PLACEMENT_DEVICE);
+        image.ExecutionGroup   = exec_group;
+        image.ComputeContext   = NULL;
+        image.ComputeImage     = NULL;
+        image.ComputeUsage     = 0;
+        image.ImageWidth       = pixel_width;
+        image.ImageHeight      = pixel_height;
+        image.SliceCount       = slice_count;
+        image.ArrayCount       = array_count;
+        image.LevelCount       = level_count;
+        image.PaddedWidth      = padded_width;
+        image.PaddedHeight     = padded_height;
+        image.RowPitch         = row_pitch;
+        image.SlicePitch       = slice_pitch;
+        image.GraphicsImage    = texture;
+        image.DefaultTarget    = default_target;
+        image.InternalFormat   = internal_format;
+        image.BaseFormat       = base_format;
+        image.DataType         = data_type;
+        image.DxgiFormat       = pixel_format;
+
+        // set up OpenCL sharing, if requested.
+        if (kernel_types & CG_MEMORY_OBJECT_KERNEL_COMPUTE)
+        {
+            cl_mem_flags  cl_flags = 0;
+            cl_mem        clmem    = NULL;
+            cl_int        clres    = CL_SUCCESS;
+            uint32_t      access   =(kernel_access & ~CG_MEMORY_ACCESS_PRESERVE);
+
+            // convert kernel access flags into cl_mem_flags.
+            // OpenCL images created from OpenGL textures cannot specify ALLOC_HOST_PTR, etc.
+                 if (access == CG_MEMORY_ACCESS_READ      ) cl_flags = CL_MEM_READ_ONLY;
+            else if (access == CG_MEMORY_ACCESS_WRITE     ) cl_flags = CL_MEM_WRITE_ONLY;
+            else if (access == CG_MEMORY_ACCESS_READ_WRITE) cl_flags = CL_MEM_READ_WRITE;
+            else
+            {   // CG_MEMORY_ACCESS_NONE is not valid.
+                glDeleteTextures(1, &texture);
+                result = CG_INVALID_VALUE;
+                return CG_INVALID_HANDLE;
+            }
+            if ((clmem = clCreateFromGLTexture(group->ComputeContext, cl_flags, default_target, 0, texture, &clres)) == NULL)
+            {
+                switch (clres)
+                {
+                case CL_INVALID_CONTEXT                : result = CG_BAD_CLCONTEXT; break;
+                case CL_INVALID_VALUE                  : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_MIP_LEVEL              : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_GL_OBJECT              : result = CG_BAD_GLCONTEXT; break;
+                case CL_INVALID_IMAGE_FORMAT_DESCRIPTOR: result = CG_INVALID_VALUE; break;
+                case CL_OUT_OF_RESOURCES               : result = CG_OUT_OF_MEMORY; break;
+                case CL_OUT_OF_HOST_MEMORY             : result = CG_OUT_OF_MEMORY; break;
+                default                                : result = CG_ERROR;         break;
+                }
+                glDeleteTextures(1, &texture);
+                return CG_INVALID_HANDLE;
+            }
+            image.ComputeContext = group->ComputeContext;
+            image.ComputeImage   = clmem;
+            image.ComputeUsage   = cl_flags;
+        }
+
+        cg_handle_t handle = cgObjectTableAdd(&ctx->ImageTable, image);
+        if (handle == CG_INVALID_HANDLE)
+        {
+            if (image.ComputeImage != NULL) clReleaseMemObject(image.ComputeImage);
+            glDeleteBuffers(1, &image.GraphicsImage);
+            result = CG_OUT_OF_OBJECTS;
+            return CG_INVALID_HANDLE;
+        }
+        // TODO(rlk): update CG_HEAP::HeapSizeUsed.
+        result = CG_SUCCESS;
+        return handle;
+    }
+    else if (kernel_types & CG_MEMORY_OBJECT_KERNEL_COMPUTE)
+    {   // compute kernel data only.
+        cl_mem_flags  cl_flags = 0;
+        cl_mem        clmem    = NULL;
+        cl_int        clres    = CL_SUCCESS;
+        uint32_t      access   =(kernel_access & ~CG_MEMORY_ACCESS_PRESERVE);
+
+        // convert kernel access flags into cl_mem_flags.
+             if (access == CG_MEMORY_ACCESS_READ      ) cl_flags = CL_MEM_READ_ONLY;
+        else if (access == CG_MEMORY_ACCESS_WRITE     ) cl_flags = CL_MEM_WRITE_ONLY;
+        else if (access == CG_MEMORY_ACCESS_READ_WRITE) cl_flags = CL_MEM_READ_WRITE;
+        else
+        {   // CG_MEMORY_ACCESS_NONE is not valid.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+        if (placement_hint != CG_MEMORY_PLACEMENT_DEVICE)
+        {   // prefer to allocate the buffer in host or pinned memory.
+            // there are limitations on buffer size with pinned memory.
+            cl_flags |= CL_MEM_ALLOC_HOST_PTR;
+        }
+        if ((clmem = clCreateImage(group->ComputeContext, cl_flags, &cl_format, &cl_desc, NULL, &clres)) == NULL)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_CONTEXT              : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_VALUE                : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_BUFFER_SIZE          : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_HOST_PTR             : result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE: result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY           : result = CG_OUT_OF_MEMORY; break;
+            default                              : result = CG_ERROR;         break;
+            }
+            return CG_INVALID_HANDLE;
+        }
+
+        CG_IMAGE image;
+        image.KernelTypes      = kernel_types;
+        image.KernelAccess     = kernel_access;
+        image.HostAccess       = host_access;
+        image.AttachedDisplay  = NULL;
+        image.SourceHeap       = cgFindHeapForPlacement(ctx, placement_hint);
+        image.ExecutionGroup   = exec_group;
+        image.ComputeContext   = group->ComputeContext;
+        image.ComputeImage     = clmem;
+        image.ComputeUsage     = cl_flags;
+        image.ImageWidth       = pixel_width;
+        image.ImageHeight      = pixel_height;
+        image.SliceCount       = slice_count;
+        image.ArrayCount       = array_count;
+        image.LevelCount       = level_count;
+        image.PaddedWidth      = padded_width;
+        image.PaddedHeight     = padded_height;
+        image.RowPitch         = row_pitch;
+        image.SlicePitch       = slice_pitch;
+        image.GraphicsImage    = 0;
+        image.DefaultTarget    = default_target;
+        image.InternalFormat   = internal_format;
+        image.BaseFormat       = base_format;
+        image.DataType         = data_type;
+        image.DxgiFormat       = pixel_format;
+
+        cg_handle_t handle     = cgObjectTableAdd(&ctx->ImageTable, image);
+        if (handle == CG_INVALID_HANDLE)
+        {
+            clReleaseMemObject(image.ComputeImage);
+            result = CG_OUT_OF_OBJECTS;
+            return CG_INVALID_HANDLE;
+        }
+        // TODO(rlk): update CG_HEAP::HeapSizeUsed.
+        result = CG_SUCCESS;
+        return handle;
+    }
+    else
+    {   // invalid kernel_types.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+}
+
+/// @summary Query image information.
+/// @param context A CGFX context returned by cgEnumerateDevices().
+/// @param image_handle The handle of the image to query.
+/// @param param One of cg_image_info_param_e specifying the data to return.
+/// @param buffer A caller-managed buffer to receive the data.
+/// @param buffer_size The maximum number of bytes that can be written to @a buffer.
+/// @param bytes_needed On return, stores the number of bytes copied to the buffer, or the number of bytes required to store the data.
+/// @return CG_SUCCESS, CG_BUFFER_TOO_SMALL, CG_INVALID_VALUE or CG_OUT_OF_MEMORY.
+library_function int
+cgGetImageInfo
+(
+    uintptr_t                     context,
+    cg_handle_t                   image_handle,
+    int                           param,
+    void                         *buffer,
+    size_t                        buffer_size,
+    size_t                       *bytes_needed
+)
+{
+    CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
+    CG_IMAGE   *object =  NULL;
+
+    if ((object = cgObjectTableGet(&ctx->ImageTable, image_handle)) == NULL)
+    {
+        if (bytes_needed != NULL) *bytes_needed = 0;
+        return CG_INVALID_HANDLE;
+    }
+
+    // reduce the amount of boilerplate code using these macros.
+#define BUFFER_CHECK_TYPE(type) \
+    if (buffer == NULL || buffer_size < sizeof(type)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = sizeof(type); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = sizeof(type); \
+    }
+#define BUFFER_CHECK_SIZE(size) \
+    if (buffer == NULL || buffer_size < (size)) \
+    { \
+        if (bytes_needed != NULL) *bytes_needed = (size); \
+        return CG_BUFFER_TOO_SMALL; \
+    } \
+    else if (bytes_needed != NULL) \
+    { \
+        *bytes_needed = (size); \
+    }
+#define BUFFER_SET_SCALAR(type, value) \
+    *((type*)buffer) = (value)
+    // ==========================================================
+    // ==========================================================
+
+    // retrieve parameter data:
+    switch (param)
+    {
+    case CG_IMAGE_HEAP_ORDINAL:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, object->SourceHeap->Ordinal);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_HEAP_TYPE:
+        {   BUFFER_CHECK_TYPE(int);
+            BUFFER_SET_SCALAR(int, object->SourceHeap->Type);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_HEAP_FLAGS:
+        {   BUFFER_CHECK_TYPE(uint32_t);
+            BUFFER_SET_SCALAR(uint32_t, object->SourceHeap->Flags);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_ALLOCATED_SIZE:
+        {   BUFFER_CHECK_TYPE(size_t);
+            size_t allocated_size = 0;
+            size_t nslice_or_item = object->ArrayCount > 1 ? object->ArrayCount : object->SliceCount;
+            for (size_t i = 0, n  = nslice_or_item;  i < n; ++i)
+            {
+                for (size_t j = 0; j < object->LevelCount; ++j)
+                {
+                    size_t  w = cgGlLevelDimension(object->PaddedWidth , j);
+                    size_t  h = cgGlLevelDimension(object->PaddedHeight, j);
+                    size_t ss = cgGlBytesPerSlice (object->InternalFormat, object->DataType, w, h, 4);
+                    allocated_size += ss;
+                }
+            }
+            BUFFER_SET_SCALAR(size_t, align_up(allocated_size, object->SourceHeap->DeviceAlignment));
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_DIMENSIONS:
+        {   BUFFER_CHECK_SIZE(sizeof(size_t) * 3);
+            size_t whd[3] = { object->PaddedWidth, object->PaddedHeight, object->SliceCount };
+            memcpy(buffer, whd, sizeof(size_t) * 3);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_ARRAY_SIZE:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, object->ArrayCount);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_MIPMAP_LEVELS:
+        {   BUFFER_CHECK_TYPE(size_t);
+            BUFFER_SET_SCALAR(size_t, object->LevelCount);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_PIXEL_FORMAT:
+        {   BUFFER_CHECK_TYPE(uint32_t);
+            BUFFER_SET_SCALAR(uint32_t, object->DxgiFormat);
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_DDS_HEADER:
+        {   BUFFER_CHECK_TYPE(dds_header_t);
+            // TODO(rlk): implement this.
+        }
+        return CG_SUCCESS;
+
+    case CG_IMAGE_DDS_HEADER_DX10:
+        {   BUFFER_CHECK_TYPE(dds_header_dxt10_t);
+            // TODO(rlk): implement this.
+        }
+        return CG_SUCCESS;
+
+    default:
+        {
+            if (bytes_needed != NULL) *bytes_needed = 0;
+            return CG_INVALID_VALUE;
+        }
+    }
+
+#undef  BUFFER_SET_SCALAR
+#undef  BUFFER_CHECK_SIZE
+#undef  BUFFER_CHECK_TYPE
+}
+
 internal_function int
 cgExecuteTransferCommandBuffer
 (
@@ -8013,6 +8887,728 @@ cgDepthStencilStateInitDefault
     state.StencilWriteMask    = 0xFF;
     state.StencilReference    = 0x00;
     return CG_SUCCESS;
+}
+
+/// @summary Determines if a DXGI format value is a block-compressed format.
+/// @param format One of dxgi_format_e or DXGI_FORMAT.
+/// @return true if format is one of DXGI_FORMAT_BCn.
+library_function bool
+cgPixelFormatIsBlockCompressed
+(
+    uint32_t format
+)
+{
+    switch (format)
+    {
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return true;
+
+        default:
+            break;
+    }
+    return false;
+}
+
+/// @summary Determines if a DXGI format value specifies a packed format.
+/// @param format One of dxgi_format_e or DXGI_FORMAT.
+/// @return true if format is one of DXGI_FORMAT_R8G8_B8G8_UNORM or DXGI_FORMAT_G8R8_G8B8_UNORM.
+library_function bool
+cgPixelFormatIsPacked
+(
+    uint32_t format
+)
+{
+    if (format == DXGI_FORMAT_R8G8_B8G8_UNORM ||
+        format == DXGI_FORMAT_G8R8_G8B8_UNORM)
+    {
+        return true;
+    }
+    else return false;
+}
+
+/// @summary Calculate the number of bits-per-pixel for a given format. Block-
+/// compressed formats are supported as well.
+/// @param format One of dxgi_format_e.
+/// @return The number of bits per-pixel.
+library_function size_t
+cgPixelFormatBitsPerPixel
+(
+    uint32_t format
+)
+{
+    switch (format)
+    {
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+            return 128;
+
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+        case DXGI_FORMAT_R32G32B32_UINT:
+        case DXGI_FORMAT_R32G32B32_SINT:
+            return 96;
+
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G32_FLOAT:
+        case DXGI_FORMAT_R32G32_UINT:
+        case DXGI_FORMAT_R32G32_SINT:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+            return 64;
+
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R16G16_FLOAT:
+        case DXGI_FORMAT_R16G16_UNORM:
+        case DXGI_FORMAT_R16G16_UINT:
+        case DXGI_FORMAT_R16G16_SNORM:
+        case DXGI_FORMAT_R16G16_SINT:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT:
+        case DXGI_FORMAT_R32_FLOAT:
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R32_SINT:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            return 32;
+
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
+        case DXGI_FORMAT_B5G6R5_UNORM:
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+            return 16;
+
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+            return 8;
+
+        case DXGI_FORMAT_R1_UNORM:
+            return 1;
+
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+            return 4;
+
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return 8;
+
+        default:
+            return 0;
+    }
+}
+
+/// @summary Calculate the number of bytes per 4x4-pixel block.
+/// @param format One of dxgi_format_e.
+/// @return The number of bytes in a 4x4 pixel block, or 0 for non-block-compressed formats.
+library_function size_t
+cgPixelFormatBytesPerBlock
+(
+    uint32_t format
+)
+{
+    switch (format)
+    {
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+            return 8;
+
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return 16;
+
+        default:
+            break;
+    }
+    return 0;
+}
+
+/// @summary Calculates the dimension of an image, in pixels, and accounting for block compression. Note that only width and height should be calculated using this logic as block compression is 2D-only.
+/// @param format One of dxgi_format_e or DXGI_FORMAT.
+/// @param pixel_dimension The unpadded width or height of an image.
+/// @return The width or height, in pixels.
+library_function size_t
+cgImageDimension
+(
+    uint32_t format,
+    size_t   pixel_dimension
+)
+{
+    if (cgPixelFormatIsBlockCompressed(format))
+    {   // all BC formats encode 4x4 blocks.
+        size_t dim = ((pixel_dimension + 3) / 4) * 4;
+        return dim > 0 ? dim : 1;
+    }
+    else return pixel_dimension > 0 ? pixel_dimension : 1;
+}
+
+/// @summary Calculates the dimension of a mipmap level. This function may be used to calculate the width, height or depth dimensions.
+/// @param format One of dxgi_format_e or DXGI_FORMAT.
+/// @param base_dimension The unpadded dimension of the highest-resolution level (level 0.)
+/// @param level_index The zero-based index of the mip-level to compute.
+/// @return The corresponding unpadded dimension of the specified mipmap level.
+library_function size_t
+cgImageLevelDimension
+(
+    uint32_t format,
+    size_t   base_dimension,
+    size_t   level_index
+)
+{
+    size_t level_dimension = base_dimension >> level_index;
+    return(level_dimension > 0 ? level_dimension : 1);
+}
+
+/// @summary Calculates the correct pitch value for a scanline, based on the data format and width of the surface. This is necessary because many DDS writers do not correctly compute the pitch value. See MSDN documentation at:
+/// http://msdn.microsoft.com/en-us/library/windows/desktop/bb943991(v=vs.85).aspx
+/// @param format One of the values of the dxgi_format_e enumeration.
+/// @param pixel_width The unpadded width of a single scanline, in pixels.
+/// @return The number of bytes per-scanline.
+library_function size_t
+cgImageRowPitch
+(
+    uint32_t format,
+    size_t   pixel_width
+)
+{
+    if (cgPixelFormatIsBlockCompressed(format))
+    {
+        size_t bw =(pixel_width + 3) / 4; bw = bw > 0 ? bw : 1;
+        return bw * cgPixelFormatBytesPerBlock(format);
+    }
+    if (cgPixelFormatIsPacked(format))
+    {
+        return ((pixel_width + 1) >> 1) * 4;
+    }
+    return (pixel_width * cgPixelFormatBitsPerPixel(format) + 7) / 8;
+}
+
+/// @summary Calculates the number of bytes required to store a single slice with the specified dimensions.
+/// @param format One of the values of the dxgi_format_e or DXGI_FORMAT enumeration.
+/// @param pixel_width The unpadded width of a single scanline, in pixels.
+/// @param pixel_height The unpadded height of the image, in pixels.
+/// @return The number of bytes required to store a single slice.
+library_function size_t
+cgImageSlicePitch
+(
+    uint32_t format,
+    size_t   pixel_width,
+    size_t   pixel_height
+)
+{
+    return cgImageRowPitch (format, pixel_width) * 
+           cgImageDimension(format, pixel_height);
+}
+
+/// @summary Determines if a DDS describes a cubemap surface.
+/// @param header The base surface header of the DDS.
+/// @param header_ex The extended surface header of the DDS, or NULL.
+/// @return true if the DDS describes a cubemap.
+library_function bool
+cgIsCubemapImageDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (header_ex != NULL)
+    {
+        if (header_ex->Dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D &&
+            header_ex->Flags     == D3D11_RESOURCE_MISC_TEXTURECUBE)
+        {
+            return true;
+        }
+        // else fall through and look at the dds_header_t.
+    }
+    if (header != NULL)
+    {
+        if ((header->Caps  & DDSCAPS_COMPLEX) == 0)
+            return false;
+        if ((header->Caps2 & DDSCAPS2_CUBEMAP) == 0)
+            return false;
+        if ((header->Caps2 & DDSCAPS2_CUBEMAP_POSITIVEX) ||
+            (header->Caps2 & DDSCAPS2_CUBEMAP_NEGATIVEX) ||
+            (header->Caps2 & DDSCAPS2_CUBEMAP_POSITIVEY) ||
+            (header->Caps2 & DDSCAPS2_CUBEMAP_NEGATIVEY) ||
+            (header->Caps2 & DDSCAPS2_CUBEMAP_POSITIVEZ) ||
+            (header->Caps2 & DDSCAPS2_CUBEMAP_NEGATIVEZ))
+            return true;
+    }
+    return false;
+}
+
+/// @summary Determines if a DDS describes a volume surface.
+/// @param header The base surface header of the DDS.
+/// @param header_ex The extended surface header of the DDS, or NULL.
+/// @return true if the DDS describes a volume.
+library_function bool
+cgIsVolumeImageDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (header_ex != NULL)
+    {
+        if (header_ex->ArraySize != 1)
+        {   // arrays of volumes are not supported.
+            return false;
+        }
+    }
+    if (header != NULL)
+    {
+        if ((header->Caps  & DDSCAPS_COMPLEX) == 0)
+            return false;
+        if ((header->Caps2 & DDSCAPS2_VOLUME) == 0)
+            return false;
+        if ((header->Flags & DDSD_DEPTH) == 0)
+            return false;
+        return header->Depth > 1;
+    }
+    return false;
+}
+
+/// @summary Determines if a DDS describes a surface array. Note that a volume is not considered to be the same as a surface array.
+/// @param header The base surface header of the DDS.
+/// @param header_ex The extended surface header of the DDS, or NULL.
+/// @return true if the DDS describes a surface array.
+library_function bool
+cgIsArrayImageDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (header != NULL && header_ex != NULL)
+    {
+        return header_ex->ArraySize > 1;
+    }
+    return false;
+}
+
+/// @summary Determines if a DDS describes a mipmap chain.
+/// @param header The base surface header of the DDS.
+/// @param header_ex The extended surface header of the DDS, or NULL.
+/// @return true if the DDS describes a mipmap chain.
+library_function bool
+cgHasMipmapsDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (header_ex != NULL)
+    {
+        if (header_ex->Dimension != D3D11_RESOURCE_DIMENSION_TEXTURE1D &&
+            header_ex->Dimension != D3D11_RESOURCE_DIMENSION_TEXTURE2D &&
+            header_ex->Dimension != D3D11_RESOURCE_DIMENSION_TEXTURE3D)
+            return false;
+    }
+    if (header != NULL)
+    {
+        if (header->Caps & DDSCAPS_MIPMAP)
+            return true;
+        if (header->Flags & DDSD_MIPMAPCOUNT)
+            return true;
+        if (header->Levels > 0)
+            return true;
+    }
+    return false;
+}
+
+/// @summary Determines the number of elements in a surface array.
+/// @param header The base surface header of the DDS.
+/// @param header_ex The extended surface header of the DDS, or NULL.
+/// @return The number of elements in the surface array, or 1 if the DDS does not describe an array.
+library_function size_t
+cgImageArrayCountDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (header != NULL && header_ex != NULL)
+    {
+        size_t multiplier = 1;
+        if (header->Caps2 & DDSCAPS2_CUBEMAP)
+        {   // DX10+ cubemaps must specify all faces.
+            multiplier = 6;
+        }
+        // DX10 extended header is required for surface arrays.
+        return size_t(header_ex->ArraySize) * multiplier;
+    }
+    else if (header != NULL)
+    {
+        size_t nfaces = 1;
+        if (header->Caps2 & DDSCAPS2_CUBEMAP)
+        {   // non-DX10 cubemaps may specify only some faces.
+            if (header->Caps2 & DDSCAPS2_CUBEMAP_POSITIVEX) nfaces++;
+            if (header->Caps2 & DDSCAPS2_CUBEMAP_NEGATIVEX) nfaces++;
+            if (header->Caps2 & DDSCAPS2_CUBEMAP_POSITIVEY) nfaces++;
+            if (header->Caps2 & DDSCAPS2_CUBEMAP_NEGATIVEY) nfaces++;
+            if (header->Caps2 & DDSCAPS2_CUBEMAP_POSITIVEZ) nfaces++;
+            if (header->Caps2 & DDSCAPS2_CUBEMAP_NEGATIVEZ) nfaces++;
+        }
+        return nfaces;
+    }
+    else return 0;
+}
+
+/// @summary Determines the number of levels in the mipmap chain.
+/// @param header The base surface header of the DDS.
+/// @param header_ex The extended surface header of the DDS, or NULL.
+/// @return The number of levels in the mipmap chain, or 1 if the DDS describes the top level only.
+library_function size_t
+cgImageLevelCountDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (cgHasMipmapsDDS(header, header_ex))
+    {
+        return header->Levels;
+    }
+    else if (header != NULL) return 1;
+    else return 0;
+}
+
+/// @summary Determines the dxgi_format value based on data in dds headers.
+/// @param header the base surface header of the dds.
+/// @param header_ex the extended surface header of the dds, or NULL.
+/// @return One of the values of the dxgi_format_e enumeration.
+library_function uint32_t
+cgPixelFormatForDDS
+(
+    dds_header_t       const *header,
+    dds_header_dxt10_t const *header_ex
+)
+{
+    if (header_ex != NULL)
+    {
+        return header_ex->Format;
+    }
+    if (header == NULL)
+    {
+        return DXGI_FORMAT_UNKNOWN;
+    }
+
+    dds_pixelformat_t const &pf =  header->Format;
+    #define ISBITMASK(r, g, b, a) (pf.BitMaskR == (r) && pf.BitMaskG == (g) && pf.BitMaskB == (b) && pf.BitMaskA == (a))
+
+    if (pf.Flags & DDPF_FOURCC)
+    {
+        if (pf.FourCC == cgFourCC_le('D','X','T','1'))
+        {
+            return DXGI_FORMAT_BC1_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('D','X','T','2'))
+        {
+            return DXGI_FORMAT_BC2_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('D','X','T','3'))
+        {
+            return DXGI_FORMAT_BC2_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('D','X','T','4'))
+        {
+            return DXGI_FORMAT_BC3_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('D','X','T','5'))
+        {
+            return DXGI_FORMAT_BC3_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('A','T','I','1'))
+        {
+            return DXGI_FORMAT_BC4_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('A','T','I','2'))
+        {
+            return DXGI_FORMAT_BC5_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('B','C','4','U'))
+        {
+            return DXGI_FORMAT_BC4_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('B','C','4','S'))
+        {
+            return DXGI_FORMAT_BC4_SNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('B','C','5','U'))
+        {
+            return DXGI_FORMAT_BC5_UNORM;
+        }
+        if (pf.FourCC == cgFourCC_le('B','C','5','S'))
+        {
+            return DXGI_FORMAT_BC5_SNORM;
+        }
+        switch (pf.FourCC)
+        {
+            case 36: // D3DFMT_A16B16G16R16
+                return DXGI_FORMAT_R16G16B16A16_UNORM;
+
+            case 110: // D3DFMT_Q16W16V16U16
+                return DXGI_FORMAT_R16G16B16A16_SNORM;
+
+            case 111: // D3DFMT_R16F
+                return DXGI_FORMAT_R16_FLOAT;
+
+            case 112: // D3DFMT_G16R16F
+                return DXGI_FORMAT_R16G16_FLOAT;
+
+            case 113: // D3DFMT_A16B16G16R16F
+                return DXGI_FORMAT_R16G16B16A16_FLOAT;
+
+            case 114: // D3DFMT_R32F
+                return DXGI_FORMAT_R32_FLOAT;
+
+            case 115: // D3DFMT_G32R32F
+                return DXGI_FORMAT_R32G32_FLOAT;
+
+            case 116: // D3DFMT_A32B32G32R32F
+                return DXGI_FORMAT_R32G32B32A32_FLOAT;
+
+            default:
+                break;
+        }
+        return DXGI_FORMAT_UNKNOWN;
+    }
+    if (pf.Flags & DDPF_RGB)
+    {
+        switch (pf.RGBBitCount)
+        {
+            case 32:
+                {
+                    if (ISBITMASK(0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000))
+                    {
+                        return DXGI_FORMAT_R8G8B8A8_UNORM;
+                    }
+                    if (ISBITMASK(0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000))
+                    {
+                        return DXGI_FORMAT_B8G8R8A8_UNORM;
+                    }
+                    if (ISBITMASK(0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000))
+                    {
+                        return DXGI_FORMAT_B8G8R8X8_UNORM;
+                    }
+
+                    // No DXGI format maps to ISBITMASK(0x000000ff, 0x0000ff00, 0x00ff0000, 0x00000000) aka D3DFMT_X8B8G8R8
+                    // Note that many common DDS reader/writers (including D3DX) swap the the RED/BLUE masks for 10:10:10:2
+                    // formats. We assumme below that the 'backwards' header mask is being used since it is most likely
+                    // written by D3DX. The more robust solution is to use the 'DX10' header extension and specify the
+                    // DXGI_FORMAT_R10G10B10A2_UNORM format directly.
+
+                    // For 'correct' writers, this should be 0x000003ff, 0x000ffc00, 0x3ff00000 for RGB data.
+                    if (ISBITMASK(0x3ff00000, 0x000ffc00, 0x000003ff, 0xc0000000))
+                    {
+                        return DXGI_FORMAT_R10G10B10A2_UNORM;
+                    }
+                    // No DXGI format maps to ISBITMASK(0x000003ff, 0x000ffc00, 0x3ff00000, 0xc0000000) aka D3DFMT_A2R10G10B10.
+                    if (ISBITMASK(0x0000ffff, 0xffff0000, 0x00000000, 0x00000000))
+                    {
+                        return DXGI_FORMAT_R16G16_UNORM;
+                    }
+                    if (ISBITMASK(0xffffffff, 0x00000000, 0x00000000, 0x00000000))
+                    {
+                        // Only 32-bit color channel format in D3D9 was R32F
+                        return DXGI_FORMAT_R32_FLOAT; // D3DX writes this out as a FourCC of 114.
+                    }
+                }
+                break;
+
+            case 24:
+                // No 24bpp DXGI formats aka D3DFMT_R8G8B8
+                break;
+
+            case 16:
+                {
+                    if (ISBITMASK(0x7c00, 0x03e0, 0x001f, 0x8000))
+                    {
+                        return DXGI_FORMAT_B5G5R5A1_UNORM;
+                    }
+                    if (ISBITMASK(0xf800, 0x07e0, 0x001f, 0x0000))
+                    {
+                        return DXGI_FORMAT_B5G6R5_UNORM;
+                    }
+                    // No DXGI format maps to ISBITMASK(0x7c00, 0x03e0, 0x001f, 0x0000) aka D3DFMT_X1R5G5B5.
+                    if (ISBITMASK(0x0f00, 0x00f0, 0x000f, 0xf000))
+                    {
+                        return DXGI_FORMAT_B4G4R4A4_UNORM;
+                    }
+                    // No DXGI format maps to ISBITMASK(0x0f00, 0x00f0, 0x000f, 0x0000) aka D3DFMT_X4R4G4B4.
+                    // No 3:3:2, 3:3:2:8, or paletted DXGI formats aka D3DFMT_A8R3G3B2, D3DFMT_R3G3B2, D3DFMT_P8, D3DFMT_A8P8, etc.
+                }
+                break;
+        }
+    }
+    if (pf.Flags & DDPF_ALPHA)
+    {
+        if (pf.RGBBitCount == 8)
+        {
+            return DXGI_FORMAT_A8_UNORM;
+        }
+    }
+    if (pf.Flags & DDPF_LUMINANCE)
+    {
+        if (pf.RGBBitCount == 8)
+        {
+            if (ISBITMASK(0x000000ff, 0x00000000, 0x00000000, 0x00000000))
+            {
+                // D3DX10/11 writes this out as DX10 extension.
+                return DXGI_FORMAT_R8_UNORM;
+            }
+
+            // No DXGI format maps to ISBITMASK(0x0f, 0x00, 0x00, 0xf0) aka D3DFMT_A4L4
+        }
+        if (pf.RGBBitCount == 16)
+        {
+            if (ISBITMASK(0x0000ffff, 0x00000000, 0x00000000, 0x00000000))
+            {
+                // D3DX10/11 writes this out as DX10 extension.
+                return DXGI_FORMAT_R16_UNORM;
+            }
+            if (ISBITMASK(0x000000ff, 0x00000000, 0x00000000, 0x0000ff00))
+            {
+                // D3DX10/11 writes this out as DX10 extension
+                return DXGI_FORMAT_R8G8_UNORM;
+            }
+        }
+    }
+    #undef ISBITMASK
+    return DXGI_FORMAT_UNKNOWN;
+}
+
+/// @summary Given a baseline DDS header, generates a corresponding DX10 extended header.
+/// @param dx10 The DX10 extended DDS header to populate.
+/// @param header base DDS header describing the image.
+library_function void
+cgMakeDx10HeaderDDS
+(
+    dds_header_dxt10_t       *dx10,
+    dds_header_t       const *header
+)
+{
+    dx10->Format    = cgPixelFormatForDDS(header, NULL);
+    dx10->Dimension = D3D11_RESOURCE_DIMENSION_TEXTURE1D;
+    dx10->Flags     = 0; // determined below
+    dx10->ArraySize =(uint32_t) cgImageArrayCountDDS(header, NULL);
+    dx10->Flags2    = DDS_ALPHA_MODE_UNKNOWN;
+
+    // determine a correct resource dimension:
+    if (cgIsCubemapImageDDS(header, NULL) && dx10->ArraySize == 6)
+    {   // DX10+ cubemaps must specify all six faces.
+        dx10->Dimension = D3D11_RESOURCE_DIMENSION_TEXTURE2D;
+        dx10->Flags    |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+    }
+    else if (cgIsVolumeImageDDS(header, NULL))
+    {
+        dx10->Dimension = D3D11_RESOURCE_DIMENSION_TEXTURE3D;
+    }
+    else if ((header->Flags & DDSD_WIDTH ) != 0 && header->Width  > 1 && 
+             (header->Flags & DDSD_HEIGHT) != 0 && header->Height > 1)
+    {
+        dx10->Dimension = D3D11_RESOURCE_DIMENSION_TEXTURE2D;
+    }
 }
 
 /// @summary Registers a compute pipeline dispatch function.

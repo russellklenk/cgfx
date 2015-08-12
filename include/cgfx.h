@@ -147,8 +147,7 @@ typedef cg_handle_t  (CG_API *cgCreateDataBuffer_fn            )(uintptr_t, cg_h
 typedef int          (CG_API *cgGetDataBufferInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
 typedef int          (CG_API *cgUnmapDataBuffer_fn             )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
-typedef cg_handle_t  (CG_API *cgCreateImage2D_fn               )(uintptr_t, cg_handle_t, size_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
-typedef cg_handle_t  (CG_API *cgCreateImage3D_fn               )(uintptr_t, cg_handle_t, size_t, size_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
+typedef cg_handle_t  (CG_API *cgCreateImage_fn                 )(uintptr_t, cg_handle_t, size_t, size_t, size_t, size_t, size_t, uint32_t, uint32_t, uint32_t, uint32_t, int, int, int &);
 typedef int          (CG_API *cgGetImageInfo_fn                )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef void*        (CG_API *cgMapImageRegion_fn              )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], uint32_t, size_t &, size_t &, int &);
 typedef int          (CG_API *cgUnmapImageRegion_fn            )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
@@ -575,9 +574,11 @@ enum cg_image_info_param_e : int
     CG_IMAGE_HEAP_FLAGS                =  2,           /// Retrieve the cg_heap_flags_e of the heap from which the image was allocated. Data is uint32_t.
     CG_IMAGE_ALLOCATED_SIZE            =  3,           /// Retrieve the number of bytes allocated for the image. Data is size_t.
     CG_IMAGE_DIMENSIONS                =  4,           /// Retrieve the padded image dimensions in pixels (width, height) and slices (depth). Data is size_t[3].
-    CG_IMAGE_PIXEL_FORMAT              =  5,           /// Retrieve the dxgi_format_e defining the storage format of the pixel data. Data is uint32_t.
-    CG_IMAGE_DDS_HEADER                =  6,           /// Retrieve the dds_header_t specifying the DDS file header for the image. Data is dds_header_t.
-    CG_IMAGE_DDS_HEADER_DX10           =  7,           /// Retrieve the dds_header_dxt10_t specifying the extended DDS file header for the image. Data is dds_header_dxt10_t.
+    CG_IMAGE_ARRAY_SIZE                =  5,           /// Retrieve the number of elements in an image array. Non-array images return 1. Data is size_t.
+    CG_IMAGE_MIPMAP_LEVELS             =  6,           /// Retrieve the number of mipmap levels defined for each slice of the image. Images without mipmaps return 1. Data is size_t.
+    CG_IMAGE_PIXEL_FORMAT              =  7,           /// Retrieve the dxgi_format_e defining the storage format of the pixel data. Data is uint32_t.
+    CG_IMAGE_DDS_HEADER                =  8,           /// Retrieve the dds_header_t specifying the DDS file header for the image. Data is dds_header_t.
+    CG_IMAGE_DDS_HEADER_DX10           =  9,           /// Retrieve the dds_header_dxt10_t specifying the extended DDS file header for the image. Data is dds_header_dxt10_t.
 };
 
 /// @summary Define the recognized display orientation values.
@@ -1462,28 +1463,16 @@ cgUnmapDataBuffer                                   /// Unmap a portion of a dat
 );
 
 cg_handle_t
-cgCreateImage2D                                     /// Create a new 2D image object.
+cgCreateImage                                       /// Create a new image object.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   exec_group,       /// The handle of the execution group defining the devices that will operate on the buffer.
     size_t                        pixel_width,      /// The unpadded width of the image, in pixels.
     size_t                        pixel_height,     /// The unpadded height of the image, in pixels.
-    uint32_t                      kernel_types,     /// One or more of cg_memory_object_kernel_e specifying the type(s) of kernels requiring access to the image.
-    uint32_t                      kernel_access,    /// One or more of cg_memory_object_access_e specifying how kernels will access the memory.
-    uint32_t                      host_access,      /// One or more of cg_memory_object_access_e specifying how the host will access the memory.
-    int                           placement_hint,   /// One of cg_memory_placement_e specifying the placement preference for the memory.
-    int                           frequency_hint,   /// One of cg_memory_update_frequency_e specifying how often the memory contents will be updated.
-    int                          &result            /// On return, set to CG_SUCCESS or another result code.
-);
-
-cg_handle_t
-cgCreateImage3D                                     /// Create a new 3D image object.
-(
-    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   exec_group,       /// The handle of the execution group defining the devices that will operate on the buffer.
-    size_t                        pixel_width,      /// The unpadded width of the image, in pixels.
-    size_t                        pixel_height,     /// The unpadded height of the image, in pixels.
-    size_t                        slice_count,      /// The number of 2D slices of image data, each pixel_width * pixel_height.
+    size_t                        slice_count,      /// The number of slices in the image. For 1D and 2D images, specify 1.
+    size_t                        array_count,      /// The number of elements in the image array. For non-array images, specify 1.
+    size_t                        level_count,      /// The number of mipmap levels. For no mipmaps, specify 1. For the maximum number of mipmap levels, specify 0.
+    uint32_t                      pixel_format,     /// One of dxgi_format_e or DXGI_FORMAT specifying the underlying pixel format.
     uint32_t                      kernel_types,     /// One or more of cg_memory_object_kernel_e specifying the type(s) of kernels requiring access to the image.
     uint32_t                      kernel_access,    /// One or more of cg_memory_object_access_e specifying how kernels will access the memory.
     uint32_t                      host_access,      /// One or more of cg_memory_object_access_e specifying how the host will access the memory.
