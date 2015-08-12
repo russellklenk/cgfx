@@ -73,6 +73,8 @@
 typedef uint64_t cg_handle_t;
 
 /// @summary Forward declarations for types used in the function pointers below.
+struct dds_header_t;
+struct dds_header_dxt10_t;
 struct cg_application_info_t;
 struct cg_allocation_callbacks_t;
 struct cg_execution_group_t;
@@ -84,6 +86,7 @@ struct cg_kernel_code_t;
 struct cg_blend_state_t;
 struct cg_raster_state_t;
 struct cg_depth_stencil_state_t;
+struct cg_image_sampler_t;
 struct cg_graphics_pipeline_t;
 struct cg_compute_pipeline_t;
 
@@ -144,12 +147,34 @@ typedef cg_handle_t  (CG_API *cgCreateDataBuffer_fn            )(uintptr_t, cg_h
 typedef int          (CG_API *cgGetDataBufferInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
 typedef int          (CG_API *cgUnmapDataBuffer_fn             )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
+typedef cg_handle_t  (CG_API *cgCreateImage2D_fn               )(uintptr_t, cg_handle_t, size_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
+typedef cg_handle_t  (CG_API *cgCreateImage3D_fn               )(uintptr_t, cg_handle_t, size_t, size_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
+typedef int          (CG_API *cgGetImageInfo_fn                )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
+typedef void*        (CG_API *cgMapImageRegion_fn              )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], uint32_t, size_t &, size_t &, int &);
+typedef int          (CG_API *cgUnmapImageRegion_fn            )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
+typedef cg_handle_t  (CG_API *cgCreateImageSampler_fn          )(uintptr_t, cg_image_sampler_t const *, int &);
 typedef int          (CG_API *cgBlendStateInitNone_fn          )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAlpha_fn         )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAdditive_fn      )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitPremultiplied_fn )(cg_blend_state_t &);
 typedef int          (CG_API *cgRasterStateInitDefault_fn      )(cg_raster_state_t &);
 typedef int          (CG_API *cgDepthStencilStateInitDefault_fn)(cg_depth_stencil_state_t &);
+typedef bool         (CG_API *cgPixelFormatIsBlockCompressed_fn)(uint32_t);
+typedef bool         (CG_API *cgPixelFormatIsPacked_fn         )(uint32_t);
+typedef size_t       (CG_API *cgPixelFormatBitsPerPixel_fn     )(uint32_t);
+typedef size_t       (CG_API *cgPixelFormatBytesPerBlock_fn    )(uint32_t);
+typedef size_t       (CG_API *cgImageDimension_fn              )(uint32_t, size_t);
+typedef size_t       (CG_API *cgImageLevelDimension_fn         )(uint32_t, size_t, size_t);
+typedef size_t       (CG_API *cgImageRowPitch_fn               )(uint32_t, size_t);
+typedef size_t       (CG_API *cgImageSlicePitch_fn             )(uint32_t, size_t, size_t);
+typedef bool         (CG_API *cgIsCubemapImageDDS_fn           )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef bool         (CG_API *cgIsVolumeImageDDS_fn            )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef bool         (CG_API *cgIsArrayImageDDS_fn             )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef bool         (CG_API *cgHasMipmapsDDS_fn               )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef size_t       (CG_API *cgImageArrayCountDDS_fn          )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef size_t       (CG_API *cgImageLevelCountDDS_fn          )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef uint32_t     (CG_API *cgPixelFormatForDDS_fn           )(dds_header_t const *, dds_header_dxt10_t const *);
+typedef void         (CG_API *cgMakeDx10HeaderDDS_fn           )(dds_header_dxt10_t *, dds_header_t const *);
 
 /*//////////////////
 //   Data Types   //
@@ -781,14 +806,14 @@ enum cg_event_usage_e : uint32_t
 /// @summary The pre-defined compute pipeline identifiers. These pipelines are provided by the CGFX implementation.
 enum cg_compute_pipeline_id_e : uint16_t
 {
-    CG_COMPUTE_PIPELINE_TEST01         =       0 ,     /// See cgfx_test_cl.h
+    CG_COMPUTE_PIPELINE_TEST01         =       0 ,     /// See cgfx_kernel_compute.h
     CG_COMPUTE_PIPELINE_COUNT
 };
 
 /// @summary The pre-defined graphics pipeline identifiers. These pipelines are provided by the CGFX implementation.
 enum cg_graphics_pipeline_id_e : uint16_t
 {
-    CG_GRAPHICS_PIPELINE_TEST01        =       0 ,     /// See cgfx_test_gl.h
+    CG_GRAPHICS_PIPELINE_TEST01        =       0 ,     /// See cgfx_kernel_graphics.h
     CG_GRAPHICS_PIPELINE_COUNT
 };
 
