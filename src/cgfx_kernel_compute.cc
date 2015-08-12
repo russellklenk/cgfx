@@ -5,6 +5,9 @@
 /*////////////////////
 //   Preprocessor   //
 ////////////////////*/
+/// @summary Somewhere in our include chain, someone includes <dxgiformat.h>.
+/// Don't re-define the DXGI_FORMAT and D3D11 enumerations.
+#define CG_DXGI_ENUMS_DEFINED 1
 
 /*////////////////
 //   Includes   //

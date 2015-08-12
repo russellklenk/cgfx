@@ -59,6 +59,10 @@
 #endif
 #endif /* _MSC_VER */
 
+/// @summary Somewhere in our include chain, someone includes <dxgiformat.h>.
+/// Don't re-define the DXGI_FORMAT and D3D11 enumerations.
+#define CG_DXGI_ENUMS_DEFINED 1
+
 /// @summary Enable heap checking and leak tracing in debug builds (MSVC).
 #ifdef  _MSC_VER
 #ifdef  _DEBUG

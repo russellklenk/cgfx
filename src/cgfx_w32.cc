@@ -25,6 +25,10 @@
 #endif
 #endif /* _MSC_VER */
 
+/// @summary Somewhere in our include chain, someone includes <dxgiformat.h>.
+/// Don't re-define the DXGI_FORMAT and D3D11 enumerations.
+#define CG_DXGI_ENUMS_DEFINED 1
+
 /*////////////////
 //   Includes   //
 ////////////////*/
@@ -1019,6 +1023,50 @@ cgDeleteEvent
     memset(event, 0, sizeof(CG_EVENT));
 }
 
+/// @summary Frees all resources associated with an image object.
+/// @param ctx The CGFX context that owns the image object.
+/// @param image The image object to delete.
+internal_function void
+cgDeleteImage
+(
+    CG_CONTEXT *ctx, 
+    CG_IMAGE   *image
+)
+{   UNREFERENCED_PARAMETER(ctx);
+    if (image->ComputeImage != NULL)
+    {
+        clReleaseMemObject(image->ComputeImage);
+    }
+    if (image->GraphicsImage != 0)
+    {
+        CG_DISPLAY *display = image->AttachedDisplay;
+        glDeleteTextures(1, &image->GraphicsImage);
+    }
+    memset(image, 0, sizeof(CG_IMAGE));
+}
+
+/// @summary Frees all resources associated with an image sampler object.
+/// @param ctx The CGFX context that owns the sampler object.
+/// @param sampler The image sampler object to delete.
+internal_function void
+cgDeleteSampler
+(
+    CG_CONTEXT *ctx, 
+    CG_SAMPLER *sampler
+)
+{   UNREFERENCED_PARAMETER(ctx);
+    CG_DISPLAY *display = sampler->AttachedDisplay;
+    if (sampler->GraphicsSampler != 0 && GLEW_ARB_sampler_objects)
+    {
+        glDeleteSamplers(1, &sampler->GraphicsSampler);
+    }
+    if (sampler->ComputeSampler != NULL)
+    {
+        clReleaseSampler(sampler->ComputeSampler);
+    }
+    memset(sampler, 0, sizeof(CG_SAMPLER));
+}
+
 /// @summary Allocates memory for and initializes an empty CGFX context object.
 /// @param app_info Information about the application associated with the context.
 /// @param alloc_cb User-supplied host memory allocator callbacks, or NULL.
@@ -1055,6 +1103,8 @@ cgCreateContext
     cgObjectTableInit(&ctx->PipelineTable , CG_OBJECT_PIPELINE       , CG_PIPELINE_TABLE_ID);
     cgObjectTableInit(&ctx->BufferTable   , CG_OBJECT_BUFFER         , CG_BUFFER_TABLE_ID);
     cgObjectTableInit(&ctx->EventTable    , CG_OBJECT_EVENT          , CG_EVENT_TABLE_ID);
+    cgObjectTableInit(&ctx->ImageTable    , CG_OBJECT_IMAGE          , CG_IMAGE_TABLE_ID);
+    cgObjectTableInit(&ctx->SamplerTable  , CG_OBJECT_SAMPLER        , CG_SAMPLER_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -1071,6 +1121,18 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all sampler objects:
+    for (size_t i = 0, n = ctx->SamplerTable.ObjectCount; i < n; ++i)
+    {
+        CG_SAMPLER *obj = &ctx->SamplerTable.Objects[i];
+        cgDeleteSampler(ctx, obj);
+    }
+    // free all image objects:
+    for (size_t i = 0, n = ctx->ImageTable.ObjectCount; i < n; ++i)
+    {
+        CG_IMAGE *obj = &ctx->ImageTable.Objects[i];
+        cgDeleteImage(ctx, obj);
+    }
     // free all event objects:
     for (size_t i = 0, n = ctx->EventTable.ObjectCount; i < n; ++i)
     {
@@ -3042,7 +3104,7 @@ cgGlTextureTarget
 }
 
 /// @summary Given a value from the DXGI_FORMAT enumeration, determine the appropriate OpenGL format, base format and data type values. This is useful when loading texture data from a DDS container.
-/// @param dxgi A value of the DXGI_FORMAT enumeration (data::dxgi_format_e).
+/// @param dxgi A value of the DXGI_FORMAT or dxgi_format_e enumeration.
 /// @param out_internalformat On return, stores the corresponding OpenGL internal format.
 /// @param out_baseformat On return, stores the corresponding OpenGL base format (layout).
 /// @param out_datatype On return, stores the corresponding OpenGL data type.
@@ -6262,6 +6324,28 @@ cgDeleteObject
         }
         break;
 
+    case CG_OBJECT_IMAGE:
+        {
+            CG_IMAGE image;
+            if (cgObjectTableRemove(&ctx->ImageTable, object, image))
+            {
+                cgDeleteImage(ctx, &image);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
+    case CG_OBJECT_SAMPLER:
+        {
+            CG_SAMPLER sampler;
+            if (cgObjectTableRemove(&ctx->SamplerTable, object, sampler))
+            {
+                cgDeleteSampler(ctx, &sampler);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
     default:
         break;
     }
@@ -6720,7 +6804,7 @@ cgCreateKernel
                 GLsizei len = 0;
                 GLchar *buf = (GLchar*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
                 glGetShaderInfoLog(shader, log_size+1, &len, buf);
-                buf[len] = '\0';
+                buf[len]    = '\0';
                 OutputDebugString(_T("OpenGL shader compilation failed: \n"));
                 OutputDebugString(_T("**** Source Code: \n"));
                 OutputDebugStringA((char const*) code->Code);
@@ -6735,7 +6819,7 @@ cgCreateKernel
                 return CG_INVALID_HANDLE;
             }
 
-            // set the shader object handles for each attached display.
+            // save the shader object handle.
             kernel.GraphicsShader = shader;
         }
         break;
@@ -6751,7 +6835,7 @@ cgCreateKernel
 
             // OpenCL drivers support kernel program loading from source or binary.
             if (code->Flags & CG_KERNEL_FLAGS_SOURCE)
-            {   // compile the program for each OpenCL context.
+            {   // load the source code into the program object.
                 cl_int clres = CL_SUCCESS;
                 cl_program p = clCreateProgramWithSource(group->ComputeContext, 1, (char const**) &code->Code, &code->CodeSize, &clres);
                 if (p == NULL)
@@ -6767,6 +6851,8 @@ cgCreateKernel
                     cgDeleteKernel(ctx, &kernel);
                     return CG_INVALID_HANDLE;
                 }
+                // compile the program for each device attached to the context.
+                // TODO(rlk): support passing compiler options and defines.
                 if ((clres = clBuildProgram(p, group->DeviceCount, group->DeviceIds, NULL, NULL, NULL)) != CL_SUCCESS)
                 {
 #ifdef _DEBUG
@@ -6777,7 +6863,7 @@ cgCreateKernel
                         size_t len = 0;
                         char  *buf = (char*) cgAllocateHostMemory(&ctx->HostAllocator, log_size+1, 0, CG_ALLOCATION_TYPE_TEMP);
                         clGetProgramBuildInfo(p, group->DeviceIds[0], CL_PROGRAM_BUILD_LOG, log_size+1, buf, &len);
-                        buf[len] = '\0';
+                        buf[len]   = '\0';
                         OutputDebugString(_T("OpenCL program compilation failed: \n"));
                         OutputDebugString(_T("**** Source Code: \n"));
                         OutputDebugStringA((char const*) code->Code);
@@ -6796,18 +6882,21 @@ cgCreateKernel
                     case CL_INVALID_BUILD_OPTIONS : result = CG_INVALID_VALUE; break;
                     case CL_INVALID_OPERATION     : result = CG_INVALID_STATE; break;
                     case CL_COMPILER_NOT_AVAILABLE: result = CG_UNSUPPORTED;   break;
-                    case CL_BUILD_PROGRAM_FAILURE : result = CG_ERROR;         break;
+                    case CL_BUILD_PROGRAM_FAILURE : result = CG_COMPILE_FAILED;break;
                     case CL_OUT_OF_HOST_MEMORY    : result = CG_OUT_OF_MEMORY; break;
-                    default: result = CG_ERROR; break;
+                    default                       : result = CG_ERROR;         break;
                     }
                     cgDeleteKernel(ctx, &kernel);
                     return CG_INVALID_HANDLE;
                 }
+
+                // save the compute kernel handle.
                 kernel.ComputeProgram = p;
             }
             else
             {   // TODO(rlk): support loading of binaries.
                 // this requires having a list of devices per-context.
+                // also, the kernel code structure must store a pointer to the binary for each device.
                 cgDeleteKernel(ctx, &kernel);
                 result = CG_UNSUPPORTED;
                 return CG_INVALID_HANDLE;

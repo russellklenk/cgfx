@@ -126,6 +126,8 @@ struct CG_EXEC_GROUP;
 #define CG_PIPELINE_TABLE_ID                     (6)
 #define CG_BUFFER_TABLE_ID                       (7)
 #define CG_EVENT_TABLE_ID                        (8)
+#define CG_IMAGE_TABLE_ID                        (9)
+#define CG_SAMPLER_TABLE_ID                      (10)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -138,6 +140,8 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_PIPELINES                         (4096)
 #define CG_MAX_BUFFERS                           (16384)
 #define CG_MAX_EVENTS                            (32768)
+#define CG_MAX_IMAGES                            (16384)
+#define CG_MAX_SAMPLERS                          (4096)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -219,7 +223,7 @@ struct CG_EXEC_GROUP;
 #define CG_OPENGL_VERSION_MINOR                   5
 #define CG_OPENGL_VERSION_SUPPORTED               GLEW_VERSION_4_5
 #else
-#error  No constants defined for target OpenGL version in cgfx_w32.cc!
+#error  No constants defined for target OpenGL version in cgfx_w32_private.h!
 #endif
 
 /*////////////////////////////
@@ -640,6 +644,44 @@ struct CG_BUFFER
     GLenum                       GraphicsUsage;        /// The OpenGL buffer usage hints.
 };
 
+/// @summary Defines the data associated with an image object.
+struct CG_IMAGE
+{
+    uint32_t                     ObjectId;             /// The CGFX internal object identifier.
+    uint32_t                     KernelTypes;          /// One or more of cg_memory_object_kernel_e specifying the types of kernels that can access the image.
+    uint32_t                     KernelAccess;         /// One or more of cg_memory_object_access_e specifying how the kernel(s) will access the image.
+    uint32_t                     HostAccess;           /// One or more of cg_memory_object_access_e specifying how the host will access the image.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
+    CG_HEAP                     *SourceHeap;           /// The heap from which image memory is allocated.
+    cg_handle_t                  ExecutionGroup;       /// The handle of the execution group that owns the image.
+    cl_context                   ComputeContext;       /// The OpenCL context in which the object is allocated.
+    cl_mem                       ComputeImage;         /// The handle of the associated compute memory object, or NULL.
+    cl_mem_flags                 ComputeUsage;         /// The OpenCL memory object usage values.
+    size_t                       ImageWidth;           /// The width of the image, in pixels.
+    size_t                       ImageHeight;          /// The height of the image, in pixels.
+    size_t                       SliceCount;           /// The number of slices in the image. For 2D images, this value is 1.
+    size_t                       RowPitch;             /// The number of bytes allocated to each row in the image.
+    size_t                       SlicePitch;           /// The number of bytes allocated to each slice in the image.
+    GLuint                       GraphicsImage;        /// The name of the OpenGL image object, or 0.
+    GLenum                       InternalFormat;       /// The OpenGL internal format identifier.
+    GLenum                       BaseFormat;           /// The OpenGL base format identifier.
+    GLenum                       DataType;             /// The OpenGL data type identifier.
+    uint32_t                     DxgiFormat;           /// The DXGI pixel format identifier.
+};
+
+/// @summary Defines the data associated with an image sampler object.
+struct CG_SAMPLER
+{
+    uint32_t                     ObjectId;
+    GLuint                       GraphicsSampler;      /// If ARB_sampler_objects is available, the name of the sampler; otherwise, 0.
+    GLenum                       TextureTarget;        /// The texture target, for example GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
+    GLenum                       FilterMode;           /// The OpenGL magnification filter, either GL_LINEAR or GL_NEAREST.
+    GLenum                       AddressMode;          /// The OpenGL addressing mode for both the S (X) and T (Y) directions.
+    GLfloat                      BorderColor[4];       /// The constant border color value.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
+    cl_sampler                   ComputeSampler;       /// The OpenCL sampler object.
+};
+
 /// @summary Defines the data associated with an event object.
 struct CG_EVENT
 {
@@ -668,6 +710,8 @@ typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
 typedef CG_OBJECT_TABLE<CG_PIPELINE  , CG_MAX_PIPELINES  > CG_PIPELINE_TABLE;
 typedef CG_OBJECT_TABLE<CG_BUFFER    , CG_MAX_BUFFERS    > CG_BUFFER_TABLE;
 typedef CG_OBJECT_TABLE<CG_EVENT     , CG_MAX_EVENTS     > CG_EVENT_TABLE;
+typedef CG_OBJECT_TABLE<CG_IMAGE     , CG_MAX_IMAGES     > CG_IMAGE_TABLE;
+typedef CG_OBJECT_TABLE<CG_SAMPLER   , CG_MAX_SAMPLERS   > CG_SAMPLER_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -681,13 +725,15 @@ struct CG_CONTEXT
 
     CG_DEVICE_TABLE              DeviceTable;          /// The object table of all OpenCL 1.2-capable compute devices.
     CG_DISPLAY_TABLE             DisplayTable;         /// The object table of all OpenGL 3.2-capable display devices.
-    CG_QUEUE_TABLE               QueueTable;           /// The object table of all active command queues.
-    CG_CMD_BUFFER_TABLE          CmdBufferTable;       /// The object table of all active command buffers.
-    CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all active execution groups.
+    CG_QUEUE_TABLE               QueueTable;           /// The object table of all command queues.
+    CG_CMD_BUFFER_TABLE          CmdBufferTable;       /// The object table of all command buffers.
+    CG_EXEC_GROUP_TABLE          ExecGroupTable;       /// The object table of all execution groups.
     CG_KERNEL_TABLE              KernelTable;          /// The object table of all compiled kernels.
     CG_PIPELINE_TABLE            PipelineTable;        /// The object table of all compiled pipelines.
     CG_BUFFER_TABLE              BufferTable;          /// The object table of all data buffers.
     CG_EVENT_TABLE               EventTable;           /// The object table of all synchronization events.
+    CG_IMAGE_TABLE               ImageTable;           /// The object table of all image objects.
+    CG_SAMPLER_TABLE             SamplerTable;         /// The object table of all image sampler objects.
 };
 
 /*/////////////////
