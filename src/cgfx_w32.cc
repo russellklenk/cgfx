@@ -5049,6 +5049,30 @@ cgFreeExecutionGroupDeviceList
     cgFreeHostMemory(&ctx->HostAllocator, devices, num_devices * sizeof(cg_handle_t), 0, CG_ALLOCATION_TYPE_TEMP);
 }
 
+/// @summary Calculate the number of bytes allocated for an image on its associated heap.
+/// @param image The image to query. All image attributes (dimensions, format, etc.) must be set.
+/// @return The number of bytes allocated for image data storage on the image source heap.
+internal_function size_t
+cgCalculateImageAllocatedSize
+(
+    CG_IMAGE *image
+)
+{
+    size_t allocated_size = 0;
+    size_t nslice_or_item = image->ArrayCount > 1 ? image->ArrayCount : image->SliceCount;
+    for (size_t i = 0, n  = nslice_or_item; i < n; ++i)
+    {
+        for (size_t j = 0; j < image->LevelCount; ++j)
+        {
+            size_t  w = cgGlLevelDimension(image->PaddedWidth , j);
+            size_t  h = cgGlLevelDimension(image->PaddedHeight, j);
+            size_t ss = cgGlBytesPerSlice (image->InternalFormat, image->DataType, w, h, 4);
+            allocated_size += ss;
+        }
+    }
+    return align_up(allocated_size, image->SourceHeap->DeviceAlignment);
+}
+
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
@@ -6125,6 +6149,8 @@ cgCreateExecutionGroup
     // its unified memory capability set gets its own transfer queue.
     for (size_t i = 0; i < device_count; ++i)
     {   // create the command queue used for submitting compute dispatch operations.
+        // TODO(rlk): in OpenCL 2.0, clCreateCommandQueue is marked deprecated.
+        // it has been replaced by clCreateCommandQueueWithProperties.
         cl_int       cl_err = CL_SUCCESS;
         cl_device_id cl_dev = group.DeviceIds[i];
         cl_command_queue cq = NULL; // compute queue
@@ -6134,7 +6160,7 @@ cgCreateExecutionGroup
         CG_QUEUE    *cq_ref = NULL;
         CG_QUEUE    *tq_ref = NULL;
 
-        if ((cq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE, &cl_err)) == NULL)
+        if ((cq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &cl_err)) == NULL)
         {   // unable to create the command queue for some reason.
             switch (cl_err)
             {
@@ -6168,7 +6194,7 @@ cgCreateExecutionGroup
         // create the command queue used for submitting data transfer operations.
         if (group.DeviceList[i]->Capabilities.UnifiedMemory == CL_FALSE)
         {   // also create a transfer queue for the device.
-            if ((tq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE, &cl_err)) == NULL)
+            if ((tq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &cl_err)) == NULL)
             {
                 switch (cl_err)
                 {
@@ -7728,6 +7754,10 @@ cgCreateDataBuffer
         result = CG_NO_OPENGL;
         return CG_INVALID_HANDLE;
     }
+    if (host_access == CG_MEMORY_ACCESS_NONE)
+    {   // the host will not map the buffer, so it should be placed in device memory.
+        placement_hint = CG_MEMORY_PLACEMENT_DEVICE;
+    }
 
     if (kernel_types & CG_MEMORY_OBJECT_KERNEL_GRAPHICS)
     {   // the buffer must be created in OpenGL first. the OpenGL driver 
@@ -7879,6 +7909,10 @@ cgCreateDataBuffer
             // there are limitations on buffer size with pinned memory.
             cl_flags |= CL_MEM_ALLOC_HOST_PTR;
         }
+        if (host_access == CG_MEMORY_ACCESS_NONE)
+        {   // the host promises not to map the memory. attempts to do so will fail.
+            cl_flags |= CL_MEM_HOST_NO_ACCESS;
+        }
         if ((clmem = clCreateBuffer(group->ComputeContext, cl_flags, buffer_size, NULL, &clres)) == NULL)
         {
             switch (clres)
@@ -8028,6 +8062,7 @@ cgGetDataBufferInfo
 /// @param amount The number of bytes to map into the host address space.
 /// @param flags A combination of cg_memory_access_e specifying mapping options. CG_MEMORY_ACCESS_NONE is not valid.
 /// @param result On return, set to CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_OUT_OF_MEMORY, CG_BAD_CLCONTEXT or CG_ERROR.
+/// @return A pointer to host-accessible memory representing the buffer contents, or NULL.
 library_function void*
 cgMapDataBuffer
 (
@@ -8200,6 +8235,7 @@ cgUnmapDataBuffer
                 if ((event.GraphicsSync = glCreateSyncFromCLeventARB(queue->ComputeContext, evt_relgl, 0)) != NULL)
                     event.EventUsage   |= CG_EVENT_USAGE_GRAPHICS;
             }
+            else clReleaseEvent(evt_relgl);
         }
         if (event_handle != NULL)
         {   // return the event object handle to the caller.
@@ -8248,7 +8284,7 @@ cgCreateImage
     int          frequency_hint,
     int         &result
 )
-{
+{   UNREFERENCED_PARAMETER(frequency_hint);
     CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
     CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
     if (group == NULL)
@@ -8275,6 +8311,10 @@ cgCreateImage
     {   // the pixel format must be specified.
         result = CG_INVALID_VALUE;
         return CG_INVALID_HANDLE;
+    }
+    if (host_access  == CG_MEMORY_ACCESS_NONE)
+    {   // images with no need for host access are always placed in device memory.
+        placement_hint = CG_MEMORY_PLACEMENT_DEVICE;
     }
 
     size_t max_mip_levels = cgGlLevelCount(pixel_width, pixel_height, slice_count, level_count);
@@ -8311,7 +8351,6 @@ cgCreateImage
     {   // the texture must be created in OpenGL first.
         CG_DISPLAY *display = group->AttachedDisplay;
         GLuint      texture = 0;
-        GLenum      glerror = 0;
         size_t      nslices = 0;
 
         if (array_count > 1)
@@ -8453,6 +8492,10 @@ cgCreateImage
             // there are limitations on buffer size with pinned memory.
             cl_flags |= CL_MEM_ALLOC_HOST_PTR;
         }
+        if (host_access == CG_MEMORY_ACCESS_NONE)
+        {   // the host promises not to map the memory. attempts to do so will fail.
+            cl_flags |= CL_MEM_HOST_NO_ACCESS;
+        }
         if ((clmem = clCreateImage(group->ComputeContext, cl_flags, &cl_format, &cl_desc, NULL, &clres)) == NULL)
         {
             switch (clres)
@@ -8523,12 +8566,12 @@ cgCreateImage
 library_function int
 cgGetImageInfo
 (
-    uintptr_t                     context,
-    cg_handle_t                   image_handle,
-    int                           param,
-    void                         *buffer,
-    size_t                        buffer_size,
-    size_t                       *bytes_needed
+    uintptr_t   context,
+    cg_handle_t image_handle,
+    int         param,
+    void       *buffer,
+    size_t      buffer_size,
+    size_t     *bytes_needed
 )
 {
     CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
@@ -8589,19 +8632,7 @@ cgGetImageInfo
 
     case CG_IMAGE_ALLOCATED_SIZE:
         {   BUFFER_CHECK_TYPE(size_t);
-            size_t allocated_size = 0;
-            size_t nslice_or_item = object->ArrayCount > 1 ? object->ArrayCount : object->SliceCount;
-            for (size_t i = 0, n  = nslice_or_item;  i < n; ++i)
-            {
-                for (size_t j = 0; j < object->LevelCount; ++j)
-                {
-                    size_t  w = cgGlLevelDimension(object->PaddedWidth , j);
-                    size_t  h = cgGlLevelDimension(object->PaddedHeight, j);
-                    size_t ss = cgGlBytesPerSlice (object->InternalFormat, object->DataType, w, h, 4);
-                    allocated_size += ss;
-                }
-            }
-            BUFFER_SET_SCALAR(size_t, align_up(allocated_size, object->SourceHeap->DeviceAlignment));
+            BUFFER_SET_SCALAR(size_t, cgCalculateImageAllocatedSize(object));
         }
         return CG_SUCCESS;
 
@@ -8652,6 +8683,483 @@ cgGetImageInfo
 #undef  BUFFER_SET_SCALAR
 #undef  BUFFER_CHECK_SIZE
 #undef  BUFFER_CHECK_TYPE
+}
+
+/// @summary Map a region of an image object into the host address space. If the host is reading the data, a data transfer from device to host may be performed. Map operations always block until the required data is available.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param queue_handle The queue on which the transfer will be performed.
+/// @param image_handle The handle of the image object to map.
+/// @param xyz The x-coordinate, y-coordinate and slice or image index of the upper-left corner of the region to map.
+/// @param whd The width (in pixels), height (in pixels) and depth (in slices or images) of the region to map.
+/// @param flags A combination of cg_memory_access_e specifying mapping options. CG_MEMORY_ACCESS_NONE is not valid.
+/// @param row_pitch On return, specifies the number of bytes between successive rows in the mapped region.
+/// @param slice_pitch On return, specifies the number of bytes between successive slices in the mapped region.
+/// @param result On return, set to CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_OUT_OF_MEMORY, CG_BAD_CLCONTEXT or CG_ERROR.
+/// @return A host-accessible pointer to the specified region of the image, or NULL.
+library_function void*
+cgMapImageRegion
+(
+    uintptr_t   context,
+    cg_handle_t queue_handle,
+    cg_handle_t image_handle,
+    size_t      xyz[3], 
+    size_t      whd[3],
+    uint32_t    flags,
+    size_t     &row_pitch, 
+    size_t     &slice_pitch,
+    int        &result
+)
+{
+    CG_CONTEXT *ctx   = (CG_CONTEXT*) context;
+    CG_QUEUE   *queue = (CG_QUEUE  *) cgObjectTableGet(&ctx->QueueTable, queue_handle);
+    CG_IMAGE   *obj   = (CG_IMAGE  *) cgObjectTableGet(&ctx->ImageTable, image_handle);
+    if (obj == NULL || queue == NULL || flags == CG_MEMORY_ACCESS_NONE)
+    {   // one or more of the supplied handles is invalid.
+        result = CG_INVALID_VALUE;
+        return NULL;
+    }
+    // mapping the buffer for read access performs a blocking transfer to the host.
+    // mapping the buffer for write access returns a pointer to pinned memory.
+    if (queue->QueueType == CG_QUEUE_TYPE_COMPUTE || 
+        queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
+    {   // map the buffer using OpenCL.
+        cl_map_flags map_flags = 0;
+        cl_int       clres     = CL_SUCCESS;
+        void        *mapped    = NULL;
+
+        if (flags & CG_MEMORY_ACCESS_READ)
+            map_flags |= CL_MAP_READ;
+        if (flags & CG_MEMORY_ACCESS_WRITE)
+            map_flags |= CL_MAP_WRITE;
+        if ((flags & CG_MEMORY_ACCESS_READ) == 0 && (flags & CG_MEMORY_ACCESS_PRESERVE) == 0)
+            map_flags  = CL_MAP_WRITE_INVALIDATE_REGION;
+
+        // fix up the values in xyz and whd to match what OpenCL expects.
+        switch (obj->DefaultTarget)
+        {
+        case GL_TEXTURE_1D:
+            xyz[1] = xyz[2] = 0;
+            whd[1] = whd[2] = 1;
+            break;
+        case GL_TEXTURE_1D_ARRAY:
+            xyz[1] = xyz[2]; // set xyz[1] to the array index
+            xyz[2] = 0;      // OpenCL expects xyz[2] to be 0
+            whd[2] = 1;      // OpenCL expects whd[2] to be 1
+            break;
+        case GL_TEXTURE_2D:
+            xyz[2] = 0;      // OpenCL expects xyz[2] to be 0
+            whd[2] = 1;      // OpenCL expects whd[2] to be 1
+            break;
+        default:
+            break;
+        }
+
+        if (obj->GraphicsImage != 0)
+        {   // the buffer first needs to be acquired by OpenCL for use.
+            if ((clres = clEnqueueAcquireGLObjects(queue->CommandQueue, 1, &obj->ComputeImage, 0, NULL, NULL)) != CL_SUCCESS)
+            {
+                switch (clres)
+                {
+                case CL_INVALID_VALUE          : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_MEM_OBJECT     : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_COMMAND_QUEUE  : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_CONTEXT        : result = CG_BAD_CLCONTEXT; break;
+                case CL_INVALID_GL_OBJECT      : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+                case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+                case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+                default                        : result = CG_ERROR;         break;
+                }
+                return NULL;
+            }
+        }
+
+        if ((mapped = clEnqueueMapImage(queue->CommandQueue, obj->ComputeImage, CL_TRUE, map_flags, xyz, whd, &row_pitch, &slice_pitch, 0, NULL, NULL, &clres)) == NULL)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_COMMAND_QUEUE                    : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_CONTEXT                          : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_MEM_OBJECT                       : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_VALUE                            : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_EVENT_WAIT_LIST                  : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_IMAGE_SIZE                       : result = CG_INVALID_VALUE; break;
+            case CL_MAP_FAILURE                              : result = CG_ERROR;         break;
+            case CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST: result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE            : result = CG_OUT_OF_MEMORY; break;
+            case CL_INVALID_OPERATION                        : result = CG_INVALID_STATE; break;
+            case CL_OUT_OF_RESOURCES                         : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY                       : result = CG_OUT_OF_MEMORY; break;
+            default                                          : result = CG_ERROR;         break;
+            }
+            return NULL;
+        }
+        result = CG_SUCCESS;
+        return mapped;
+    }
+    else
+    {   // the queue type is not valid.
+        result = CG_INVALID_VALUE;
+        return NULL;
+    }
+}
+
+/// @summary Unmap a region of a mapped image. If the host was writing data to the image, a data transfer from host to device may be performed. Unmap operations are always non-blocking.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param queue_handle The queue on which the transfer will be performed. This must be the same queue that was supplied to cgMapDataBuffer.
+/// @param image_handle The handle of the mapped image object.
+/// @param mapped_region The pointer returned by a call to cgMapImageRegion.
+/// @param event_handle On return, if non-NULL, stores a handle to an event object that can be used to block the host or device until the data transfer has completed.
+library_function int
+cgUnmapImageRegion
+(
+    uintptr_t    context,
+    cg_handle_t  queue_handle,
+    cg_handle_t  image_handle,
+    void        *mapped_region,
+    cg_handle_t *event_handle
+)
+{
+    CG_CONTEXT *ctx   = (CG_CONTEXT*) context;
+    CG_QUEUE   *queue = (CG_QUEUE  *) cgObjectTableGet(&ctx->QueueTable, queue_handle);
+    CG_IMAGE   *obj   = (CG_IMAGE  *) cgObjectTableGet(&ctx->ImageTable, image_handle);
+    int        result =  CG_SUCCESS;
+    if (obj == NULL || queue == NULL)
+    {   // one or more of the supplied handles is invalid.
+        if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
+        return CG_INVALID_VALUE;
+    }
+
+    if (queue->QueueType == CG_QUEUE_TYPE_COMPUTE || 
+        queue->QueueType == CG_QUEUE_TYPE_TRANSFER)
+    {   
+        cl_int        clres = CL_SUCCESS;
+        cl_event  evt_unmap = NULL;
+        cl_event  evt_relgl = NULL;
+        CG_EVENT  event;
+
+        // fill out basic event object properties.
+        event.EventUsage      = CG_EVENT_USAGE_COMPUTE;
+        event.ComputeSync     = NULL;
+        event.GraphicsSync    = NULL;
+        event.AttachedDisplay = queue->AttachedDisplay;
+        
+        // unmap the image region from the host address space. if the region was mapped for write 
+        // access, a data transfer from host to device may be performed (hopefully asynchronously.)
+        if ((clres = clEnqueueUnmapMemObject(queue->CommandQueue, obj->ComputeImage, mapped_region, 0, NULL, &evt_unmap)) != CL_SUCCESS)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_VALUE          : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_MEM_OBJECT     : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_COMMAND_QUEUE  : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_CONTEXT        : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+            case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+            default                        : result = CG_ERROR;         break;
+            }
+        }
+
+        // set the compute event handle to the unmap completion event.
+        event.ComputeSync = evt_unmap;
+
+        if (clres == CL_SUCCESS && obj->GraphicsImage != 0)
+        {   // release the buffer so it can be used by OpenGL again. this must wait for the data 
+            // transfer, possibly performed by the unmap operation, to complete. also, to ensure
+            // the data is visible in the rendering context, it is necessary to bind or re-bind 
+            // the buffer object from the rendering thread.
+            CG_DISPLAY  *display = queue->AttachedDisplay;
+            if ((clres = clEnqueueReleaseGLObjects(queue->CommandQueue, 1, &obj->ComputeImage, 1, &evt_unmap, &evt_relgl)) != CL_SUCCESS)
+            {
+                switch (clres)
+                {
+                case CL_INVALID_VALUE          : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_MEM_OBJECT     : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_COMMAND_QUEUE  : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_CONTEXT        : result = CG_BAD_CLCONTEXT; break;
+                case CL_INVALID_GL_OBJECT      : result = CG_INVALID_VALUE; break;
+                case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+                case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+                case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+                default                        : result = CG_ERROR;         break;
+                }
+            }
+            else if (GLEW_ARB_cl_event)
+            {   // setup the graphics sync object.
+                if ((event.GraphicsSync = glCreateSyncFromCLeventARB(queue->ComputeContext, evt_relgl, 0)) != NULL)
+                    event.EventUsage   |= CG_EVENT_USAGE_GRAPHICS;
+            }
+            else clReleaseEvent(evt_relgl);
+        }
+        if (event_handle != NULL)
+        {   // return the event object handle to the caller.
+            *event_handle = cgObjectTableAdd(&ctx->EventTable, event);
+        }
+        return result;
+    }
+    else
+    {   // the queue type is not valid.
+        if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
+        return CG_INVALID_VALUE;
+    }
+}
+
+/// @summary Creates a new image sampler object.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The handle of the execution group defining devices that will access the sampler.
+/// @param create_info Attributes specifying the image sampler configuration.
+/// @param result On return, set to CG_SUCCESS or ...
+/// @return A handle to the new image sampler object, or CG_INVALID_HANDLE.
+library_function cg_handle_t
+cgCreateImageSampler
+(
+    uintptr_t                 context, 
+    uintptr_t                 exec_group, 
+    cg_image_sampler_t const *create_info, 
+    int                      &result
+)
+{
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // invalid execution group handle.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    CG_DISPLAY        *display     = group->AttachedDisplay;
+    GLenum             gl_target   = GL_NONE;
+    GLenum             gl_minfilter= GL_NEAREST;
+    GLenum             gl_magfilter= GL_LINEAR;
+    GLenum             gl_address  = GL_CLAMP_TO_EDGE;
+    cl_bool            cl_norm     = CL_TRUE;
+    cl_filter_mode     cl_filter   = CL_FILTER_LINEAR;
+    cl_addressing_mode cl_address  = CL_ADDRESS_CLAMP_TO_EDGE;
+    uint32_t           flags       = create_info->Flags;
+    CG_SAMPLER         sampler;
+
+    if (flags == CG_IMAGE_SAMPLER_FLAGS_NONE)
+    {   // use the default configuration, compatible with both OpenCL and OpenGL.
+        flags  = CG_IMAGE_SAMPLER_FLAG_COMPUTE | CG_IMAGE_SAMPLER_FLAG_GRAPHICS;
+    }
+
+    // figure out the OpenGL and OpenCL enum values.
+    if ((create_info->Flags & CG_IMAGE_SAMPLER_FLAG_GRAPHICS) == 0)
+    {   // the sampler will be used for compute only.
+        switch (create_info->Type)
+        {
+        case CG_IMAGE_SAMPLER_1D:
+            gl_target = GL_TEXTURE_1D;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_1D_ARRAY:
+            gl_target = GL_TEXTURE_1D_ARRAY;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_2D:
+            gl_target = GL_TEXTURE_2D;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_2D_RECT:
+            gl_target = GL_TEXTURE_RECTANGLE;
+            cl_norm   = CL_FALSE;
+            break;
+        case CG_IMAGE_SAMPLER_2D_ARRAY:
+            gl_target = GL_TEXTURE_2D_ARRAY;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_3D:
+            gl_target = GL_TEXTURE_3D;
+            cl_norm   = CL_TRUE;
+            break;
+        default:
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+    }
+    else
+    {   // the sampler will be used for graphics, so enable support for additional sampler types.
+        switch (create_info->Type)
+        {
+        case CG_IMAGE_SAMPLER_1D:
+            gl_target = GL_TEXTURE_1D;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_1D_ARRAY:
+            gl_target = GL_TEXTURE_1D_ARRAY;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_2D:
+            gl_target = GL_TEXTURE_2D;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_2D_RECT:
+            gl_target = GL_TEXTURE_RECTANGLE;
+            cl_norm   = CL_FALSE;
+            break;
+        case CG_IMAGE_SAMPLER_2D_ARRAY:
+            gl_target = GL_TEXTURE_2D_ARRAY;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_3D:
+            gl_target = GL_TEXTURE_3D;
+            cl_norm   = CL_TRUE;
+            break;
+        case CG_IMAGE_SAMPLER_CUBEMAP:
+            gl_target = GL_TEXTURE_CUBE_MAP;
+            cl_norm   = CL_TRUE;
+            break;
+#if CG_OPENGL_VERSION >= CG_OPENGL_VERSION_40
+        case CG_IMAGE_SAMPLER_CUBEMAP_ARRAY:
+            gl_target = GL_TEXTURE_CUBE_MAP_ARRAY;
+            cl_norm   = CL_TRUE;
+            break;
+#else
+        case CG_IMAGE_SAMPLER_CUBEMAP_ARRAY:
+            if (GLEW_ARB_texture_cube_map_array)
+            {
+                gl_target = GL_TEXTURE_CUBE_MAP_ARRAY_ARB;
+                cl_norm   = CL_TRUE;
+            }
+            else
+            {   // the required extension is not supported by the current context.
+                result = CG_INVALID_VALUE;
+                return CG_INVALID_HANDLE;
+            }
+            break;
+#endif
+        case CG_IMAGE_SAMPLER_BUFFER:
+            gl_target = GL_TEXTURE_BUFFER;
+            cl_norm   = CL_FALSE;
+            break;
+        default:
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+    }
+
+    switch (create_info->FilterMode)
+    {
+    case CG_IMAGE_FILTER_NEAREST:
+        if (create_info->Flags & CG_IMAGE_SAMPLER_FLAG_MIPMAPPED)
+        {
+            gl_minfilter = GL_NEAREST_MIPMAP_LINEAR;
+            gl_magfilter = GL_NEAREST;
+            cl_filter    = CL_FILTER_NEAREST;
+        }
+        else
+        {
+            gl_minfilter = GL_NEAREST;
+            gl_magfilter = GL_NEAREST;
+            cl_filter    = CL_FILTER_NEAREST;
+        }
+        break;
+    case CG_IMAGE_FILTER_LINEAR:
+        if (create_info->Flags & CG_IMAGE_SAMPLER_FLAG_MIPMAPPED)
+        {
+            gl_minfilter = GL_NEAREST_MIPMAP_LINEAR;
+            gl_magfilter = GL_LINEAR_MIPMAP_LINEAR;
+            cl_filter    = CL_FILTER_LINEAR;
+        }
+        else
+        {
+            gl_minfilter = GL_NEAREST;
+            gl_magfilter = GL_LINEAR;
+            cl_filter    = CL_FILTER_LINEAR;
+        }
+        break;
+    default:
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    switch (create_info->AddressMode)
+    {
+    case CG_IMAGE_ADDRESS_UNDEFINED:
+        gl_address = GL_CLAMP;
+        cl_address = CL_ADDRESS_NONE;
+        break;
+    case CG_IMAGE_ADDRESS_BORDER_COLOR:
+        gl_address = GL_CLAMP_TO_BORDER;
+        cl_address = CL_ADDRESS_CLAMP;
+        break;
+    case CG_IMAGE_ADDRESS_CLAMP_TO_EDGE:
+        gl_address = GL_CLAMP_TO_EDGE;
+        cl_address = CL_ADDRESS_CLAMP_TO_EDGE;
+        break;
+    case CL_IMAGE_ADDRESS_REPEAT:
+        gl_address = GL_REPEAT;
+        cl_address = CL_ADDRESS_REPEAT;
+        break;
+    case CL_IMAGE_ADDRESS_REFLECT:
+        gl_address = GL_MIRRORED_REPEAT;
+        cl_address = CL_ADDRESS_MIRRORED_REPEAT;
+        break;
+    default:
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    // fill out the basic sampler attributes.
+    sampler.GraphicsSampler = 0;
+    sampler.TextureTarget   = gl_target;
+    sampler.MinFilter       = gl_minfilter;
+    sampler.MagFilter       = gl_magfilter;
+    sampler.AddressMode     = gl_address;
+    sampler.AttachedDisplay = display;
+    sampler.ComputeSampler  = NULL;
+
+    // create the OpenCL sampler object.
+    if (create_info->Flags & CG_IMAGE_SAMPLER_FLAG_COMPUTE)
+    {   // TODO(rlk): In OpenCL 2.0, clCreateSampler has been marked deprecated.
+        // it has been replaced with clCreateSamplerWithProperties.
+        cl_int clres = CL_SUCCESS;
+        if ((sampler.ComputeSampler = clCreateSampler(group->ComputeContext, cl_norm, cl_address, cl_filter, &clres)) == NULL)
+        {
+            switch (clres)
+            {
+            case CL_INVALID_CONTEXT   : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_VALUE     : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_OPERATION : result = CG_UNSUPPORTED;   break;
+            case CL_OUT_OF_RESOURCES  : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY: result = CG_OUT_OF_MEMORY; break;
+            default: result = CG_ERROR; break;
+            }
+        }
+    }
+    if (create_info->Flags & CG_IMAGE_SAMPLER_FLAG_GRAPHICS)
+    {   // this requires ARB_sampler_objects support. if this extension is not 
+        // available, we'll fall back and just set the sampler properties each 
+        // time the associated texture is bound.
+        if (GLEW_ARB_sampler_objects)
+        {
+            GLuint glsamp = 0;
+            glGenSamplers(1, &glsamp);
+            if (glsamp == 0)
+            {
+                if (sampler.ComputeSampler != NULL) clReleaseSampler(sampler.ComputeSampler);
+                result = CG_BAD_GLCONTEXT;
+                return CG_INVALID_HANDLE;
+            }
+            glSamplerParameteri(glsamp, GL_TEXTURE_MIN_FILTER, gl_minfilter);
+            glSamplerParameteri(glsamp, GL_TEXTURE_MAG_FILTER, gl_magfilter);
+            glSamplerParameteri(glsamp, GL_TEXTURE_WRAP_S    , gl_address);
+            glSamplerParameteri(glsamp, GL_TEXTURE_WRAP_T    , gl_address);
+            glSamplerParameteri(glsamp, GL_TEXTURE_WRAP_R    , gl_address);
+            sampler.GraphicsSampler   = glsamp;
+        }
+    }
+
+    cg_handle_t handle = cgObjectTableAdd(&ctx->SamplerTable, sampler);
+    if (handle == CG_INVALID_HANDLE)
+    {
+        if (sampler.GraphicsSampler != 0   ) glDeleteSamplers(1, &sampler.GraphicsSampler);
+        if (sampler.ComputeSampler  != NULL) clReleaseSampler(sampler.ComputeSampler);
+        result = CG_OUT_OF_OBJECTS;
+        return CG_INVALID_HANDLE;
+    }
+    return handle;
 }
 
 internal_function int

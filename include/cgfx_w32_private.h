@@ -680,9 +680,9 @@ struct CG_SAMPLER
     uint32_t                     ObjectId;
     GLuint                       GraphicsSampler;      /// If ARB_sampler_objects is available, the name of the sampler; otherwise, 0.
     GLenum                       TextureTarget;        /// The texture target, for example GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
-    GLenum                       FilterMode;           /// The OpenGL magnification filter, either GL_LINEAR or GL_NEAREST.
+    GLenum                       MinFilter;            /// The OpenGL minification filter, either GL_NEAREST_MIPMAP_LINEAR or GL_NEAREST.
+    GLenum                       MagFilter;            /// The OpenGL magnification filter, either GL_LINEAR_MIPMAP_LINEAR, GL_NEAREST or GL_LINEAR.
     GLenum                       AddressMode;          /// The OpenGL addressing mode for both the S (X) and T (Y) directions.
-    GLfloat                      BorderColor[4];       /// The constant border color value.
     CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
     cl_sampler                   ComputeSampler;       /// The OpenCL sampler object.
 };

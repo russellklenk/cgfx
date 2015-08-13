@@ -151,7 +151,7 @@ typedef cg_handle_t  (CG_API *cgCreateImage_fn                 )(uintptr_t, cg_h
 typedef int          (CG_API *cgGetImageInfo_fn                )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef void*        (CG_API *cgMapImageRegion_fn              )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], uint32_t, size_t &, size_t &, int &);
 typedef int          (CG_API *cgUnmapImageRegion_fn            )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
-typedef cg_handle_t  (CG_API *cgCreateImageSampler_fn          )(uintptr_t, cg_image_sampler_t const *, int &);
+typedef cg_handle_t  (CG_API *cgCreateImageSampler_fn          )(uintptr_t, cg_handle_t, cg_image_sampler_t const *, int &);
 typedef int          (CG_API *cgBlendStateInitNone_fn          )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAlpha_fn         )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAdditive_fn      )(cg_blend_state_t &);
@@ -751,6 +751,21 @@ enum cg_image_address_mode_e : int
     CL_IMAGE_ADDRESS_REFLECT           =  4,           /// Samples outside of the image bounds are reflected back into the image.
 };
 
+/// @summary Define the supported image sampler types.
+enum cg_image_sampler_type : int
+{
+    CG_IMAGE_SAMPLER_1D                =  1,           /// The image being sampled is accessed as a 1D image using normalized coordinates.
+    CG_IMAGE_SAMPLER_1D_ARRAY          =  2,           /// The image being sampled is accessed as a 1D image array using normalized coordinates.
+    CG_IMAGE_SAMPLER_2D                =  3,           /// The image being sampled is accessed as a 2D image using normalized coordinates.
+    CG_IMAGE_SAMPLER_2D_RECT           =  4,           /// The image being sampled is accessed as a 2D image using integer coordinates.
+    CG_IMAGE_SAMPLER_2D_ARRAY          =  5,           /// The image being sampled is accessed as a 2D image array using normalized coordinates.
+    CG_IMAGE_SAMPLER_3D                =  6,           /// The image being sampled is accessed as a 3D image using normalized coordinates.
+    // the following are graphics-only
+    CG_IMAGE_SAMPLER_CUBEMAP           =  7,           /// The image being sampled is accessed as a cubemap using normalized coordinates.
+    CG_IMAGE_SAMPLER_CUBEMAP_ARRAY     =  8,           /// The image being sampled is accessed as a cubemap image array using normalized coordinates. Requires an OpenGL 4.0 context or ARB_texture_cube_map_array support.
+    CG_IMAGE_SAMPLER_BUFFER            =  9,           /// The image being sampled is a texture buffer using integer coordinates.
+};
+
 /// @summary Define flags that can be specified when creating an execution group.
 enum cg_execution_group_flags_e : uint32_t
 {
@@ -795,6 +810,16 @@ enum cg_memory_access_flags_e : uint32_t
     CG_MEMORY_ACCESS_READ_WRITE        =               /// The memory object will be both read and written.
         CG_MEMORY_ACCESS_READ          |
         CG_MEMORY_ACCESS_WRITE
+};
+
+/// @summary Define flags specifying additional image sampler behaviors.
+enum cg_image_sampler_flags_e : uint32_t
+{
+    CG_IMAGE_SAMPLER_FLAGS_NONE        = (0 << 0),     /// The sampler has no special attributes and may be used by both graphics and compute kernels.
+    CG_IMAGE_SAMPLER_FLAG_COMPUTE      = (1 << 0),     /// The sampler will be used from compute kernels.
+    CG_IMAGE_SAMPLER_FLAG_GRAPHICS     = (1 << 1),     /// The sampler will be used from graphics kernels.
+    CG_IMAGE_SAMPLER_FLAG_MIPMAPPED    = (1 << 2),     /// The sampler expects an image with mipmaps.
+    CG_IMAGE_SAMPLER_FLAG_DEPTH_VALUES = (1 << 3),     /// The sampler expects an depth image.
 };
 
 /// @summary Define flags used to specify whether an event will be used for compute, graphics or both.
@@ -975,9 +1000,10 @@ struct cg_command_t
 /// @summary Define the attributes of an image sampler object.
 struct cg_image_sampler_t
 {
-    uint32_t                      Flags;               /// A combination of cg_image_sampler_flags_e specifying sampler behavior.
+    int                           Type;                /// One of cg_image_sampler_type_e specifying the sampler type.
     int                           FilterMode;          /// One of cg_image_filter_mode_e specifying the filtering to use for non-integer coordinates.
     int                           AddressMode;         /// One of cg_image_address_mode_e specifying how the sampler behaves with out-of-bounds coordinates.
+    uint32_t                      Flags;               /// Additional flags controlling sampler behavior, a combination of cg_image_sampler_flags_e.
 };
 
 /// @summary Describes a bit of kernel (device-executable) code. 
@@ -1520,6 +1546,7 @@ cg_handle_t
 cgCreateImageSampler                                /// Create a new image sampler definition.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group defining devices on which the sampler will be used.
     cg_image_sampler_t const     *create_info,      /// A description of the sampler behavior.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
 );
@@ -1679,6 +1706,13 @@ cgMakeDx10HeaderDDS                                 /// Generate a DX10 extended
     dds_header_dxt10_t           *dx10,             /// The DX10 extended DDS header to populate.
     dds_header_t       const     *header            /// The base DDS header used to generate the extended header.
 );
+
+// still TODO:
+// 1. VAOs (graphics only)
+// 2. renderbuffers (maybe extend image support)
+// 3. command buffer synchronization commands
+// 4. graphics command buffer commands
+// 5. transfer command buffer commands
 
 #ifdef __cplusplus
 };     /* extern "C"  */
