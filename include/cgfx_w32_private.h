@@ -142,6 +142,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_EVENTS                            (32768)
 #define CG_MAX_IMAGES                            (16384)
 #define CG_MAX_SAMPLERS                          (4096)
+#define CG_MAX_MEM_REFS                          (2048)
 
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
@@ -438,7 +439,18 @@ struct CG_CMD_BUFFER
     size_t                       BytesUsed;            /// The number of bytes actually used for command data.
     size_t                       CommandCount;         /// The number of buffered commands.
     uint8_t                     *CommandData;          /// The start of the command data buffer.
+
+    cl_event                     InteropAcquire;       /// The OpenCL event signaled when OpenGL objects have been acquired. Valid for the current submission only.
+    size_t                       InteropListCount;     /// The number of items in the CL-GL interop list.
+    cl_mem                       GLMemRefs[CG_MAX_MEM_REFS]; /// Each item is the OpenCL handle of a shared memory object.
+    size_t                       RefCounts[CG_MAX_MEM_REFS]; /// Each item represents the number of commands referencing a shared memory object.
 };
+
+// the command buffer maintains a list of memory object references and increments reference counts. 
+// this way, the application doesn't have to track this information. 
+// after a command is executed, the reference count for any associated memory objects is decremented.
+// if the reference count reaches zero, add the cl_mem to the interop release list.
+// once the interop release list has been built for a command, release the GL objects.
 
 /// @summary Define the state associated with a device execution group.
 struct CG_EXEC_GROUP
@@ -1140,6 +1152,80 @@ cgCmdBufferCommandAt
     cmd_offset += cmd->DataSize + CG_CMD_BUFFER::CMD_HEADER_SIZE;
     result = CG_SUCCESS;
     return cmd;
+}
+
+/// @summary Checks to see if there is enough space in the command buffer memory reference list for the specified number of references.
+/// @param cmdbuf The command buffer being updated.
+/// @param memref The maximum number of memory references being added.
+/// @return true if memory object references can be added.
+internal_function inline bool
+cgCmdBufferCanAddMemRefs
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    size_t         count
+)
+{
+    return (cmdbuf->InteropListCount + count <= CG_MAX_MEM_REFS);
+}
+
+/// @summary Registers a memory object reference to be acquired by OpenCL. This function is used when building a command buffer.
+/// @param cmdbuf The command buffer being updated.
+/// @param memref The OpenCL memory object shared with an OpenGL memory object.
+internal_function inline void
+cgCmdBufferAddMemRef
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    cl_mem         memref
+)
+{
+    for (size_t i = 0, n = cmdbuf->InteropListCount; i < n; ++i)
+    {   // search the list of existing interop memrefs. if found, increment the reference count.
+        if (cmdbuf->GLMemRefs[i] == memref)
+        {
+            cmdbuf->RefCounts[i]++;
+            return;
+        }
+    }
+    if (cmdbuf->InteropListCount < CG_MAX_MEM_REFS)
+    {   // the interop memref was not found, so insert a new record.
+        cmdbuf->GLMemRefs[cmdbuf->InteropListCount] = memref;
+        cmdbuf->RefCounts[cmdbuf->InteropListCount] = 1;
+        cmdbuf->InteropListCount++;
+    }
+}
+
+/// @summary Registers a buffer object reference within a command list.
+/// @param cmdbuf The command buffer being updated.
+/// @param buffer The CGFX buffer object being referenced.
+internal_function inline void
+cgCmdBufferAddMemRef
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    CG_BUFFER     *buffer
+)
+{
+    if (buffer->GraphicsBuffer == 0 || buffer->ComputeBuffer == NULL)
+    {   // the buffer object is not shared with OpenGL, so ignore it.
+        return;
+    }
+    return cgCmdBufferAddMemRef(cmdbuf, buffer->ComputeBuffer);
+}
+
+/// @summary Registers an image object reference within a command list.
+/// @param cmdbuf The command buffer being updated.
+/// @param image The CGFX image object being referenced.
+internal_function inline void
+cgCmdBufferAddMemRef
+(
+    CG_CMD_BUFFER *cmdbuf, 
+    CG_IMAGE      *image
+)
+{
+    if (image->GraphicsImage == 0 || image->ComputeImage == NULL)
+    {   // the image object is not shared with OpenGL, so ignore it.
+        return;
+    }
+    return cgCmdBufferAddMemRef(cmdbuf, image->ComputeImage);
 }
 
 /// @summary Internal function to register a callback to perform all clSetKernelArg and call clEnqueueNDRangeKernel for a pre-defined compute pipeline.

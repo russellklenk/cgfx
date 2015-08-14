@@ -6828,9 +6828,11 @@ cgCreateCommandBuffer
     CG_CMD_BUFFER buf;
 
     cgCmdBufferSetTypeAndState(&buf, queue_type, CG_CMD_BUFFER::UNINITIALIZED);
-    buf.BytesTotal    = 0;
-    buf.BytesUsed     = 0;
-    buf.CommandCount  = 0;
+    buf.BytesTotal       =  0;
+    buf.BytesUsed        =  0;
+    buf.CommandCount     =  0;
+    buf.InteropAcquire   =  NULL;
+    buf.InteropListCount =  0;
     if ((buf.CommandData = (uint8_t*) VirtualAlloc(NULL, CG_CMD_BUFFER::MAX_SIZE, MEM_RESERVE, PAGE_READWRITE)) == NULL)
     {   // unable to reserve the required virtual address space.
         result = CG_OUT_OF_MEMORY;
@@ -6872,8 +6874,9 @@ cgBeginCommandBuffer
     {   // the command buffer is in an invalid state for this call.
         return CG_INVALID_STATE;
     }
-    cmdbuf->BytesUsed    = 0;
-    cmdbuf->CommandCount = 0;
+    cmdbuf->BytesUsed         = 0;
+    cmdbuf->CommandCount      = 0;
+    cmdbuf->InteropListCount  = 0;
     cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::BUILDING);
     return CG_SUCCESS;
 }
@@ -6895,8 +6898,9 @@ cgResetCommandBuffer
     {   // an invalid handle was supplied.
         return CG_INVALID_VALUE;
     }
-    cmdbuf->BytesUsed    = 0;
-    cmdbuf->CommandCount = 0;
+    cmdbuf->BytesUsed         = 0;
+    cmdbuf->CommandCount      = 0;
+    cmdbuf->InteropListCount  = 0;
     cgCmdBufferSetState(cmdbuf, CG_CMD_BUFFER::UNINITIALIZED);
     return CG_SUCCESS;
 }
@@ -9162,14 +9166,124 @@ cgCreateImageSampler
     return handle;
 }
 
+/// @summary Copies the entire contents of one buffer to another.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cmd_buffer The handle of the destination command buffer.
+/// @param dst_buffer The handle of the target buffer.
+/// @param dst_offset The offset of the first byte to write in the target buffer.
+/// @param src_buffer The handle of the source buffer.
+/// @param done_event The handle of an event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+/// @param wait_event The handle of an event to wait for before beginning the transfer, or CG_INVALID_HANDLE.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCopyBuffer
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    cg_handle_t dst_buffer, 
+    size_t      dst_offset,
+    cg_handle_t src_buffer, 
+    cg_handle_t done_event, 
+    cg_handle_t wait_event
+)
+{
+    CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf =  cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    CG_BUFFER     *dstbuf =  cgObjectTableGet(&ctx->BufferTable   , dst_buffer);
+    CG_BUFFER     *srcbuf =  cgObjectTableGet(&ctx->BufferTable   , src_buffer);
+    int            result =  CG_SUCCESS;
+    if ((dst_offset + srcbuf->RequestedSize) > dstbuf->RequestedSize)
+    {   // the destination buffer is not large enough, or the offset is invalid.
+        return CG_INVALID_VALUE;
+    }
+    if (!cgCmdBufferCanAddMemRefs(cmdbuf, 2))
+    {   // the command buffer references too many memory objects.
+        return CG_TOO_MANY_MEMREFS;
+    }
+
+    cg_copy_buffer_cmd_t  cmd;
+    cmd.WaitEvent         = wait_event;
+    cmd.CompleteEvent     = done_event;
+    cmd.SourceBuffer      = src_buffer;
+    cmd.TargetBuffer      = dst_buffer;
+    cmd.SourceOffset      = 0;
+    cmd.TargetOffset      = dst_offset;
+    cmd.CopyAmount        = srcbuf->RequestedSize;
+    if ((result = cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_BUFFER, sizeof(cmd), &cmd)) == CG_SUCCESS)
+    {
+        cgCmdBufferAddMemRef(cmdbuf, srcbuf);
+        cgCmdBufferAddMemRef(cmdbuf, dstbuf);
+        return CG_SUCCESS;
+    }
+    else return result;
+}
+
+/// @summary Copies a region of one buffer to another.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param dst_buffer The handle of the target buffer.
+/// @param dst_offset The offset of the first byte to write in the target buffer.
+/// @param src_buffer The handle of the source buffer.
+/// @param src_offset The offset of the first byte to read from the source buffer.
+/// @param copy_amount The number of bytes to copy.
+/// @param done_event The handle of an event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+/// @param wait_event The handle of an event to wait for before beginning the transfer, or CG_INVALID_HANDLE.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCopyBufferRegion
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    cg_handle_t dst_buffer, 
+    size_t      dst_offset,
+    cg_handle_t src_buffer,
+    size_t      src_offset, 
+    size_t      copy_amount,
+    cg_handle_t done_event, 
+    cg_handle_t wait_event
+)
+{
+    CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
+    CG_CMD_BUFFER *cmdbuf =  cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
+    CG_BUFFER     *dstbuf =  cgObjectTableGet(&ctx->BufferTable   , dst_buffer);
+    CG_BUFFER     *srcbuf =  cgObjectTableGet(&ctx->BufferTable   , src_buffer);
+    int            result =  CG_SUCCESS;
+    if ((src_offset + copy_amount) > srcbuf->RequestedSize)
+    {   // the offset or amount is invalid.
+        return CG_INVALID_VALUE;
+    }
+    if ((dst_offset + copy_amount) > dstbuf->RequestedSize)
+    {   // the destination buffer is not large enough, or the offset is invalid.
+        return CG_INVALID_VALUE;
+    }
+    if (!cgCmdBufferCanAddMemRefs(cmdbuf, 2))
+    {   // the command buffer references too many memory objects.
+        return CG_TOO_MANY_MEMREFS;
+    }
+
+    cg_copy_buffer_cmd_t  cmd;
+    cmd.WaitEvent         = wait_event;
+    cmd.CompleteEvent     = done_event;
+    cmd.SourceBuffer      = src_buffer;
+    cmd.TargetBuffer      = dst_buffer;
+    cmd.SourceOffset      = src_offset;
+    cmd.TargetOffset      = dst_offset;
+    cmd.CopyAmount        = copy_amount;
+    if ((result = cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_BUFFER, sizeof(cmd), &cmd)) == CG_SUCCESS)
+    {
+        cgCmdBufferAddMemRef(cmdbuf, srcbuf);
+        cgCmdBufferAddMemRef(cmdbuf, dstbuf);
+        return CG_SUCCESS;
+    }
+    else return result;
+}
+
 internal_function int
 cgExecuteTransferCommandBuffer
 (
-    CG_CONTEXT            *ctx, 
-    CG_QUEUE              *queue, 
-    CG_CMD_BUFFER         *cmdbuf,
-    size_t                 num_mem_refs, 
-    cg_memory_ref_t const *mem_ref_list
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf,
+    size_t        *ref_counts
 )
 {
     return CG_SUCCESS;
@@ -9178,16 +9292,16 @@ cgExecuteTransferCommandBuffer
 internal_function int
 cgExecuteComputeCommandBuffer
 (
-    CG_CONTEXT            *ctx, 
-    CG_QUEUE              *queue, 
-    CG_CMD_BUFFER         *cmdbuf,
-    size_t                 num_mem_refs, 
-    cg_memory_ref_t const *mem_ref_list
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf,
+    size_t        *ref_counts
 )
 {
     cg_command_t *cmd = NULL;
     size_t        ofs = 0;
     int           res = CG_SUCCESS;
+
     while ((cmd = cgCmdBufferCommandAt(cmdbuf, ofs, res)) != NULL)
     {
         switch (cmd->CommandId)
@@ -9198,6 +9312,36 @@ cgExecuteComputeCommandBuffer
                 cgComputeDispatch_fn  dispatch_func =  COMPUTE_DISPATCH_TABLE[bdp->PipelineId];
                 CG_PIPELINE               *pipeline =  cgObjectTableGet(&ctx->PipelineTable, bdp->Pipeline);
                 dispatch_func(ctx, queue , pipeline, cmd);
+            }
+            break;
+        case CG_COMMAND_COPY_BUFFER:
+            {
+                cg_copy_buffer_cmd_t *bdp = (cg_copy_buffer_cmd_t*) cmd->Data;
+                CG_BUFFER         *srcbuf =  cgObjectTableGet(&ctx->BufferTable, bdp->SourceBuffer);
+                CG_BUFFER         *dstbuf =  cgObjectTableGet(&ctx->BufferTable, bdp->TargetBuffer);
+                CG_EVENT          *devent =  cgObjectTableGet(&ctx->EventTable , bdp->CompleteEvent);
+                CG_EVENT          *wevent =  cgObjectTableGet(&ctx->EventTable , bdp->WaitEvent);
+                cl_event           clwait =  wevent != NULL ? wevent->ComputeSync : NULL;
+                cl_uint             nwait =  clwait != NULL ? 1 : 0;
+
+                if (devent != NULL)
+                {   // create a new event to signal on completion.
+                    cl_event cldone = NULL;
+                    clEnqueueCopyBuffer(
+                        queue ->CommandQueue, 
+                        srcbuf->ComputeBuffer, dstbuf->ComputeBuffer, 
+                        bdp->SourceOffset    , bdp->TargetOffset, 
+                        bdp->CopyAmount      , nwait, &clwait, &cldone);
+                    devent->ComputeSync = cldone;
+                }
+                else
+                {   // no need to create an event to signal on completion.
+                    clEnqueueCopyBuffer(
+                        queue ->CommandQueue, 
+                        srcbuf->ComputeBuffer, dstbuf->ComputeBuffer, 
+                        bdp->SourceOffset    , bdp->TargetOffset, 
+                        bdp->CopyAmount      , nwait, &clwait, NULL);
+                }
             }
             break;
         }
@@ -9211,31 +9355,33 @@ cgExecuteComputeCommandBuffer
 internal_function int
 cgExecuteGraphicsCommandBuffer
 (
-    CG_CONTEXT            *ctx, 
-    CG_QUEUE              *queue, 
-    CG_CMD_BUFFER         *cmdbuf,
-    size_t                 num_mem_refs, 
-    cg_memory_ref_t const *mem_ref_list
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf,
+    size_t        *ref_counts
 )
 {
     return CG_SUCCESS;
 }
 
+/// @summary Submits a command buffer for asynchronous execution.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param queue_handle The target command queue.
+/// @param cmd_buffer The command buffer to submit.
+/// @return One of CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_UNSUPPORTED or another result code.
 library_function int
 cgExecuteCommandBuffer
 (
-    uintptr_t              context,  
-    cg_handle_t            queue_handle, 
-    cg_handle_t            cmd_buffer, 
-    size_t                 num_mem_refs, 
-    cg_memory_ref_t const *mem_ref_list
+    uintptr_t   context,  
+    cg_handle_t queue_handle, 
+    cg_handle_t cmd_buffer
 )
 {
     CG_CONTEXT    *ctx    =(CG_CONTEXT*) context;
     CG_QUEUE      *fifo   = cgObjectTableGet(&ctx->QueueTable, queue_handle);
     CG_CMD_BUFFER *cmdbuf = cgObjectTableGet(&ctx->CmdBufferTable, cmd_buffer);
     size_t         nbytes = 0;
-    if (fifo == NULL || cmdbuf == NULL || num_mem_refs == 0 || mem_ref_list == NULL)
+    if (fifo == NULL || cmdbuf == NULL)
     {
         return CG_INVALID_VALUE;
     }
@@ -9248,14 +9394,40 @@ cgExecuteCommandBuffer
     {
         return CG_INVALID_STATE;
     }
+
+    // this array stores a copy of the command buffer CL-GL interop reference counts.
+    // the reference counts in this array may be modified during command submission.
+    size_t ref_counts[CG_MAX_MEM_REFS];
+
+    // if the command buffer is holding on to an event reference from a prior submission, 
+    // release the event object. if any commands are active, they have retained the event, 
+    // which will keep the underlying object alive.
+    if (cmdbuf->InteropAcquire != NULL)
+    {
+        clReleaseEvent(cmdbuf->InteropAcquire);
+        cmdbuf->InteropAcquire  = NULL;
+    }
+
+    // if the command buffer references memory objects shared between OpenGL and OpenCL, 
+    // acquire them all at once. they will be released on a per-command basis.
+    if (cmdbuf->InteropListCount > 0)
+    {
+        memcpy(ref_counts, cmdbuf->RefCounts, cmdbuf->InteropListCount * sizeof(size_t));
+        clEnqueueAcquireGLObjects(
+            fifo->CommandQueue, 
+            cl_uint(cmdbuf->InteropListCount), cmdbuf->GLMemRefs, 
+            0, NULL, &cmdbuf->InteropAcquire);
+    }
+
+    // submit commands to the associated command queues.
     switch (queue_type)
     {
     case CG_QUEUE_TYPE_COMPUTE:
-        return cgExecuteComputeCommandBuffer(ctx, fifo, cmdbuf, num_mem_refs, mem_ref_list);
+        return cgExecuteComputeCommandBuffer (ctx, fifo, cmdbuf, ref_counts);
     case CG_QUEUE_TYPE_GRAPHICS:
-        return cgExecuteGraphicsCommandBuffer(ctx, fifo, cmdbuf, num_mem_refs, mem_ref_list);
+        return cgExecuteGraphicsCommandBuffer(ctx, fifo, cmdbuf, ref_counts);
     case CG_QUEUE_TYPE_TRANSFER:
-        return cgExecuteTransferCommandBuffer(ctx, fifo, cmdbuf, num_mem_refs, mem_ref_list);
+        return cgExecuteTransferCommandBuffer(ctx, fifo, cmdbuf, ref_counts);
     default:
         break;
     }

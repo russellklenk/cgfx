@@ -152,6 +152,13 @@ typedef int          (CG_API *cgGetImageInfo_fn                )(uintptr_t, cg_h
 typedef void*        (CG_API *cgMapImageRegion_fn              )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], uint32_t, size_t &, size_t &, int &);
 typedef int          (CG_API *cgUnmapImageRegion_fn            )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
 typedef cg_handle_t  (CG_API *cgCreateImageSampler_fn          )(uintptr_t, cg_handle_t, cg_image_sampler_t const *, int &);
+typedef int          (CG_API *cgCopyBuffer_fn                  )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t, cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgCopyBufferRegion_fn            )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t, cg_handle_t, size_t, size_t, cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgCopyImage_fn                   )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], cg_handle_t, cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgCopyImageRegion_fn             )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], cg_handle_t, size_t[3], size_t[3], cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgCopyBufferToImage_fn           )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], cg_handle_t, size_t, cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgCopyImageToBuffer_fn           )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t, size_t[3], size_t[3], cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgExecuteCommandBuffer_fn        )(uintptr_t, cg_handle_t, cg_handle_t);
 typedef int          (CG_API *cgBlendStateInitNone_fn          )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAlpha_fn         )(cg_blend_state_t &);
 typedef int          (CG_API *cgBlendStateInitAdditive_fn      )(cg_blend_state_t &);
@@ -450,6 +457,7 @@ enum cg_result_e : int
     CG_INVALID_STATE                   = -12,          /// The object is in an invalid state for the operation.
     CG_COMPILE_FAILED                  = -13,          /// The kernel source code compilation failed.
     CG_LINK_FAILED                     = -14,          /// The pipeline linking phase failed.
+    CG_TOO_MANY_MEMREFS                = -15,          /// The command buffer references too many memory objects.
 
     // EXTENSION API RESULT CODES - FAILURE
     CG_RESULT_FAILURE_EXT              = -100000,      /// The first valid failure result code for extensions.
@@ -847,6 +855,10 @@ enum cg_graphics_pipeline_id_e : uint16_t
 enum cg_command_id_e : uint16_t
 {
     CG_COMMAND_COMPUTE_DISPATCH        =       0 ,     /// Dispatch a compute pipeline invocation.
+    CG_COMMAND_COPY_BUFFER             =       1 ,     /// Copy data from one buffer to another.
+    CG_COMMAND_COPY_IMAGE              =       2 ,     /// Copy data from one image to another.
+    CG_COMMAND_COPY_BUFFER_TO_IMAGE    =       3 ,     /// Copy data from a buffer into an image object.
+    CG_COMMAND_COPY_IMAGE_TO_BUFFER    =       4 ,     /// Copy data from an image object into a buffer.
 };
 
 /// @summary The equivalent of the DDS_PIXELFORMAT structure. See MSDN at:
@@ -1100,9 +1112,58 @@ struct cg_compute_dispatch_cmd_base_t
 };
 
 /// @summary Define the runtime data view of a compute dispatch command in a command buffer.
-struct cg_compute_dispatch_cmd_data_t : public cg_compute_dispatch_cmd_base_t
+struct cg_compute_dispatch_cmd_data_t : 
+    public cg_compute_dispatch_cmd_base_t
 {
     uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
+};
+
+/// @summary Defines the data passed with an asynchronous buffer-to-buffer copy command.
+struct cg_copy_buffer_cmd_t
+{
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before starting the transfer, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                  SourceBuffer;         /// The handle of the source buffer.
+    cg_handle_t                  TargetBuffer;         /// The handle of the target buffer.
+    size_t                       SourceOffset;         /// The offset of the first byte to copy from the source buffer.
+    size_t                       TargetOffset;         /// The offset of the first byte to write in the target buffer.
+    size_t                       CopyAmount;           /// The number of bytes to copy.
+};
+
+/// @summary Defines the data passed with an asynchronous image-to-image copy command.
+struct cg_copy_image_cmd_t
+{
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before starting the transfer, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                  SourceImage;          /// The handle of the source image.
+    cg_handle_t                  TargetImage;          /// The handle of the target image.
+    size_t                       SourceOrigin[3];      /// The x-coordinate, y-coordinate and slice index on the source image.
+    size_t                       TargetOrigin[3];      /// The x-coordinate, y-coordinate and slice index on the target image.
+    size_t                       Dimensions[3];        /// The width (in pixels), height (in pixels) and number of slices to copy.
+};
+
+/// @summary Defines the data passed with an asynchronous buffer-to-image copy command.
+struct cg_copy_buffer_to_image_cmd_t
+{
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before starting the transfer, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                  SourceBuffer;         /// The handle of the source buffer.
+    cg_handle_t                  TargetImage;          /// The handle of the target image object.
+    size_t                       SourceOffset;         /// The offset of the first byte to copy from the source buffer.
+    size_t                       TargetOrigin[3];      /// The x-coordinate, y-coordinate and slice index on the target image.
+    size_t                       Dimensions[3];        /// The width (in pixels), height (in pixels) and number of slices to copy.
+};
+
+/// @summary Defines the data passed with an asynchronous image-to-buffer copy command.
+struct cg_copy_image_to_buffer_cmd_t
+{
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before starting the transfer, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                  SourceImage;          /// The handle of the source image.
+    cg_handle_t                  TargetBuffer;         /// The handle of the target buffer.
+    size_t                       SourceOrigin[3];      /// The x-coordinate, y-coordinate and slice index on the source image.
+    size_t                       Dimensions[3];        /// The width (in pixels), height (in pixels) and number of slices to copy.
+    size_t                       TargetOffset;         /// The offset of the first byte to write in the target buffer.
 };
 
 /*/////////////////
@@ -1552,13 +1613,91 @@ cgCreateImageSampler                                /// Create a new image sampl
 );
 
 int
+cgCopyBuffer                                        /// Copies the entire contents of one buffer to the start of another buffer.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   dst_buffer,       /// The handle of the target buffer.
+    size_t                        dst_offset,       /// The offset of the first byte to write in the target buffer.
+    cg_handle_t                   src_buffer,       /// The handle of the source buffer.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on before proceeding with the copy, or CG_INVALID_HANDLE.
+);
+
+int
+cgCopyBufferRegion                                  /// Copies a region of one buffer to another buffer.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   dst_buffer,       /// The handle of the target buffer.
+    size_t                        dst_offset,       /// The offset of the first byte to write in the target buffer.
+    cg_handle_t                   src_buffer,       /// The handle of the source buffer.
+    size_t                        src_offset,       /// The offset of the first byte to read from the source buffer.
+    size_t                        copy_amount,      /// The number of bytes to copy.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on before proceeding with the copy, or CG_INVALID_HANDLE.
+);
+
+int
+cgCopyImage                                         /// Copies an entire image to another image.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   dst_image,        /// The handle of the target image.
+    size_t                        dst_origin[3],    /// The x-coordinate, y-coordinate and slice or array index on the target image.
+    cg_handle_t                   src_image,        /// The handle of the source image.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on before proceeding with the copy, or CG_INVALID_HANDLE.
+);
+
+int
+cgCopyImageRegion                                   /// Copies a region of one image to another image.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   dst_image,        /// The handle of the target image.
+    size_t                        dst_origin[3],    /// The x-coordinate, y-coordinate and slice or array index on the target image.
+    cg_handle_t                   src_image,        /// The handle of the source image.
+    size_t                        src_origin[3],    /// The x-coordinate, y-coordinate and slice or array index on the source image.
+    size_t                        dimension[3],     /// The width (in pixels), height (in pixels) and number of slices to copy.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on before proceeding with the copy, or CG_INVALID_HANDLE.
+);
+
+int
+cgCopyBufferToImage                                 /// Copies the contents of a buffer object to an image object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   dst_image,        /// The handle of the target image.
+    size_t                        dst_origin[3],    /// The x-coordinate, y-coordinate and slice or array index on the target image.
+    size_t                        dst_dimension[3], /// The width (in pixels), height (in pixels) and number of slices to copy.
+    cg_handle_t                   src_buffer,       /// The handle of the source buffer object.
+    size_t                        src_offset,       /// The offset of the first byte to read from the source buffer.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on before proceeding with the copy, or CG_INVALID_HANDLE.
+);
+
+int
+cgCopyImageToBuffer                                 /// Copies a region from an image object into a buffer object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   dst_buffer,       /// The handle of the target buffer.
+    size_t                        dst_offset,       /// The offset of the first byte to write in the target buffer.
+    cg_handle_t                   src_image,        /// The handle of the source image.
+    size_t                        src_origin[3],    /// The x-coordinate, y-coordinate and slice or array index in the source image.
+    size_t                        src_dimension[3], /// The width (in pixels), height (in pixels) and number of slices to copy.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of the event to wait on before proceeding with the copy, or CG_INVALID_HANDLE.
+);
+
+int
 cgExecuteCommandBuffer                              /// Execute a command buffer on a device.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   queue,            /// The command queue for the target device.
-    cg_handle_t                   cmd_buffer,       /// The command buffer to execute.
-    size_t                        num_mem_refs,     /// The number of memory objects referenced by the command buffer.
-    cg_memory_ref_t const        *mem_ref_list      /// An array of num_mem_refs memory object references.
+    cg_handle_t                   cmd_buffer        /// The command buffer to execute.
 );
 
 int
