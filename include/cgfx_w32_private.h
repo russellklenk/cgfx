@@ -116,7 +116,7 @@ struct CG_EXEC_GROUP;
 #define CG_HANDLE_SHIFT_Y                        (32)
 #define CG_HANDLE_SHIFT_T                        (56)
 
-/// @summary Define object table indicies within a context. Used when building handles.
+/// @summary Define object table indicies within a context. Used when building handles. The maximum ID is 255.
 #define CG_DEVICE_TABLE_ID                       (0)
 #define CG_DISPLAY_TABLE_ID                      (1)
 #define CG_QUEUE_TABLE_ID                        (2)
@@ -125,9 +125,10 @@ struct CG_EXEC_GROUP;
 #define CG_KERNEL_TABLE_ID                       (5)
 #define CG_PIPELINE_TABLE_ID                     (6)
 #define CG_BUFFER_TABLE_ID                       (7)
-#define CG_EVENT_TABLE_ID                        (8)
-#define CG_IMAGE_TABLE_ID                        (9)
-#define CG_SAMPLER_TABLE_ID                      (10)
+#define CG_FENCE_TABLE_ID                        (8)
+#define CG_EVENT_TABLE_ID                        (9)
+#define CG_IMAGE_TABLE_ID                        (10)
+#define CG_SAMPLER_TABLE_ID                      (11)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -139,6 +140,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_KERNELS                           (8192)
 #define CG_MAX_PIPELINES                         (4096)
 #define CG_MAX_BUFFERS                           (16384)
+#define CG_MAX_FENCES                            (32768)
 #define CG_MAX_EVENTS                            (32768)
 #define CG_MAX_IMAGES                            (16384)
 #define CG_MAX_SAMPLERS                          (4096)
@@ -699,14 +701,25 @@ struct CG_SAMPLER
     cl_sampler                   ComputeSampler;       /// The OpenCL sampler object.
 };
 
-/// @summary Defines the data associated with an event object.
+/// @summary Defines the data associated with a fence object. A fence prevents execution of subsequent commands until all prior commands have completed.
+struct CG_FENCE
+{
+    uint32_t                     ObjectId;             /// The CGFX internal object identifier.
+    int                          QueueType;            /// The type of queue into which the fence can be inserted.
+    union
+    {
+        cl_event                 ComputeFence;         /// The OpenCL event object representing the barrier.
+        GLsync                   GraphicsFence;        /// The OpenGL fence synchronization object.
+    };
+    cg_handle_t                  LinkedEvent;          /// The handle of the linked compute or transfer queue event, or CG_INVALID_HANDLE. When this event becomes signaled, the fence can be passed.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
+};
+
+/// @summary Defines the data associated with an event object. Events are used only with compute or transfer queues and become signaled when a specific command has completed.
 struct CG_EVENT
 {
     uint32_t                     ObjectId;             /// The CGFX internal object identifier.
-    uint32_t                     EventUsage;           /// One or more of cg_event_usage_e specifying where the event may be used.
-    cl_event                     ComputeSync;          /// The OpenCL sync object handle, or NULL.
-    GLsync                       GraphicsSync;         /// The OpenGL sync object handle, or NULL.
-    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
+    cl_event                     ComputeEvent;         /// The OpenCL event object handle, or NULL.
 };
 
 /// @summary Defines the basic structure of a compute pipeline dispatch within a command buffer.
@@ -726,6 +739,7 @@ typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
 typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
 typedef CG_OBJECT_TABLE<CG_PIPELINE  , CG_MAX_PIPELINES  > CG_PIPELINE_TABLE;
 typedef CG_OBJECT_TABLE<CG_BUFFER    , CG_MAX_BUFFERS    > CG_BUFFER_TABLE;
+typedef CG_OBJECT_TABLE<CG_FENCE     , CG_MAX_FENCES     > CG_FENCE_TABLE;
 typedef CG_OBJECT_TABLE<CG_EVENT     , CG_MAX_EVENTS     > CG_EVENT_TABLE;
 typedef CG_OBJECT_TABLE<CG_IMAGE     , CG_MAX_IMAGES     > CG_IMAGE_TABLE;
 typedef CG_OBJECT_TABLE<CG_SAMPLER   , CG_MAX_SAMPLERS   > CG_SAMPLER_TABLE;
@@ -748,6 +762,7 @@ struct CG_CONTEXT
     CG_KERNEL_TABLE              KernelTable;          /// The object table of all compiled kernels.
     CG_PIPELINE_TABLE            PipelineTable;        /// The object table of all compiled pipelines.
     CG_BUFFER_TABLE              BufferTable;          /// The object table of all data buffers.
+    CG_FENCE_TABLE               FenceTable;           /// The object table of all command queue fences.
     CG_EVENT_TABLE               EventTable;           /// The object table of all synchronization events.
     CG_IMAGE_TABLE               ImageTable;           /// The object table of all image objects.
     CG_SAMPLER_TABLE             SamplerTable;         /// The object table of all image sampler objects.
@@ -1171,7 +1186,8 @@ cgCmdBufferCanAddMemRefs
 /// @summary Registers a memory object reference to be acquired by OpenCL. This function is used when building a command buffer.
 /// @param cmdbuf The command buffer being updated.
 /// @param memref The OpenCL memory object shared with an OpenGL memory object.
-internal_function inline void
+/// @return The memory object reference index in the interop list, or CG_INVALID_MEMREF.
+internal_function inline size_t
 cgCmdBufferAddMemRef
 (
     CG_CMD_BUFFER *cmdbuf, 
@@ -1183,21 +1199,23 @@ cgCmdBufferAddMemRef
         if (cmdbuf->GLMemRefs[i] == memref)
         {
             cmdbuf->RefCounts[i]++;
-            return;
+            return i;
         }
     }
     if (cmdbuf->InteropListCount < CG_MAX_MEM_REFS)
     {   // the interop memref was not found, so insert a new record.
         cmdbuf->GLMemRefs[cmdbuf->InteropListCount] = memref;
         cmdbuf->RefCounts[cmdbuf->InteropListCount] = 1;
-        cmdbuf->InteropListCount++;
+        return cmdbuf->InteropListCount++;
     }
+    return CG_INVALID_MEMREF;
 }
 
 /// @summary Registers a buffer object reference within a command list.
 /// @param cmdbuf The command buffer being updated.
 /// @param buffer The CGFX buffer object being referenced.
-internal_function inline void
+/// @return The memory object reference index in the interop list, or CG_INVALID_MEMREF.
+internal_function inline size_t
 cgCmdBufferAddMemRef
 (
     CG_CMD_BUFFER *cmdbuf, 
@@ -1206,7 +1224,7 @@ cgCmdBufferAddMemRef
 {
     if (buffer->GraphicsBuffer == 0 || buffer->ComputeBuffer == NULL)
     {   // the buffer object is not shared with OpenGL, so ignore it.
-        return;
+        return CG_INVALID_MEMREF;
     }
     return cgCmdBufferAddMemRef(cmdbuf, buffer->ComputeBuffer);
 }
@@ -1214,7 +1232,8 @@ cgCmdBufferAddMemRef
 /// @summary Registers an image object reference within a command list.
 /// @param cmdbuf The command buffer being updated.
 /// @param image The CGFX image object being referenced.
-internal_function inline void
+/// @return The memory object reference index in the interop list, or CG_INVALID_MEMREF.
+internal_function inline size_t
 cgCmdBufferAddMemRef
 (
     CG_CMD_BUFFER *cmdbuf, 
@@ -1223,7 +1242,7 @@ cgCmdBufferAddMemRef
 {
     if (image->GraphicsImage == 0 || image->ComputeImage == NULL)
     {   // the image object is not shared with OpenGL, so ignore it.
-        return;
+        return CG_INVALID_MEMREF;
     }
     return cgCmdBufferAddMemRef(cmdbuf, image->ComputeImage);
 }

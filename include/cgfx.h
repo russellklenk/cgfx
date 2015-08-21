@@ -96,6 +96,9 @@ struct cg_compute_pipeline_t;
 /// @summary A special value representing an invalid handle.
 #define CG_INVALID_HANDLE   ((cg_handle_t)0)
 
+/// @summary A special index value meaning there is no associated memory object reference.
+#define CG_INVALID_MEMREF   (~size_t(0))
+
 /// @summary A special value meaning that CGFX will determine the best heap placement.
 #define CG_IDEAL_HEAP       (~size_t(0))
 
@@ -138,18 +141,22 @@ typedef int          (CG_API *cgCommandBufferUnmapAppend_fn    )(uintptr_t, cg_h
 typedef int          (CG_API *cgEndCommandBuffer_fn            )(uintptr_t, cg_handle_t);
 typedef int          (CG_API *cgCommandBufferCanRead_fn        )(uintptr_t, cg_handle_t, size_t &);
 typedef cg_command_t*(CG_API *cgCommandBufferCommandAt_fn      )(uintptr_t, cg_handle_t, size_t &, int &);
-typedef cg_handle_t  (CG_API *cgCreateEvent_fn                 )(uintptr_t, cg_handle_t, uint32_t, int &);
+typedef cg_handle_t  (CG_API *cgCreateFence_fn                 )(uintptr_t, cg_handle_t, int, int &);
+typedef cg_handle_t  (CG_API *cgCreateFenceForEvent_fn         )(uintptr_t, cg_handle_t, cg_handle_t, int &);
+typedef cg_handle_t  (CG_API *cgCreateEvent_fn                 )(uintptr_t, cg_handle_t, int &);
 typedef int          (CG_API *cgHostWaitForEvent_fn            )(uintptr_t, cg_handle_t);
+typedef int          (CG_API *cgDeviceFence_fn                 )(uintptr_t, cg_handle_t, cg_handle_t, cg_handle_t);
+typedef int          (CG_API *cgDeviceFenceWithWaitList_fn     )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t const *, cg_handle_t);
 typedef cg_handle_t  (CG_API *cgCreateKernel_fn                )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateDataBuffer_fn            )(uintptr_t, cg_handle_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
 typedef int          (CG_API *cgGetDataBufferInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
+typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
 typedef int          (CG_API *cgUnmapDataBuffer_fn             )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
 typedef cg_handle_t  (CG_API *cgCreateImage_fn                 )(uintptr_t, cg_handle_t, size_t, size_t, size_t, size_t, size_t, uint32_t, uint32_t, uint32_t, uint32_t, int, int, int &);
 typedef int          (CG_API *cgGetImageInfo_fn                )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
-typedef void*        (CG_API *cgMapImageRegion_fn              )(uintptr_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], uint32_t, size_t &, size_t &, int &);
+typedef void*        (CG_API *cgMapImageRegion_fn              )(uintptr_t, cg_handle_t, cg_handle_t, cg_handle_t, size_t[3], size_t[3], uint32_t, size_t &, size_t &, int &);
 typedef int          (CG_API *cgUnmapImageRegion_fn            )(uintptr_t, cg_handle_t, cg_handle_t, void *, cg_handle_t *);
 typedef cg_handle_t  (CG_API *cgCreateImageSampler_fn          )(uintptr_t, cg_handle_t, cg_image_sampler_t const *, int &);
 typedef int          (CG_API *cgCopyBuffer_fn                  )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t, cg_handle_t, cg_handle_t);
@@ -498,12 +505,13 @@ enum cg_object_e : uint32_t
     CG_OBJECT_EXECUTION_GROUP          = (1 <<  2),    /// The object type identifier for an execution group.
     CG_OBJECT_QUEUE                    = (1 <<  3),    /// The object type identifier for a queue.
     CG_OBJECT_COMMAND_BUFFER           = (1 <<  4),    /// The object type identifier for a command buffer.
-    CG_OBJECT_EVENT                    = (1 <<  5),    /// The object type identifier for a waitable event.
-    CG_OBJECT_KERNEL                   = (1 <<  6),    /// The object type identifier for a compute or shader kernel.
-    CG_OBJECT_PIPELINE                 = (1 <<  7),    /// The object type identifier for a compute or display pipeline.
-    CG_OBJECT_BUFFER                   = (1 <<  8),    /// The object type identifier for a data buffer.
-    CG_OBJECT_IMAGE                    = (1 <<  9),    /// The object type identifier for an image.
-    CG_OBJECT_SAMPLER                  = (1 << 10),    /// The object type identifier for an image sampler.
+    CG_OBJECT_FENCE                    = (1 <<  5),    /// The object type identifier for a command queue fence.
+    CG_OBJECT_EVENT                    = (1 <<  6),    /// The object type identifier for a waitable event.
+    CG_OBJECT_KERNEL                   = (1 <<  7),    /// The object type identifier for a compute or shader kernel.
+    CG_OBJECT_PIPELINE                 = (1 <<  8),    /// The object type identifier for a compute or display pipeline.
+    CG_OBJECT_BUFFER                   = (1 <<  9),    /// The object type identifier for a data buffer.
+    CG_OBJECT_IMAGE                    = (1 << 10),    /// The object type identifier for an image.
+    CG_OBJECT_SAMPLER                  = (1 << 11),    /// The object type identifier for an image sampler.
 };
 
 /// @summary Define the queryable data on a CGFX context object.
@@ -601,8 +609,9 @@ enum cg_display_orientation_e : int
 enum cg_queue_type_e : int
 {
     CG_QUEUE_TYPE_COMPUTE              =  1,           /// The queue is used for submitting compute kernel dispatch commands.
-    CG_QUEUE_TYPE_GRAPHICS             =  2,           /// The queue is used for submitting graphics kernel dispatch commands.
-    CG_QUEUE_TYPE_TRANSFER             =  3,           /// The queue is used for submitting data transfer commands using a DMA engine.
+    CG_QUEUE_TYPE_TRANSFER             =  2,           /// The queue is used for submitting data transfer commands.
+    CG_QUEUE_TYPE_COMPUTE_OR_TRANSFER  =  3,           /// The queue is used for submitting data transfer and compute kernel dispatch commands.
+    CG_QUEUE_TYPE_GRAPHICS             =  4,           /// The queue is used for submitting graphics kernel dispatch commands.
 };
 
 /// @summary Define the supported types of kernel fragments.
@@ -830,13 +839,6 @@ enum cg_image_sampler_flags_e : uint32_t
     CG_IMAGE_SAMPLER_FLAG_DEPTH_VALUES = (1 << 3),     /// The sampler expects an depth image.
 };
 
-/// @summary Define flags used to specify whether an event will be used for compute, graphics or both.
-enum cg_event_usage_e : uint32_t
-{
-    CG_EVENT_USAGE_COMPUTE             = (1 << 0),     /// The event object will be used to synchronize compute operations.
-    CG_EVENT_USAGE_GRAPHICS            = (1 << 1),     /// The event object will be used to synchronize graphics operations.
-};
-
 /// @summary The pre-defined compute pipeline identifiers. These pipelines are provided by the CGFX implementation.
 enum cg_compute_pipeline_id_e : uint16_t
 {
@@ -855,10 +857,11 @@ enum cg_graphics_pipeline_id_e : uint16_t
 enum cg_command_id_e : uint16_t
 {
     CG_COMMAND_COMPUTE_DISPATCH        =       0 ,     /// Dispatch a compute pipeline invocation.
-    CG_COMMAND_COPY_BUFFER             =       1 ,     /// Copy data from one buffer to another.
-    CG_COMMAND_COPY_IMAGE              =       2 ,     /// Copy data from one image to another.
-    CG_COMMAND_COPY_BUFFER_TO_IMAGE    =       3 ,     /// Copy data from a buffer into an image object.
-    CG_COMMAND_COPY_IMAGE_TO_BUFFER    =       4 ,     /// Copy data from an image object into a buffer.
+    CG_COMMAND_DEVICE_FENCE            =       1 ,     /// Insert a fence in a command queue.
+    CG_COMMAND_COPY_BUFFER             =       2 ,     /// Copy data from one buffer to another.
+    CG_COMMAND_COPY_IMAGE              =       3 ,     /// Copy data from one image to another.
+    CG_COMMAND_COPY_BUFFER_TO_IMAGE    =       4 ,     /// Copy data from a buffer into an image object.
+    CG_COMMAND_COPY_IMAGE_TO_BUFFER    =       5 ,     /// Copy data from an image object into a buffer.
 };
 
 /// @summary The equivalent of the DDS_PIXELFORMAT structure. See MSDN at:
@@ -1118,6 +1121,21 @@ struct cg_compute_dispatch_cmd_data_t :
     uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
 };
 
+/// @summary Defines the basic data passed with a device fence command in a command buffer.
+struct cg_device_fence_cmd_base_t
+{
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when the fence has been passed, or CG_INVALID_HANDLE.
+    cg_handle_t                  FenceObject;          /// The handle of the fence object used as a barrier to command execution.
+    size_t                       WaitListCount;        /// The number of explicit items to wait on. If this value is 0, the fence cannot be passed until all prior commands have finished.
+};
+
+/// @summary Define the runtime data view of a device fence command in a command buffer.
+struct cg_device_fence_cmd_data_t : 
+    public cg_device_fence_cmd_base_t
+{
+    cg_handle_t                  WaitList[1];          /// The set of handles of event objects that must become signaled before the fence can be passed.
+};
+
 /// @summary Defines the data passed with an asynchronous buffer-to-buffer copy command.
 struct cg_copy_buffer_cmd_t
 {
@@ -1128,6 +1146,8 @@ struct cg_copy_buffer_cmd_t
     size_t                       SourceOffset;         /// The offset of the first byte to copy from the source buffer.
     size_t                       TargetOffset;         /// The offset of the first byte to write in the target buffer.
     size_t                       CopyAmount;           /// The number of bytes to copy.
+    size_t                       SourceBufferRef;      /// The zero-based index of the source buffer memory object reference, or CG_INVALID_MEMREF.
+    size_t                       TargetBufferRef;      /// The zero-based index of the target buffer memory object reference, or CG_INVALID_MEMREF.
 };
 
 /// @summary Defines the data passed with an asynchronous image-to-image copy command.
@@ -1460,11 +1480,28 @@ cgCommandBufferCommandAt                            /// Read a command buffer at
 );
 
 cg_handle_t
+cgCreateFence                                       /// Create a new fence object in the unsignaled state.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group managing the queue that will signal the fence.
+    int                           queue_type,       /// One of cg_queue_type_e specifying whether the fence is used with a graphics, compute or transfer queue.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+cg_handle_t
+cgCreateFenceForEvent                               /// Create a new graphics-only fence object that becomes signaled when a compute event becomes signaled. 
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group managing both queues.
+    cg_handle_t                   event,            /// The handle of the event object that will allow the queue to pass the fence.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+cg_handle_t
 cgCreateEvent                                       /// Create a new event object in the unsignaled state.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   exec_group,       /// The handle of the execution group that will signal the event.
-    uint32_t                      usage,            /// One or more of cg_event_usage_e specifying whether graphics, compute, or both will use the event.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
 );
 
@@ -1473,6 +1510,26 @@ cgHostWaitForEvent                                  /// Blocks the calling threa
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   wait_event        /// The handle of the event to wait on.
+);
+
+int
+cgDeviceFence                                       /// Block the device from executing compute, transfer or graphics commands enqueued after the fence until all prior commands have finished executing. 
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   fence_handle,     /// The handle of the fence object to insert in the command queue.
+    cg_handle_t                   done_event        /// The handle of the event to signal when the fence is passed, or CG_INVALID_HANDLE.
+);
+
+int
+cgDeviceFenceWithWaitList                           /// Block the device from executing compute or transfer commands enqueued after the fence until the specified set of events have been signaled. Graphics queues do not support wait lists.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   fence_handle,     /// The handle of the fence object to insert in the command queue.
+    size_t                        wait_count,       /// The number of events or fences to wait on before the fence becomes passable.
+    cg_handle_t const            *wait_handles,     /// An array of wait_count event or fence handles that, when all are signaled, allow execution of commands past the fence.
+    cg_handle_t                   done_event        /// The handle of the event to signal when the fence is passed, or CG_INVALID_HANDLE.
 );
 
 cg_handle_t
@@ -1533,6 +1590,7 @@ cgMapDataBuffer                                     /// Map a portion of a data 
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   queue,            /// The handle of the transfer or display queue.
     cg_handle_t                   buffer,           /// The handle of the buffer to map.
+    cg_handle_t                   wait_handle,      /// The handle of a fence or event object to wait on before mapping the buffer. If CG_INVALID_OBJECT, the caller asserts that no device is actively accessing the memory object.
     size_t                        offset,           /// The byte offset of the start of the buffer range to map.
     size_t                        amount,           /// The number of bytes of the buffer that will be accessed.
     uint32_t                      flags,            /// A combination of cg_memory_access_flags_e specifying how the buffer will be accessed.
@@ -1585,6 +1643,7 @@ cgMapImageRegion                                    /// Map a portion of an imag
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   queue,            /// The handle of the transfer or display queue.
     cg_handle_t                   image,            /// The handle of the image to map.
+    cg_handle_t                   wait_handle,      /// The handle of a fence or event object to wait on before mapping the buffer. If CG_INVALID_OBJECT, the caller asserts that no device is actively accessing the memory object.
     size_t                        xyz[3],           /// The x-coordinate, y-coordinate and slice index of the upper-left corner of the region to map.
     size_t                        whd[3],           /// The width (in pixels), height (in pixels) and depth (in slices) of the region to map.
     uint32_t                      flags,            /// A combination of cg_memory_access_flags_e specifying how the buffer will be accessed.
