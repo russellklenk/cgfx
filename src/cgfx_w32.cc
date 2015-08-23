@@ -7489,7 +7489,67 @@ cgClGetWaitEvent
     return CG_INVALID_VALUE;
 }
 
-/// @summary 
+/// @summary Initializes the fields of a CG_EVENT object such that the handle refers to an OpenCL event associated with the completion of a submitted command.
+/// @param queue The command queue to which the command was submitted.
+/// @param event The CGFX event object to initialize. If this event refers to an existing event, the existing event is released.
+/// @param cl_sync The completion event returned by OpenCL, or NULL if @a gl_sync is specified.
+/// @param gl_sync The completion event returned by OpenGL (if the command was submitted to a graphics queue), or NULL if @a cl_sync is specified.
+/// @param result The result code of the caller.
+/// @return The value @a result.
+internal_function int
+cgSetupExistingEvent
+(
+    CG_QUEUE *queue, 
+    CG_EVENT *event, 
+    cl_event  cl_sync, 
+    GLsync    gl_sync, 
+    int       result
+)
+{   // if the event has an existing cl_event, release it.
+    if (event->ComputeEvent != NULL)
+    {
+        clReleaseEvent(event->ComputeEvent);
+        event->ComputeEvent  = NULL;
+    }
+
+    // the event may have already been created and associated with an 
+    // OpenCL command. in this case, we only need to save the reference.
+    if (cl_sync != NULL)
+    {
+        event->ComputeEvent = cl_sync;
+        return result;
+    }
+
+    // if the event is linked to a graphics queue fence, use cl_khr_gl_event 
+    // to create the corresponding OpenCL event object.
+    if (gl_sync != NULL)
+    {
+        cl_int clres = CL_SUCCESS;
+        if ((cl_sync = clCreateEventFromGLsyncKHR(queue->ComputeContext, gl_sync, &clres)) == NULL)
+        {   // could not create an OpenCL event from the OpenGL sync object.
+            switch (clres)
+            {
+            case CL_INVALID_CONTEXT  : return CG_BAD_CLCONTEXT;
+            case CL_INVALID_GL_OBJECT: return CG_BAD_GLCONTEXT;
+            default: break;
+            }
+            return CG_ERROR;
+        }
+        event->ComputeEvent = cl_sync;
+        return result;
+    }
+    // if we reach this point, both cl_sync and gl_sync are NULL.
+    return CG_INVALID_VALUE;
+}
+
+/// @summary Initialize an existing command completion event.
+/// @param ctx The CGFX context that created the event object.
+/// @param queue The command queue to which the command was submitted.
+/// @param complete_event The handle of the CGFX event object to initialize. Any existing OpenCL event will be released.
+/// @param cl_sync The completion event returned by OpenCL, or NULL if @a gl_sync is specified.
+/// @param gl_sync The completion event returned by OpenGL (if the command was submitted to a graphics queue), or NULL if @a cl_sync is specified.
+/// @param result The result code of the caller.
+/// @return The value @a result.
 internal_function int
 cgSetupCompleteEvent
 (
@@ -7509,50 +7569,64 @@ cgSetupCompleteEvent
     {   // no completion event is required - just return the result.
         return result;
     }
-
-    // a completion event was requested, so proceed with setup.
     CG_EVENT *done = cgObjectTableGet(&ctx->EventTable, complete_event);
     if (done == NULL)
     {   // the supplied handle doesn't identify a valid event.
         return CG_INVALID_VALUE;
     }
+    return cgSetupExistingEvent(queue, done, cl_sync, gl_sync, result);
+}
 
-    // if the event has an existing cl_event, release it.
-    if (done->ComputeEvent != NULL)
-    {
-        clReleaseEvent(done->ComputeEvent);
-        done->ComputeEvent  = NULL;
-    }
-
-    // the event may have already been created and associated with an 
-    // OpenCL command. in this case, we only need to save the reference.
-    if (cl_sync != NULL)
-    {
-        done->ComputeEvent = cl_sync;
-        return result;
-    }
-
-    // if the event is linked to a graphics queue fence, use cl_khr_gl_event 
-    // to create the corresponding OpenCL event object.
-    if (gl_sync != NULL)
-    {
-        cl_int clres = CL_SUCCESS;
-        if ((cl_sync = clCreateEventFromGLsyncKHR(queue->ComputeContext, gl_sync, &clres)) == NULL)
-        {   // could not create an OpenCL event from the OpenGL sync object.
-            switch (clres)
-            {
-            case CL_INVALID_CONTEXT  : return CG_BAD_CLCONTEXT;
-            case CL_INVALID_GL_OBJECT: return CG_BAD_GLCONTEXT;
-            default: break;
-            }
-            return CG_ERROR;
+/// @summary Create and initialize a new command completion event.
+/// @param ctx The CGFX context that created the event object.
+/// @param queue The command queue to which the command was submitted.
+/// @param event_handle A pointer to the handle of the CGFX event object to initialize. If NULL, no event is created. Any existing OpenCL event will be released.
+/// @param cl_sync The completion event returned by OpenCL, or NULL if @a gl_sync is specified.
+/// @param gl_sync The completion event returned by OpenGL (if the command was submitted to a graphics queue), or NULL if @a cl_sync is specified.
+/// @param result The result code of the caller.
+/// @return The value @a result.
+internal_function int
+cgSetupNewCompleteEvent
+(
+    CG_CONTEXT  *ctx, 
+    CG_QUEUE    *queue, 
+    cg_handle_t *event_handle,
+    cl_event     cl_sync,
+    GLsync       gl_sync, 
+    int          result
+)
+{
+    if (result != CG_SUCCESS)
+    {   // don't bother creating a completion event - just return the result.
+        if (event_handle != NULL)
+        {   // indicate that no event is being returned.
+            *event_handle = CG_INVALID_HANDLE;
         }
-        done->ComputeEvent = cl_sync;
         return result;
     }
-
-    // if we reach this point, both cl_sync and gl_sync are NULL.
-    return CG_INVALID_VALUE;
+    if (event_handle == NULL)
+    {   // no event was requested by the caller, so just return the result.
+        if (cl_sync  != NULL)
+        {   // nobody will wait on the event, so release it.
+            clReleaseEvent(cl_sync);
+        }
+        if (gl_sync  != NULL)
+        {   // nobody will wait on the event, so release it.
+            CG_DISPLAY *display = queue->AttachedDisplay;
+            glDeleteSync(gl_sync);
+        }
+        return result; 
+    }
+    
+    CG_EVENT    ev; ev.ComputeEvent = NULL;
+    cg_handle_t ev_h = cgObjectTableAdd(&ctx->EventTable, ev);
+    if (ev_h == CG_INVALID_HANDLE)
+    {   // unable to create the new event object - the object table is full.
+        *event_handle = CG_INVALID_HANDLE;
+        return CG_OUT_OF_OBJECTS;
+    }
+    CG_EVENT *done = cgObjectTableGet(&ctx->EventTable, ev_h);
+    return cgSetupExistingEvent(queue, done, cl_sync, gl_sync, result);
 }
 
 internal_function int
@@ -8738,7 +8812,10 @@ cgUnmapDataBuffer
     int        result =  CG_SUCCESS;
     if (obj == NULL || queue == NULL)
     {   // one or more of the supplied handles is invalid.
-        if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
+        if (event_handle != NULL) 
+        {   // no completion event will be returned since no command was submitted.
+           *event_handle = CG_INVALID_HANDLE;
+        }
         return CG_INVALID_VALUE;
     }
 
@@ -8747,12 +8824,7 @@ cgUnmapDataBuffer
         cl_int        clres = CL_SUCCESS;
         cl_event  evt_unmap = NULL;
         cl_event  evt_relgl = NULL;
-        CG_EVENT  event;
-
-        // fill out basic event object properties.
-        event.ComputeEvent    = NULL;
-        event.LinkedFence     = CG_INVALID_HANDLE;
-        event.AttachedDisplay = queue->AttachedDisplay;
+        cl_event  event     = NULL;
         
         // unmap the buffer from the host address space. if the buffer was mapped for write access, 
         // a data transfer from host to device may be performed (hopefully asynchronously.)
@@ -8769,10 +8841,11 @@ cgUnmapDataBuffer
             case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
             default                        : result = CG_ERROR;         break;
             }
+            return cgSetupNewCompleteEvent(ctx, queue, event_handle, NULL, NULL, result);
         }
 
         // set the compute event handle to the unmap completion event.
-        event.ComputeEvent = evt_unmap;
+        event = evt_unmap;
 
         if (clres == CL_SUCCESS && obj->GraphicsBuffer != 0)
         {   // release the buffer so it can be used by OpenGL again. this must wait for the data 
@@ -8792,30 +8865,23 @@ cgUnmapDataBuffer
                 case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
                 default                        : result = CG_ERROR;         break;
                 }
+                clReleaseEvent(evt_unmap);
+                return cgSetupNewCompleteEvent(ctx, queue, event_handle, NULL, NULL, result);
             }
             else
             {   // the returned event will only be signaled when the data becomes available to OpenGL.
                 // release the unmap event in this case, as the user will not wait on it at all.
+                event = evt_relgl;
                 clReleaseEvent(evt_unmap);
-                event.ComputeEvent = evt_relgl;
             }
         }
-
-        if (event_handle != NULL)
-        {   // return the event object handle to the caller.
-            *event_handle = cgObjectTableAdd(&ctx->EventTable, event);
-        }
-        else
-        {   // the caller doesn't need the event returned to them.
-            clReleaseEvent(event.ComputeEvent);
-        }
-        return result;
+        return cgSetupNewCompleteEvent(ctx, queue, event_handle, event, NULL, CG_SUCCESS);
     }
     else
     {   // the queue type is not valid.
         if (event_handle != NULL)
         {   // no event object will be created or returned.
-            *event_handle = CG_INVALID_HANDLE;
+           *event_handle = CG_INVALID_HANDLE;
         }
         return CG_INVALID_VALUE;
     }
@@ -9428,7 +9494,10 @@ cgUnmapImageRegion
     int        result =  CG_SUCCESS;
     if (obj == NULL || queue == NULL)
     {   // one or more of the supplied handles is invalid.
-        if (event_handle != NULL) *event_handle = CG_INVALID_HANDLE;
+        if (event_handle != NULL)
+        {   // no command was submitted, so there's no completion event to return.
+           *event_handle = CG_INVALID_HANDLE;
+        }
         return CG_INVALID_VALUE;
     }
 
@@ -9437,12 +9506,7 @@ cgUnmapImageRegion
         cl_int        clres = CL_SUCCESS;
         cl_event  evt_unmap = NULL;
         cl_event  evt_relgl = NULL;
-        CG_EVENT  event;
-
-        // fill out basic event object properties.
-        event.ComputeEvent    = NULL;
-        event.LinkedFence     = CG_INVALID_HANDLE;
-        event.AttachedDisplay = queue->AttachedDisplay;
+        cl_event  event     = NULL;
         
         // unmap the image region from the host address space. if the region was mapped for write 
         // access, a data transfer from host to device may be performed (hopefully asynchronously.)
@@ -9459,16 +9523,15 @@ cgUnmapImageRegion
             case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
             default                        : result = CG_ERROR;         break;
             }
+            return cgSetupNewCompleteEvent(ctx, queue, event_handle, NULL, NULL, result);
         }
 
         // set the compute event handle to the unmap completion event.
-        event.ComputeEvent = evt_unmap;
+        event = evt_unmap;
 
         if (clres == CL_SUCCESS && obj->GraphicsImage != 0)
         {   // release the buffer so it can be used by OpenGL again. this must wait for the data 
-            // transfer, possibly performed by the unmap operation, to complete. also, to ensure
-            // the data is visible in the rendering context, it is necessary to bind or re-bind 
-            // the buffer object from the rendering thread.
+            // transfer, possibly performed by the unmap operation, to complete.
             CG_DISPLAY  *display = queue->AttachedDisplay;
             if ((clres = clEnqueueReleaseGLObjects(queue->CommandQueue, 1, &obj->ComputeImage, 1, &evt_unmap, &evt_relgl)) != CL_SUCCESS)
             {
@@ -9484,29 +9547,23 @@ cgUnmapImageRegion
                 case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
                 default                        : result = CG_ERROR;         break;
                 }
+                clReleaseEvent(evt_unmap);
+                return cgSetupNewCompleteEvent(ctx, queue, event_handle, NULL, NULL, result);
             }
             else
             {   // the returned event will only be signaled when the data becomes available to OpenGL.
                 // release the unmap event in this case, as the user will not wait on it at all.
+                event = evt_relgl;
                 clReleaseEvent(evt_unmap);
-                event.ComputeEvent = evt_relgl;
             }
         }
-        if (event_handle != NULL)
-        {   // return the event object handle to the caller.
-            *event_handle = cgObjectTableAdd(&ctx->EventTable, event);
-        }
-        else
-        {   // the caller doesn't need the event returned to them.
-            clReleaseEvent(event.ComputeEvent);
-        }
-        return result;
+        return cgSetupNewCompleteEvent(ctx, queue, event_handle, event, NULL, CG_SUCCESS);
     }
     else
     {   // the queue type is not valid.
         if (event_handle != NULL)
         {   // no event object will be created or returned.
-            *event_handle = CG_INVALID_HANDLE;
+           *event_handle = CG_INVALID_HANDLE;
         }
         return CG_INVALID_VALUE;
     }
