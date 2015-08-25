@@ -232,7 +232,8 @@ struct CG_EXEC_GROUP;
 /*////////////////////////////
 //  Function Pointer Types  //
 ////////////////////////////*/
-typedef void (CG_API *cgComputeDispatch_fn)(CG_CONTEXT *, CG_QUEUE *, CG_PIPELINE *, cg_command_t *);
+typedef int  (CG_API *cgCommandExecute_fn )(CG_CONTEXT *, CG_QUEUE *, CG_CMD_BUFFER *, cg_command_t *);
+typedef int  (CG_API *cgComputeDispatch_fn)(CG_CONTEXT *, CG_QUEUE *, CG_PIPELINE   *, cg_command_t *);
 
 /*//////////////////
 //   Data Types   //
@@ -1169,88 +1170,129 @@ cgCmdBufferCommandAt
     return cmd;
 }
 
-/// @summary Checks to see if there is enough space in the command buffer memory reference list for the specified number of references.
-/// @param cmdbuf The command buffer being updated.
-/// @param memref The maximum number of memory references being added.
-/// @return true if memory object references can be added.
-internal_function inline bool
-cgCmdBufferCanAddMemRefs
-(
-    CG_CMD_BUFFER *cmdbuf, 
-    size_t         count
-)
-{
-    return (cmdbuf->InteropListCount + count <= CG_MAX_MEM_REFS);
-}
-
-/// @summary Registers a memory object reference to be acquired by OpenCL. This function is used when building a command buffer.
-/// @param cmdbuf The command buffer being updated.
-/// @param memref The OpenCL memory object shared with an OpenGL memory object.
-/// @return The memory object reference index in the interop list, or CG_INVALID_MEMREF.
-internal_function inline size_t
-cgCmdBufferAddMemRef
-(
-    CG_CMD_BUFFER *cmdbuf, 
-    cl_mem         memref
-)
-{
-    for (size_t i = 0, n = cmdbuf->InteropListCount; i < n; ++i)
-    {   // search the list of existing interop memrefs. if found, increment the reference count.
-        if (cmdbuf->GLMemRefs[i] == memref)
-        {
-            cmdbuf->RefCounts[i]++;
-            return i;
-        }
-    }
-    if (cmdbuf->InteropListCount < CG_MAX_MEM_REFS)
-    {   // the interop memref was not found, so insert a new record.
-        cmdbuf->GLMemRefs[cmdbuf->InteropListCount] = memref;
-        cmdbuf->RefCounts[cmdbuf->InteropListCount] = 1;
-        return cmdbuf->InteropListCount++;
-    }
-    return CG_INVALID_MEMREF;
-}
-
-/// @summary Registers a buffer object reference within a command list.
-/// @param cmdbuf The command buffer being updated.
-/// @param buffer The CGFX buffer object being referenced.
-/// @return The memory object reference index in the interop list, or CG_INVALID_MEMREF.
-internal_function inline size_t
-cgCmdBufferAddMemRef
-(
-    CG_CMD_BUFFER *cmdbuf, 
-    CG_BUFFER     *buffer
-)
-{
-    if (buffer->GraphicsBuffer == 0 || buffer->ComputeBuffer == NULL)
-    {   // the buffer object is not shared with OpenGL, so ignore it.
-        return CG_INVALID_MEMREF;
-    }
-    return cgCmdBufferAddMemRef(cmdbuf, buffer->ComputeBuffer);
-}
-
-/// @summary Registers an image object reference within a command list.
-/// @param cmdbuf The command buffer being updated.
-/// @param image The CGFX image object being referenced.
-/// @return The memory object reference index in the interop list, or CG_INVALID_MEMREF.
-internal_function inline size_t
-cgCmdBufferAddMemRef
-(
-    CG_CMD_BUFFER *cmdbuf, 
-    CG_IMAGE      *image
-)
-{
-    if (image->GraphicsImage == 0 || image->ComputeImage == NULL)
-    {   // the image object is not shared with OpenGL, so ignore it.
-        return CG_INVALID_MEMREF;
-    }
-    return cgCmdBufferAddMemRef(cmdbuf, image->ComputeImage);
-}
-
-/// @summary Internal function to register a callback to perform all clSetKernelArg and call clEnqueueNDRangeKernel for a pre-defined compute pipeline.
+/*////////////////////////
+//   External Symbols   //
+////////////////////////*/
+/// @summary Internal function to register a callback to perform all kernel setup for a compute pipeline.
 /// @param pipeline_id The pre-defined compute pipeline ID, one of cg_compute_pipeline_id_e.
-/// @param dispatch_func The function 
-extern void cgRegisterComputeDispatch(uint16_t pipeline_id, cgComputeDispatch_fn dispatch_func);
+/// @param dispatch_func The function called to perform all clSetKernelArg and enqueue any device kernels.
+extern void 
+cgRegisterComputeDispatch
+(
+    uint16_t             pipeline_id, 
+    cgComputeDispatch_fn dispatch_func
+);
+
+
+extern int
+cgGetWaitEvent
+(
+    CG_CONTEXT          *ctx, 
+    CG_QUEUE            *queue, 
+    cg_handle_t          wait_handle,
+    cl_event            *wait_list, 
+    cl_uint             &wait_count, 
+    cl_uint              max_events, 
+    bool                &release_ev
+);
+
+extern int
+cgSetupExistingEvent
+(
+    CG_QUEUE            *queue, 
+    CG_EVENT            *event, 
+    cl_event             cl_sync, 
+    GLsync               gl_sync, 
+    int                  result
+);
+
+extern int
+cgSetupCompleteEvent
+(
+    CG_CONTEXT          *ctx, 
+    CG_QUEUE            *queue, 
+    cg_handle_t          complete_event, 
+    cl_event             cl_sync, 
+    GLsync               gl_sync, 
+    int                  result
+);
+
+extern int
+cgSetupCompleteEventWithWaitList
+(
+    CG_CONTEXT          *ctx, 
+    CG_QUEUE            *queue, 
+    cg_handle_t          complete_event,
+    cl_event            *wait_list, 
+    size_t const         wait_count, 
+    int                  result
+);
+
+extern int
+cgSetupNewCompleteEvent
+(
+    CG_CONTEXT          *ctx, 
+    CG_QUEUE            *queue, 
+    cg_handle_t         *event_handle,
+    cl_event             cl_sync,
+    GLsync               gl_sync, 
+    int                  result
+);
+
+extern void
+cgMemRefListAddMem
+(
+    cl_mem               memref, 
+    cl_mem              *memref_list, 
+    size_t              &memref_count, 
+    size_t const         max_memrefs, 
+    bool                 check_list
+);
+
+extern void
+cgMemRefListAddBuffer
+(
+    CG_BUFFER           *buffer, 
+    cl_mem              *memref_list,
+    size_t              &memref_count, 
+    size_t const         max_memrefs, 
+    bool                 check_list
+);
+
+extern void
+cgMemRefListAddImage
+(
+    CG_IMAGE           *image, 
+    cl_mem             *memref_list, 
+    size_t             &memref_count, 
+    size_t const        max_memrefs, 
+    bool                check_list
+);
+
+extern int 
+cgAcquireMemoryObjects
+(
+    CG_CONTEXT          *ctx, 
+    CG_QUEUE            *queue, 
+    cl_mem              *memref_list, 
+    size_t  const        memref_count, 
+    cg_handle_t          sync_event, 
+    cl_event            *wait_events, 
+    cl_uint             &wait_count, 
+    cl_uint const        max_wait_events
+);
+
+extern int
+cgReleaseMemoryObjects
+(
+    CG_CONTEXT          *ctx, 
+    CG_QUEUE            *queue, 
+    cl_mem              *memref_list, 
+    size_t const         memref_count, 
+    cl_event            *wait_events,
+    size_t const         wait_count, 
+    cg_handle_t          done_event
+);
 
 #undef  CGFX_WIN32_INTERNALS_DEFINED
 #define CGFX_WIN32_INTERNALS_DEFINED

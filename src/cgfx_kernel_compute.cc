@@ -31,7 +31,7 @@
 /*///////////////////////
 //   Local Functions   //
 ///////////////////////*/
-internal_function void
+internal_function int
 cgExecuteComputeDispatchTest01
 (
     CG_CONTEXT   *ctx, 
@@ -44,6 +44,7 @@ cgExecuteComputeDispatchTest01
     cg_compute_dispatch_cmd_data_t *bdp = (cg_compute_dispatch_cmd_data_t*) cmd->Data;
     cg_compute_pipeline_test01_t   *ddp = (cg_compute_pipeline_test01_t  *) bdp->ArgsData;
     CG_BUFFER *output = cgObjectTableGet(&ctx->BufferTable, ddp->OutputBuffer);
+    // TODO(rlk): add memrefs and acquire
     clSetKernelArg(pipe->Compute.ComputeKernel, 0, sizeof(cl_mem), &output->ComputeBuffer);
     clEnqueueNDRangeKernel(queue->CommandQueue, pipe->Compute.ComputeKernel, cl_uint(bdp->WorkDimension), NULL, bdp->GlobalWorkSize, bdp->LocalWorkSize, 0, NULL, &cl_evt);
     if (bdp->DoneEvent != CG_INVALID_HANDLE)

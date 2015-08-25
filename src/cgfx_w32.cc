@@ -5107,6 +5107,267 @@ cgCalculateImageAllocatedSize
     return align_up(allocated_size, image->SourceHeap->DeviceAlignment);
 }
 
+/// @summary Implements the DEVICE_FENCE command, inserting a fence in an in-order graphics queue or an out-of-order compute or transfer queue.
+/// The fence ensures that some or all of the commands inserted into the queue prior to the fence have completed before executing commands enqueued after the fence.
+/// @param ctx The CGFX context returned by cgEnumerateDevices.
+/// @param queue The command queue into which the fence command is being inserted.
+/// @param cmdbuf The command buffer defining the fence command.
+/// @param cmd The fence command and any associated data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS or CG_ERROR.
+internal_function int
+cgCmdDeviceFenceExecute
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{
+    // proceed with command execution. a fence can either be a graphics 
+    // fence or a compute/transfer fence. a graphics fence could be linked
+    // to an OpenCL event from a clReleaseGLObjects command. since graphics
+    // queues are always in-order, a fence blocks execution until all prior 
+    // commands have completed. a compute or transfer queue fence, on the 
+    // other hand, supports out-of-order execution and can support waiting 
+    // for a specific set of events to become signaled.
+    cg_device_fence_cmd_data_t *ddp = (cg_device_fence_cmd_data_t*) cmd->Data;
+    CG_FENCE *fence = cgObjectTableGet(&ctx->FenceTable, ddp->FenceObject);
+    if (fence == NULL || (queue->QueueType & fence->QueueType) == 0)
+    {   // invalid fence object, or queue type doesn't match fence.
+        return CG_INVALID_VALUE;
+    }
+
+    if (fence->QueueType == CG_QUEUE_TYPE_GRAPHICS)
+    {   // create and enqueue an OpenGL fence sync object.
+        CG_DISPLAY *display = fence->AttachedDisplay;
+        GLsync      sync    = NULL;
+
+        // if there's an existing sync object associated with the fence, delete it.
+        if (fence->GraphicsFence != NULL)
+        {
+            glDeleteSync(fence->GraphicsFence);
+            fence->GraphicsFence  = NULL;
+        }
+
+        // generate a new sync object and insert the fence command in the OpenGL context's command queue.
+        if (fence->LinkedEvent != CG_INVALID_HANDLE)
+        {   // the fence is linked to an OpenCL event, so use GL_ARB_cl_event.
+            CG_EVENT *event = cgObjectTableGet(&ctx->EventTable, fence->LinkedEvent);
+            if (event == NULL || event->ComputeEvent == NULL)
+            {   // the compute or transfer queue command associated with the event hasn't
+                // yet been submitted to a command queue, so the operation is invalid.
+                return CG_INVALID_STATE;
+            }
+            if (GLEW_ARB_cl_event)
+            {
+                if ((sync = glCreateSyncFromCLeventARB(queue->ComputeContext, event->ComputeEvent, 0)) == NULL)
+                {
+                    GLenum  glerr = glGetError();
+                    switch (glerr)
+                    {
+                    case GL_INVALID_VALUE    : return CG_BAD_CLCONTEXT;
+                    case GL_INVALID_OPERATION: return CG_INVALID_STATE;
+                    default: break;
+                    }
+                    return CG_ERROR;
+                }
+            }
+            else
+            {   // GL_ARB_cl_event is not supported by the runtime. fail.
+                return CG_UNSUPPORTED;
+            }
+        }
+        else
+        {   // the fence is not linked to an OpenCL event.
+            if ((sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0)) == NULL)
+            {
+                GLenum  glerr = glGetError();
+                switch (glerr)
+                {
+                case GL_INVALID_ENUM : return CG_INVALID_VALUE;
+                case GL_INVALID_VALUE: return CG_INVALID_VALUE;
+                default              : break;
+                }
+                return CG_ERROR;
+            }
+        }
+        fence->GraphicsFence = sync;
+        return cgSetupCompleteEvent(ctx, queue, ddp->CompleteEvent, NULL, sync, CG_SUCCESS);
+    }
+    else
+    {   // enqueue an OpenCL barrier. there could be a wait list.
+        int       result     = CG_SUCCESS;
+        cl_int    clres      = CL_SUCCESS;
+        cl_uint   wait_count = 0;
+        cl_event  cl_fence   = NULL;
+        cl_event *wait_list  = NULL;
+        bool     *wait_free  = NULL;
+        cl_event  wait_stack[16];
+        bool      free_stack[16];
+
+        // if there's an existing sync object associated with this fence, delete it.
+        if (fence->ComputeFence != NULL)
+        {
+            clReleaseEvent(fence->ComputeFence);
+            fence->ComputeFence  = NULL;
+        }
+
+        // generate the event wait list. it's possible that there is no wait list, 
+        // in which case the fence waits for all prior commands in the queue to be
+        // completed, or it's possible that a specific list of events is specified 
+        // to satisfy the barrier condition.
+        if (ddp->WaitListCount == 0)
+        {   // simple case, this is a fence for all prior commands in the queue.
+            wait_count = 0; wait_list = NULL;
+        }
+        else
+        {   // there is a wait list involved. convert the wait handles into 
+            // an array of cl_event instances to wait on. in most cases we 
+            // should just be able to use stack memory.
+            if (ddp->WaitListCount <= 16)
+            {   // just use the stack arrays; no dynamic allocation.
+                wait_count = 0;
+                wait_list  = wait_stack;
+                wait_free  = free_stack;
+            }
+            else
+            {   // need to wait on many individual events. allocate temporary memory.
+                wait_list  = (cl_event*) cgAllocateHostMemory(&ctx->HostAllocator, ddp->WaitListCount * sizeof(cl_event), 1, CG_ALLOCATION_TYPE_TEMP);
+                wait_free  = (bool    *) cgAllocateHostMemory(&ctx->HostAllocator, ddp->WaitListCount * sizeof(bool)    , 1, CG_ALLOCATION_TYPE_TEMP);
+                if (wait_list == NULL || wait_free == NULL)
+                {   // unable to allocate the required memory.
+                    result = CG_OUT_OF_MEMORY;
+                    goto opencl_cleanup;
+                }
+            }
+            for (size_t i = 0, n = ddp->WaitListCount; i < n; ++i)
+            {
+                if ((result = cgGetWaitEvent(ctx, queue, ddp->WaitList[i], wait_list, wait_count, cl_uint(n), wait_free[wait_count])) != CG_SUCCESS)
+                {   // unable to retrieve the OpenCL event object to wait on.
+                    goto opencl_cleanup;
+                }
+            }
+        }
+
+        // insert the barrier command in the OpenCL command queue.
+        if ((clres = clEnqueueBarrierWithWaitList(queue->CommandQueue, 0, NULL, &cl_fence)) != CL_SUCCESS)
+        {   
+            switch (clres)
+            {
+            case CL_INVALID_COMMAND_QUEUE  : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
+            case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
+            default                        : result = CG_ERROR;         break;
+            }
+            goto opencl_cleanup;
+        }
+        fence->ComputeFence = cl_fence;
+        result = CG_SUCCESS;
+        /* fall through to opencl_cleanup */
+
+    opencl_cleanup:
+        for (size_t wait_i = 0, wait_n = wait_count; wait_i < wait_n; ++wait_i)
+        {   // free temporary event objects.
+            if (wait_free[wait_i])
+                clReleaseEvent(wait_list[wait_i]);
+        }
+        if (wait_list != &wait_stack[0])
+        {   // free the temporary wait list memory.
+            if (wait_free != NULL) cgFreeHostMemory(&ctx->HostAllocator, wait_free, ddp->WaitListCount * sizeof(bool)    , 1, CG_ALLOCATION_TYPE_TEMP);
+            if (wait_list != NULL) cgFreeHostMemory(&ctx->HostAllocator, wait_list, ddp->WaitListCount * sizeof(cl_event), 1, CG_ALLOCATION_TYPE_TEMP);
+        }
+        return cgSetupCompleteEvent(ctx, queue, ddp->CompleteEvent, cl_fence, NULL, result);
+    }
+}
+
+internal_function int
+cgExecuteComputeDispatch
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{
+    cg_compute_dispatch_cmd_data_t *bdp = (cg_compute_dispatch_cmd_data_t*) cmd->Data;
+    if (bdp->PipelineId >= CG_COMPUTE_PIPELINE_COUNT || COMPUTE_DISPATCH_TABLE[bdp->PipelineId] == NULL)
+    {   // this pipeline hasn't been registered yet.
+        return CG_INVALID_VALUE;
+    }
+
+    cgComputeDispatch_fn  dispatch_func =  COMPUTE_DISPATCH_TABLE[bdp->PipelineId];
+    CG_PIPELINE               *pipeline =  cgObjectTableGet(&ctx->PipelineTable, bdp->Pipeline);
+    if (pipeline == NULL)
+    {   // the ID is valid, but the pipeline object is not.
+        return CG_INVALID_VALUE;
+    }
+
+    int result = dispatch_func(ctx, queue , pipeline, cmd);
+}
+
+/// @summary Implements the COPY_BUFFER command, which copies data from one buffer to another.
+/// @param ctx The CGFX context returned by cgEnumerateDevices.
+/// @param queue The command queue into which the fence command is being inserted.
+/// @param cmdbuf The command buffer defining the fence command.
+/// @param cmd The fence command and any associated data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS or CG_ERROR.
+internal_function int
+cgExecuteCopyBufferRegion
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{
+    cg_copy_buffer_cmd_t *ddp  = (cg_copy_buffer_cmd_t*) cmd->Data;
+    CG_BUFFER         *srcbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->SourceBuffer);
+    CG_BUFFER         *dstbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->TargetBuffer);
+    int                result  =  CG_SUCCESS;
+    cl_uint           nmemrefs =  0;
+    cl_uint           nwaitevt =  0;
+    cl_event          acquire  =  NULL;
+    cl_mem            memrefs[2];
+    cgMemRefListAddBuffer(srcbuf, memrefs, nmemrefs, 2, false);
+    cgMemRefListAddBuffer(dstbuf, memrefs, nmemrefs, 2, false);
+    if ((result = cgAcquireMemoryObjects(ctx, queue, memrefs, nmemrefs, ddp->WaitEvent, &acquire, nwaitevt, 1)) == CL_SUCCESS)
+    {
+        cl_event  cl_done = NULL;
+        cl_int    cl_res  = clEnqueueCopyBuffer(
+            queue->CommandQueue, 
+            memrefs[0], /* src */
+            memrefs[1], /* dst */
+            ddp->SourceOffset, 
+            ddp->TargetOffset, 
+            ddp->CopyAmount, 
+            nwaitevt, 
+            nwaitevt ? &acquire : NULL, 
+            &cl_done);
+        if  (cl_res != CL_SUCCESS)
+        {
+            switch (cl_res)
+            {
+            case CL_INVALID_COMMAND_QUEUE        : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_CONTEXT              : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_MEM_OBJECT           : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_VALUE                : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_EVENT_WAIT_LIST      : result = CG_INVALID_VALUE; break;
+            case CL_MISALIGNED_SUB_BUFFER_OFFSET : result = CG_INVALID_VALUE; break;
+            case CL_MEM_COPY_OVERLAP             : result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE: result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_RESOURCES             : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY           : result = CG_OUT_OF_MEMORY; break;
+            default                              : result = CG_ERROR;         break;
+            }
+            cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, NULL, 0, CG_INVALID_HANDLE);
+            return result;
+        }
+        return cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, &cl_done, 1, ddp->CompleteEvent);
+    }
+    return result;
+}
+
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
@@ -7303,7 +7564,6 @@ cgCreateEvent
     return handle;
 }
 
-
 /// @summary Blocks the calling host thread until a device event becomes signaled. The command buffer that causes the event to become signaled must be submitted to a command queue before calling this function.
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param wait_handle The handle of the event object to wait on.
@@ -7402,398 +7662,6 @@ cgDeviceFenceWithWaitList
     bdp->WaitListCount  = wait_count;
     memcpy(bdp->WaitList, wait_handles, wait_count * sizeof(cg_handle_t));
     return cgCommandBufferUnmapAppend(context, cmd_buffer, cmd_size);
-}
-
-/// @summary Retrieves the cl_event associated with a CGFX event object. The returned event object is intended to be used in an OpenCL event wait list.
-/// @param ctx A CGFX context returned by cgEnumerateDevices.
-/// @param queue The compute or transfer command queue to which the command is being subitted.
-/// @param wait_handle A handle of a CGFX event or fence object to wait on.
-/// @param wait_list The wait list to update. The cl_event is appended to this list.
-/// @param wait_count The number of items currently in the wait list. On successfuly completion, this value is incremented by one.
-/// @param max_events The maximum number of cl_event references that can be written to the wait list.
-/// @param release_ev On return, this value is set to true if a temporary cl_event was created and should be released by the caller.
-/// @return CG_SUCCESS, CG_OUT_OF_OBJECTS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT or CG_BAD_GLCONTEXT.
-internal_function int
-cgClGetWaitEvent
-(
-    CG_CONTEXT *ctx, 
-    CG_QUEUE   *queue, 
-    cg_handle_t wait_handle,
-    cl_event   *wait_list, 
-    cl_uint    &wait_count, 
-    cl_uint     max_events, 
-    bool       &release_ev
-)
-{
-    if (wait_handle == CG_INVALID_HANDLE)
-    {   release_ev = false;
-        return CG_SUCCESS;
-    }
-    if (wait_count  == max_events)
-    {   release_ev = false;
-        return CG_OUT_OF_OBJECTS;
-    }
-    
-    switch (cgGetObjectType(wait_handle))
-    {
-    case CG_OBJECT_FENCE:
-        {   // create a temporary event signaled when the fence is passed.
-            cl_int    clres = CL_SUCCESS;
-            cl_event  clevt = NULL;
-            CG_FENCE *fence = cgObjectTableGet(&ctx->FenceTable, wait_handle);
-            if (fence == NULL || fence->QueueType != CG_QUEUE_TYPE_GRAPHICS)
-            {   // can only create an event for a graphics fence.
-                return CG_INVALID_VALUE;
-            }
-            if (fence->GraphicsFence == NULL)
-            {   // the fence object has not yet been submitted to a command queue.
-                return CG_INVALID_STATE;
-            }
-            if ((clevt = clCreateEventFromGLsyncKHR(queue->ComputeContext, fence->GraphicsFence, &clres)) == NULL)
-            {   // could not create an OpenCL event from the OpenGL sync object.
-                switch (clres)
-                {
-                case CL_INVALID_CONTEXT  : return CG_BAD_CLCONTEXT;
-                case CL_INVALID_GL_OBJECT: return CG_BAD_GLCONTEXT;
-                default: break;
-                }
-                release_ev = false;
-                return CG_ERROR;
-            }
-            wait_list[wait_count++] = clevt;
-            release_ev = true;
-        }
-        return CG_SUCCESS;
-
-    case CG_OBJECT_EVENT:
-        {
-            CG_EVENT *event = cgObjectTableGet(&ctx->EventTable, wait_handle);
-            if (event == NULL)
-            {   // an invalid event handle was specified.
-                return CG_INVALID_VALUE;
-            }
-            if (event->ComputeEvent == NULL)
-            {   // the event object has not yet been submitted to a command queue.
-                return CG_INVALID_STATE;
-            }
-            release_ev = false;
-            clRetainEvent(event->ComputeEvent);
-            wait_list[wait_count++] = event->ComputeEvent;
-        }
-        return CG_SUCCESS;
-
-    default:
-        break;
-    }
-    release_ev = false;
-    return CG_INVALID_VALUE;
-}
-
-/// @summary Initializes the fields of a CG_EVENT object such that the handle refers to an OpenCL event associated with the completion of a submitted command.
-/// @param queue The command queue to which the command was submitted.
-/// @param event The CGFX event object to initialize. If this event refers to an existing event, the existing event is released.
-/// @param cl_sync The completion event returned by OpenCL, or NULL if @a gl_sync is specified.
-/// @param gl_sync The completion event returned by OpenGL (if the command was submitted to a graphics queue), or NULL if @a cl_sync is specified.
-/// @param result The result code of the caller.
-/// @return The value @a result.
-internal_function int
-cgSetupExistingEvent
-(
-    CG_QUEUE *queue, 
-    CG_EVENT *event, 
-    cl_event  cl_sync, 
-    GLsync    gl_sync, 
-    int       result
-)
-{   // if the event has an existing cl_event, release it.
-    if (event->ComputeEvent != NULL)
-    {
-        clReleaseEvent(event->ComputeEvent);
-        event->ComputeEvent  = NULL;
-    }
-
-    // the event may have already been created and associated with an 
-    // OpenCL command. in this case, we only need to save the reference.
-    if (cl_sync != NULL)
-    {
-        event->ComputeEvent = cl_sync;
-        return result;
-    }
-
-    // if the event is linked to a graphics queue fence, use cl_khr_gl_event 
-    // to create the corresponding OpenCL event object.
-    if (gl_sync != NULL)
-    {
-        cl_int clres = CL_SUCCESS;
-        if ((cl_sync = clCreateEventFromGLsyncKHR(queue->ComputeContext, gl_sync, &clres)) == NULL)
-        {   // could not create an OpenCL event from the OpenGL sync object.
-            switch (clres)
-            {
-            case CL_INVALID_CONTEXT  : return CG_BAD_CLCONTEXT;
-            case CL_INVALID_GL_OBJECT: return CG_BAD_GLCONTEXT;
-            default: break;
-            }
-            return CG_ERROR;
-        }
-        event->ComputeEvent = cl_sync;
-        return result;
-    }
-    // if we reach this point, both cl_sync and gl_sync are NULL.
-    return CG_INVALID_VALUE;
-}
-
-/// @summary Initialize an existing command completion event.
-/// @param ctx The CGFX context that created the event object.
-/// @param queue The command queue to which the command was submitted.
-/// @param complete_event The handle of the CGFX event object to initialize. Any existing OpenCL event will be released.
-/// @param cl_sync The completion event returned by OpenCL, or NULL if @a gl_sync is specified.
-/// @param gl_sync The completion event returned by OpenGL (if the command was submitted to a graphics queue), or NULL if @a cl_sync is specified.
-/// @param result The result code of the caller.
-/// @return The value @a result.
-internal_function int
-cgSetupCompleteEvent
-(
-    CG_CONTEXT *ctx, 
-    CG_QUEUE   *queue, 
-    cg_handle_t complete_event, 
-    cl_event    cl_sync, 
-    GLsync      gl_sync, 
-    int         result
-)
-{
-    if (result != CG_SUCCESS)
-    {   // don't bother setting up the completion event - just return the result.
-        return result;
-    }
-    if (complete_event == CG_INVALID_HANDLE)
-    {   // no completion event is required - just return the result.
-        return result;
-    }
-    CG_EVENT *done = cgObjectTableGet(&ctx->EventTable, complete_event);
-    if (done == NULL)
-    {   // the supplied handle doesn't identify a valid event.
-        return CG_INVALID_VALUE;
-    }
-    return cgSetupExistingEvent(queue, done, cl_sync, gl_sync, result);
-}
-
-/// @summary Create and initialize a new command completion event.
-/// @param ctx The CGFX context that created the event object.
-/// @param queue The command queue to which the command was submitted.
-/// @param event_handle A pointer to the handle of the CGFX event object to initialize. If NULL, no event is created. Any existing OpenCL event will be released.
-/// @param cl_sync The completion event returned by OpenCL, or NULL if @a gl_sync is specified.
-/// @param gl_sync The completion event returned by OpenGL (if the command was submitted to a graphics queue), or NULL if @a cl_sync is specified.
-/// @param result The result code of the caller.
-/// @return The value @a result.
-internal_function int
-cgSetupNewCompleteEvent
-(
-    CG_CONTEXT  *ctx, 
-    CG_QUEUE    *queue, 
-    cg_handle_t *event_handle,
-    cl_event     cl_sync,
-    GLsync       gl_sync, 
-    int          result
-)
-{
-    if (result != CG_SUCCESS)
-    {   // don't bother creating a completion event - just return the result.
-        if (event_handle != NULL)
-        {   // indicate that no event is being returned.
-            *event_handle = CG_INVALID_HANDLE;
-        }
-        return result;
-    }
-    if (event_handle == NULL)
-    {   // no event was requested by the caller, so just return the result.
-        if (cl_sync  != NULL)
-        {   // nobody will wait on the event, so release it.
-            clReleaseEvent(cl_sync);
-        }
-        if (gl_sync  != NULL)
-        {   // nobody will wait on the event, so release it.
-            CG_DISPLAY *display = queue->AttachedDisplay;
-            glDeleteSync(gl_sync);
-        }
-        return result; 
-    }
-    
-    CG_EVENT    ev; ev.ComputeEvent = NULL;
-    cg_handle_t ev_h = cgObjectTableAdd(&ctx->EventTable, ev);
-    if (ev_h == CG_INVALID_HANDLE)
-    {   // unable to create the new event object - the object table is full.
-        *event_handle = CG_INVALID_HANDLE;
-        return CG_OUT_OF_OBJECTS;
-    }
-    CG_EVENT *done = cgObjectTableGet(&ctx->EventTable, ev_h);
-    return cgSetupExistingEvent(queue, done, cl_sync, gl_sync, result);
-}
-
-internal_function int
-cgCmdDeviceFenceExecute
-(
-    CG_CONTEXT    *ctx, 
-    CG_QUEUE      *queue, 
-    CG_CMD_BUFFER *cmdbuf, 
-    cg_command_t  *cmd, 
-    size_t        &mem_ref_count,
-    size_t        *mem_ref_list,
-    size_t const   max_mem_refs,
-    cg_handle_t   &done_event_cg, 
-    cl_event      &done_event_cl
-)
-{   // the device fence command does not operate on any memory objects.
-    UNREFERENCED_PARAMETER(mem_ref_list);
-    UNREFERENCED_PARAMETER(max_mem_refs);
-    mem_ref_count = 0;
-    done_event_cg = CG_INVALID_HANDLE;
-    done_event_cl = NULL;
-
-    // proceed with command execution. a fence can either be a graphics 
-    // fence or a compute/transfer fence. a graphics fence could be linked
-    // to an OpenCL event from a clReleaseGLObjects command. since graphics
-    // queues are always in-order, a fence blocks execution until all prior 
-    // commands have completed. a compute or transfer queue fence, on the 
-    // other hand, supports out-of-order execution and can support waiting 
-    // for a specific set of events to become signaled.
-    cg_device_fence_cmd_data_t *ddp = (cg_device_fence_cmd_data_t*) cmd->Data;
-    CG_FENCE *fence = cgObjectTableGet(&ctx->FenceTable, ddp->FenceObject);
-    if (fence == NULL || (queue->QueueType & fence->QueueType) == 0)
-    {   // invalid fence object, or queue type doesn't match fence.
-        return CG_INVALID_VALUE;
-    }
-
-    if (fence->QueueType == CG_QUEUE_TYPE_GRAPHICS)
-    {   // create and enqueue an OpenGL fence sync object.
-        CG_DISPLAY *display = fence->AttachedDisplay;
-        GLsync      sync    = NULL;
-
-        // if there's an existing sync object associated with the fence, delete it.
-        if (fence->GraphicsFence != NULL)
-        {
-            glDeleteSync(fence->GraphicsFence);
-            fence->GraphicsFence  = NULL;
-        }
-
-        // generate a new sync object and insert the fence command in the OpenGL context's command queue.
-        if (fence->LinkedEvent != CG_INVALID_HANDLE)
-        {   // the fence is linked to an OpenCL event, so use GL_ARB_cl_event.
-            CG_EVENT *event = cgObjectTableGet(&ctx->EventTable, fence->LinkedEvent);
-            if (event == NULL || event->ComputeEvent == NULL)
-            {   // the compute or transfer queue command associated with the event hasn't
-                // yet been submitted to a command queue, so the operation is invalid.
-                return CG_INVALID_STATE;
-            }
-            if (GLEW_ARB_cl_event)
-            {
-                if ((sync = glCreateSyncFromCLeventARB(queue->ComputeContext, event->ComputeEvent, 0)) == NULL)
-                {
-                    GLenum  glerr = glGetError();
-                    switch (glerr)
-                    {
-                    case GL_INVALID_VALUE    : return CG_BAD_CLCONTEXT;
-                    case GL_INVALID_OPERATION: return CG_INVALID_STATE;
-                    default: break;
-                    }
-                    return CG_ERROR;
-                }
-            }
-            else
-            {   // GL_ARB_cl_event is not supported by the runtime. fail.
-                return CG_UNSUPPORTED;
-            }
-        }
-        else
-        {   // the fence is not linked to an OpenCL event.
-            if ((sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0)) == NULL)
-            {
-                GLenum  glerr = glGetError();
-                switch (glerr)
-                {
-                case GL_INVALID_ENUM : return CG_INVALID_VALUE;
-                case GL_INVALID_VALUE: return CG_INVALID_VALUE;
-                default              : break;
-                }
-                return CG_ERROR;
-            }
-        }
-        fence->GraphicsFence = sync;
-        return cgSetupCompleteEvent(ctx, queue, ddp->CompleteEvent, NULL, sync, CG_SUCCESS);
-    }
-    else
-    {   // enqueue an OpenCL barrier. there could be a wait list.
-        int       result     = CG_SUCCESS;
-        cl_int    clres      = CL_SUCCESS;
-        cl_uint   wait_count = 0;
-        cl_event  cl_fence   = NULL;
-        cl_event *wait_list  = NULL;
-        bool     *wait_free  = NULL;
-        cl_event  wait_stack[16];
-        bool      free_stack[16];
-
-        if (ddp->WaitListCount == 0)
-        {   // simple case, this is a fence for all prior commands in the queue.
-            wait_count = 0; wait_list = NULL;
-        }
-        else
-        {   // there is a wait list involved. convert the wait handles into 
-            // an array of cl_event instances to wait on. in most cases we 
-            // should just be able to use stack memory.
-            if (ddp->WaitListCount <= 16)
-            {   // just use the stack arrays; no dynamic allocation.
-                wait_count = 0;
-                wait_list  = wait_stack;
-                wait_free  = free_stack;
-            }
-            else
-            {   // need to wait on many individual events. allocate temporary memory.
-                wait_list  = (cl_event*) cgAllocateHostMemory(&ctx->HostAllocator, ddp->WaitListCount * sizeof(cl_event), 1, CG_ALLOCATION_TYPE_TEMP);
-                wait_free  = (bool    *) cgAllocateHostMemory(&ctx->HostAllocator, ddp->WaitListCount * sizeof(bool)    , 1, CG_ALLOCATION_TYPE_TEMP);
-                if (wait_list == NULL || wait_free == NULL)
-                {   // unable to allocate the required memory.
-                    result = CG_OUT_OF_MEMORY;
-                    goto opencl_cleanup;
-                }
-            }
-            for (size_t i = 0, n = ddp->WaitListCount; i < n; ++i)
-            {
-                if ((result = cgClGetWaitEvent(ctx, queue, ddp->WaitList[i], wait_list, wait_count, cl_uint(n), wait_free[wait_count])) != CG_SUCCESS)
-                {   // unable to retrieve the OpenCL event object to wait on.
-                    goto opencl_cleanup;
-                }
-            }
-        }
-
-        // insert the barrier command in the OpenCL command queue.
-        if ((clres = clEnqueueBarrierWithWaitList(queue->CommandQueue, 0, NULL, &cl_fence)) != CL_SUCCESS)
-        {   
-            switch (clres)
-            {
-            case CL_INVALID_COMMAND_QUEUE  : result = CG_BAD_CLCONTEXT; break;
-            case CL_INVALID_EVENT_WAIT_LIST: result = CG_INVALID_VALUE; break;
-            case CL_OUT_OF_RESOURCES       : result = CG_OUT_OF_MEMORY; break;
-            case CL_OUT_OF_HOST_MEMORY     : result = CG_OUT_OF_MEMORY; break;
-            default                        : result = CG_ERROR;         break;
-            }
-            goto opencl_cleanup;
-        }
-        fence->ComputeFence = cl_fence;
-        result = CG_SUCCESS;
-        /* fall through to opencl_cleanup */
-
-    opencl_cleanup:
-        for (size_t wait_i = 0, wait_n = wait_count; wait_i < wait_n; ++wait_i)
-        {   // free temporary event objects.
-            if (wait_free[wait_i])
-                clReleaseEvent(wait_list[wait_i]);
-        }
-        if (wait_list != &wait_stack[0])
-        {   // free the temporary wait list memory.
-            if (wait_free != NULL) cgFreeHostMemory(&ctx->HostAllocator, wait_free, ddp->WaitListCount * sizeof(bool)    , 1, CG_ALLOCATION_TYPE_TEMP);
-            if (wait_list != NULL) cgFreeHostMemory(&ctx->HostAllocator, wait_list, ddp->WaitListCount * sizeof(cl_event), 1, CG_ALLOCATION_TYPE_TEMP);
-        }
-        return cgSetupCompleteEvent(ctx, queue, ddp->CompleteEvent, cl_fence, NULL, result);
-    }
 }
 
 /// @summary Create a kernel object and load graphics or compute shader code into it.
@@ -8706,7 +8574,7 @@ cgMapDataBuffer
         void        *mapped     = NULL;
         bool         release_ev = false;
 
-        if ((result = cgClGetWaitEvent(ctx, queue, wait_handle, &wait_event, wait_count, 1, release_ev)) != CG_SUCCESS)
+        if ((result = cgGetWaitEvent(ctx, queue, wait_handle, &wait_event, wait_count, 1, release_ev)) != CG_SUCCESS)
         {   // some problem with the event or fence we're told to wait on.
             return NULL;
         }
@@ -9368,7 +9236,7 @@ cgMapImageRegion
         void        *mapped     = NULL;
         bool         release_ev = false;
 
-        if ((result = cgClGetWaitEvent(ctx, queue, wait_handle, &wait_event, wait_count, 1, release_ev)) != CG_SUCCESS)
+        if ((result = cgGetWaitEvent(ctx, queue, wait_handle, &wait_event, wait_count, 1, release_ev)) != CG_SUCCESS)
         {   // some problem with the event or fence we're told to wait on.
             return NULL;
         }
@@ -9925,197 +9793,6 @@ cgCopyBufferRegion
     cmd.SourceBufferRef   = cgCmdBufferAddMemRef(cmdbuf, srcbuf);
     cmd.TargetBufferRef   = cgCmdBufferAddMemRef(cmdbuf, dstbuf);
     return cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_BUFFER, sizeof(cmd), &cmd);
-}
-
-typedef int (*cgCommandImpl_fn)
-(
-    CG_CONTEXT    *ctx, 
-    CG_QUEUE      *queue, 
-    CG_CMD_BUFFER *cmdbuf, 
-    cg_command_t  *cmd,
-    size_t        &mem_ref_count,
-    size_t        *mem_ref_list,
-    size_t const   max_mem_refs,
-    cg_handle_t   &done_event_cg, 
-    cl_event      &done_event_cl, 
-    GLsync        &done_event_gl
-);
-
-// the command implementation should acquire and release any shared GL objects.
-// make helper functions to build a local list that are basically the equivalent of cgCmdBufferAddMemRef.
-// make a helper function to acquire all mem refs *for that command* at once. this function returns a CL event and increments an event count.
-// then the actual command is submitted to the queue. this always generates a cl_event.
-// make a helper function to release all mem refs *for that command* at once. 
-internal_function void
-cgMemRefListAdd
-(
-    cl_mem       memref, 
-    cl_mem      *memref_list, 
-    size_t      &memref_count, 
-    size_t const max_memrefs, 
-    bool         check_list
-)
-{
-    if (memref_count >= max_memrefs)
-    {   // the list is full. this should never happen.
-        assert(memref_count < max_memrefs);
-        return;
-    }
-    if (check_list)
-    {   // check for memref in the existing list to avoid adding duplicate entries.
-        for (size_t i = 0, n = memref_count; i < n; ++i)
-        {
-            if (memref_list[i] == memref)
-                return;
-        }
-    }
-    memref_list[memref_count++] = memref;
-}
-
-internal_function void
-cgMemRefListAdd
-(
-    CG_BUFFER    *buffer, 
-    cl_mem       *memref_list,
-    size_t       &memref_count, 
-    size_t const  max_memrefs, 
-    bool          check_list
-)
-{
-    if (buffer->GraphicsBuffer == 0 || buffer->ComputeBuffer == NULL)
-    {   // the buffer object is not shared with OpenGL, so ignore it.
-        return;
-    }
-    cgMemRefListAdd(buffer->ComputeBuffer, memref_list, memref_count, max_memrefs, check_list);
-}
-
-internal_function void
-cgMemRefListAdd
-(
-    CG_IMAGE     *image, 
-    cl_mem       *memref_list, 
-    size_t       &memref_count, 
-    size_t const  max_memrefs, 
-    bool          check_list
-)
-{
-    if (image->GraphicsImage == 0 || image->ComputeImage == NULL)
-    {   // the image object is not shared with OpenGL, so ignore it.
-        return;
-    }
-    cgMemRefListAdd(image->ComputeImage, memref_list, memref_count, max_memrefs, check_list);
-}
-
-internal_function int 
-cgAcquireMemRefsFromGL
-(
-    CG_QUEUE     *queue, 
-    cl_mem       *memref_list, 
-    size_t  const memref_count, 
-    cl_event     *wait_events, 
-    cl_uint      &wait_count, 
-    cl_uint const max_wait_events
-)
-{   // TODO(rlk): also need to accept a list of GLsync to wait on GL operations to complete.
-    // probably worthwhile to figure out how this stuff works from the GL side of the fence.
-    if (memref_count > 0)
-    {
-        cl_event  ev = NULL;
-        cl_int clres = clEnqueueAcquireGLObjects(queue->CommandQueue, cl_uint(memref_count), memref_list, 0, NULL, &ev);
-        if (clres   != CL_SUCCESS)
-        {   // convert the OpenCL error code to a CGFX result code.
-            int    r = CG_ERROR;
-            switch(r)
-            {
-            case CL_INVALID_VALUE          : r = CG_INVALID_VALUE; break;
-            case CL_INVALID_MEM_OBJECT     : r = CG_INVALID_VALUE; break;
-            case CL_INVALID_COMMAND_QUEUE  : r = CG_INVALID_VALUE; break;
-            case CL_INVALID_CONTEXT        : r = CG_BAD_CLCONTEXT; break;
-            case CL_INVALID_GL_OBJECT      : r = CG_INVALID_VALUE; break;
-            case CL_INVALID_EVENT_WAIT_LIST: r = CG_INVALID_VALUE; break;
-            case CL_OUT_OF_RESOURCES       : r = CG_OUT_OF_MEMORY; break;
-            case CL_OUT_OF_HOST_MEMORY     : r = CG_OUT_OF_MEMORY; break;
-            default                        : r = CG_ERROR;         break;
-            }
-            return r;
-        }
-        if (wait_count < max_wait_events)
-        {   // save the event handle in the wait list.
-            wait_events[wait_count++] = ev;
-        }
-        else clReleaseEvent(ev);
-    }
-    return CG_SUCCESS;
-}
-
-internal_function int
-cgReleaseMemRefsToGL
-(
-)
-{
-}
-
-/// @summary Wraps command execution to perform common pre- and post-execution operations such as managing memory object reference counts.
-/// @param context A CGFX context returned by cgEnumerateDevices.
-/// @param queue The queue executing the command buffer.
-/// @param cmdbuf The command buffer being executed.
-/// @param cmd The command being executed.
-/// @param cmd_exec The function to interpret the command data and execute the main body of the command.
-/// @param ref_counts Memory object reference counts. These counts are decremented when cmd_exec returns.
-/// @return 
-internal_function int
-cgExecuteCommandCl
-(
-    CG_CONTEXT       *ctx, 
-    CG_QUEUE         *queue, 
-    CG_CMD_BUFFER    *cmdbuf, 
-    cg_command_t     *cmd, 
-    cgCommandImpl_fn  cmd_exec,
-    size_t           *ref_counts 
-)
-{
-    size_t      mem_refs[128];
-    size_t      num_refs     = 0;
-    cg_handle_t done_evt     = CG_INVALID_HANDLE;
-    cl_event    done_evt_cl  = NULL;
-    cl_event    done_evt_gl  = NULL;
-    int         result       = cmd_exec(ctx, queue, cmdbuf, cmd, num_refs, mem_refs, 128, done_evt, done_evt_cl);
-    for (size_t i = 0; i < num_refs; ++i)
-    {   // decrement reference counts on each returned memref.
-        if (mem_refs[i] != CG_INVALID_MEMREF)
-        {   // if the reference count reaches zero, release the GL object.
-            if (1 == ref_counts[mem_refs[i]]--)
-            {
-                clEnqueueReleaseGLObjects(queue->CommandQueue, 1, &cmdbuf->GLMemRefs[mem_refs[i]], 1, &done_evt_cl, &done_evt_gl);
-            }
-        }
-    }
-    if (done_evt != CG_INVALID_HANDLE && done_evt_cl != NULL)
-    {   // set up the completion event object for the caller.
-        CG_EVENT *devent = cgObjectTableGet(&ctx->EventTable, done_evt);
-        if (devent != NULL)
-        {
-            if (devent->EventUsage  & CG_EVENT_USAGE_COMPUTE)
-            {   // set the OpenCL event reference; no additional work is necessary.
-                devent->ComputeSync = done_evt_cl;
-            }
-            else clReleaseEvent(done_evt_cl);
-
-            if (devent->EventUsage  & CG_EVENT_USAGE_GRAPHICS)
-            {   // create an OpenGL event from the OpenCL event, if supported.
-                CG_DISPLAY *display = devent->AttachedDisplay;
-                if (GLEW_ARB_cl_event && done_evt_gl != NULL)
-                {
-                    devent->GraphicsSync = glCreateSyncFromCLeventARB(queue->ComputeContext, done_evt_gl, 0);
-                }
-            }
-            if (done_evt_gl != NULL && devent->GraphicsSync == NULL)
-            {   // OpenGL sync event wasn't needed, supported or couldn't be created.
-                clReleaseEvent(done_evt_gl);
-            }
-        }
-    }
-    return result;
 }
 
 internal_function int
