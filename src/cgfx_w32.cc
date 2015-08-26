@@ -5376,6 +5376,197 @@ cgExecuteCopyBufferRegion
     return result;
 }
 
+/// @summary Implements the COPY_IMAGE command, which copies data from one image to another.
+/// @param ctx The CGFX context returned by cgEnumerateDevices.
+/// @param queue The command queue into which the command is being inserted.
+/// @param cmdbuf The command buffer defining the command.
+/// @param cmd The command and any associated data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS or CG_ERROR.
+internal_function int
+cgExecuteCopyImageRegion
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{   UNREFERENCED_PARAMETER(cmdbuf);
+    cg_copy_image_cmd_t  *ddp  = (cg_copy_image_cmd_t*) cmd->Data;
+    CG_IMAGE          *srcimg  =  cgObjectTableGet(&ctx->ImageTable, ddp->SourceImage);
+    CG_IMAGE          *dstimg  =  cgObjectTableGet(&ctx->ImageTable, ddp->TargetImage);
+    int                result  =  CG_SUCCESS;
+    cl_uint           nmemrefs =  0;
+    cl_uint           nwaitevt =  0;
+    cl_event          acquire  =  NULL;
+    cl_mem            memrefs[2];
+    cgMemRefListAddImage(srcimg, memrefs, nmemrefs, 2, false);
+    cgMemRefListAddImage(dstimg, memrefs, nmemrefs, 2, false);
+    if ((result = cgAcquireMemoryObjects(ctx, queue, memrefs, nmemrefs, ddp->WaitEvent, &acquire, nwaitevt, 1)) == CL_SUCCESS)
+    {
+        cl_event  cl_done = NULL;
+        cl_int    cl_res  = clEnqueueCopyImage(
+            queue->CommandQueue, 
+            memrefs[0], /* src */
+            memrefs[1], /* dst */
+            ddp->SourceOrigin, 
+            ddp->TargetOrigin, 
+            ddp->Dimensions, 
+            nwaitevt, 
+            CG_OPENCL_WAIT_LIST(nwaitevt, &acquire),
+            &cl_done);
+        if  (cl_res != CL_SUCCESS)
+        {
+            switch (cl_res)
+            {
+            case CL_INVALID_COMMAND_QUEUE        : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_CONTEXT              : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_MEM_OBJECT           : result = CG_BAD_CLCONTEXT; break;
+            case CL_IMAGE_FORMAT_MISMATCH        : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_IMAGE_SIZE           : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_VALUE                : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_EVENT_WAIT_LIST      : result = CG_INVALID_VALUE; break;
+            case CL_MEM_COPY_OVERLAP             : result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE: result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_RESOURCES             : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY           : result = CG_OUT_OF_MEMORY; break;
+            default                              : result = CG_ERROR;         break;
+            }
+            cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, NULL, 0, CG_INVALID_HANDLE);
+            return result;
+        }
+        return cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, &cl_done, 1, ddp->CompleteEvent);
+    }
+    return result;
+}
+
+/// @summary Implements the COPY_BUFFER_TO_IMAGE command, which copies data from one image to another.
+/// @param ctx The CGFX context returned by cgEnumerateDevices.
+/// @param queue The command queue into which the command is being inserted.
+/// @param cmdbuf The command buffer defining the command.
+/// @param cmd The command and any associated data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS, CG_UNSUPPORTED or CG_ERROR.
+internal_function int
+cgExecuteCopyBufferToImage
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{   UNREFERENCED_PARAMETER(cmdbuf);
+    cg_copy_buffer_to_image_cmd_t  *ddp  = (cg_copy_buffer_to_image_cmd_t*) cmd->Data;
+    CG_BUFFER         *srcbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->SourceBuffer);
+    CG_IMAGE          *dstimg  =  cgObjectTableGet(&ctx->ImageTable , ddp->TargetImage);
+    int                result  =  CG_SUCCESS;
+    cl_uint           nmemrefs =  0;
+    cl_uint           nwaitevt =  0;
+    cl_event          acquire  =  NULL;
+    cl_mem            memrefs[2];
+    cgMemRefListAddBuffer(srcbuf, memrefs, nmemrefs, 2, false);
+    cgMemRefListAddImage (dstimg, memrefs, nmemrefs, 2, false);
+    if ((result = cgAcquireMemoryObjects(ctx, queue, memrefs, nmemrefs, ddp->WaitEvent, &acquire, nwaitevt, 1)) == CL_SUCCESS)
+    {
+        cl_event  cl_done = NULL;
+        cl_int    cl_res  = clEnqueueCopyBufferToImage(
+            queue->CommandQueue, 
+            memrefs[0], /* src */
+            memrefs[1], /* dst */
+            ddp->SourceOffset, 
+            ddp->TargetOrigin, 
+            ddp->Dimensions, 
+            nwaitevt, 
+            CG_OPENCL_WAIT_LIST(nwaitevt, &acquire),
+            &cl_done);
+        if  (cl_res != CL_SUCCESS)
+        {
+            switch (cl_res)
+            {
+            case CL_INVALID_OPERATION            : result = CG_UNSUPPORTED;   break;
+            case CL_INVALID_COMMAND_QUEUE        : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_CONTEXT              : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_MEM_OBJECT           : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_IMAGE_SIZE           : result = CG_UNSUPPORTED;   break;
+            case CL_MISALIGNED_SUB_BUFFER_OFFSET : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_VALUE                : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_EVENT_WAIT_LIST      : result = CG_INVALID_VALUE; break;
+            case CL_MEM_COPY_OVERLAP             : result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE: result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_RESOURCES             : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY           : result = CG_OUT_OF_MEMORY; break;
+            default                              : result = CG_ERROR;         break;
+            }
+            cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, NULL, 0, CG_INVALID_HANDLE);
+            return result;
+        }
+        return cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, &cl_done, 1, ddp->CompleteEvent);
+    }
+    return result;
+}
+
+/// @summary Implements the COPY_IMAGE_TO_BUFFER command, which copies data from one image to another.
+/// @param ctx The CGFX context returned by cgEnumerateDevices.
+/// @param queue The command queue into which the command is being inserted.
+/// @param cmdbuf The command buffer defining the command.
+/// @param cmd The command and any associated data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS, CG_UNSUPPORTED or CG_ERROR.
+internal_function int
+cgExecuteCopyImageToBuffer
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{   UNREFERENCED_PARAMETER(cmdbuf);
+    cg_copy_image_to_buffer_cmd_t  *ddp  = (cg_copy_image_to_buffer_cmd_t*) cmd->Data;
+    CG_IMAGE          *srcimg  =  cgObjectTableGet(&ctx->ImageTable , ddp->SourceImage);
+    CG_BUFFER         *dstbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->TargetBuffer);
+    int                result  =  CG_SUCCESS;
+    cl_uint           nmemrefs =  0;
+    cl_uint           nwaitevt =  0;
+    cl_event          acquire  =  NULL;
+    cl_mem            memrefs[2];
+    cgMemRefListAddImage (srcimg, memrefs, nmemrefs, 2, false);
+    cgMemRefListAddBuffer(dstbuf, memrefs, nmemrefs, 2, false);
+    if ((result = cgAcquireMemoryObjects(ctx, queue, memrefs, nmemrefs, ddp->WaitEvent, &acquire, nwaitevt, 1)) == CL_SUCCESS)
+    {
+        cl_event  cl_done = NULL;
+        cl_int    cl_res  = clEnqueueCopyImageToBuffer(
+            queue->CommandQueue, 
+            memrefs[0], /* src */
+            memrefs[1], /* dst */
+            ddp->SourceOrigin, 
+            ddp->Dimensions, 
+            ddp->TargetOffset, 
+            nwaitevt, 
+            CG_OPENCL_WAIT_LIST(nwaitevt, &acquire),
+            &cl_done);
+        if  (cl_res != CL_SUCCESS)
+        {
+            switch (cl_res)
+            {
+            case CL_INVALID_OPERATION            : result = CG_UNSUPPORTED;   break;
+            case CL_INVALID_COMMAND_QUEUE        : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_CONTEXT              : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_MEM_OBJECT           : result = CG_BAD_CLCONTEXT; break;
+            case CL_INVALID_IMAGE_SIZE           : result = CG_UNSUPPORTED;   break;
+            case CL_MISALIGNED_SUB_BUFFER_OFFSET : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_VALUE                : result = CG_INVALID_VALUE; break;
+            case CL_INVALID_EVENT_WAIT_LIST      : result = CG_INVALID_VALUE; break;
+            case CL_MEM_COPY_OVERLAP             : result = CG_INVALID_VALUE; break;
+            case CL_MEM_OBJECT_ALLOCATION_FAILURE: result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_RESOURCES             : result = CG_OUT_OF_MEMORY; break;
+            case CL_OUT_OF_HOST_MEMORY           : result = CG_OUT_OF_MEMORY; break;
+            default                              : result = CG_ERROR;         break;
+            }
+            cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, NULL, 0, CG_INVALID_HANDLE);
+            return result;
+        }
+        return cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, &cl_done, 1, ddp->CompleteEvent);
+    }
+    return result;
+}
+
 /// @summary Executes a command buffer against an out-of-order transfer queue.
 /// @param ctx The CGFX context defining the command queue.
 /// @param queue The CGFX command queue, which must be a transfer queue.
@@ -5402,6 +5593,15 @@ cgExecuteTransferCommandBuffer
             break;
         case CG_COMMAND_COPY_BUFFER:
             res = cgExecuteCopyBufferRegion(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_COPY_IMAGE:
+            res = cgExecuteCopyImageRegion(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_COPY_BUFFER_TO_IMAGE:
+            res = cgExecuteCopyImageToBuffer(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_COPY_IMAGE_TO_BUFFER:
+            res = cgExecuteCopyBufferToImage(ctx, queue, cmdbuf, cmd);
             break;
         default:
             res = CG_COMMAND_NOT_IMPLEMENTED;
@@ -5443,6 +5643,15 @@ cgExecuteComputeCommandBuffer
             break;
         case CG_COMMAND_COPY_BUFFER:
             res = cgExecuteCopyBufferRegion(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_COPY_IMAGE:
+            res = cgExecuteCopyImageRegion(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_COPY_BUFFER_TO_IMAGE:
+            res = cgExecuteCopyImageToBuffer(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_COPY_IMAGE_TO_BUFFER:
+            res = cgExecuteCopyBufferToImage(ctx, queue, cmdbuf, cmd);
             break;
         default:
             res = CG_COMMAND_NOT_IMPLEMENTED;
@@ -9835,8 +10044,12 @@ cgCopyBuffer
 )
 {
     CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
-    CG_BUFFER     *dstbuf =  cgObjectTableGet(&ctx->BufferTable   , dst_buffer);
-    CG_BUFFER     *srcbuf =  cgObjectTableGet(&ctx->BufferTable   , src_buffer);
+    CG_BUFFER     *dstbuf =  cgObjectTableGet(&ctx->BufferTable, dst_buffer);
+    CG_BUFFER     *srcbuf =  cgObjectTableGet(&ctx->BufferTable, src_buffer);
+    if ((srcbuf == NULL) || (dstbuf == NULL) || (srcbuf == dstbuf))
+    {   // one or both buffer objects are invalid, or the same buffer.
+        return CG_INVALID_VALUE;
+    }
     if ((dst_offset + srcbuf->RequestedSize) > dstbuf->RequestedSize)
     {   // the destination buffer is not large enough, or the offset is invalid.
         return CG_INVALID_VALUE;
@@ -9878,8 +10091,12 @@ cgCopyBufferRegion
 )
 {
     CG_CONTEXT *ctx    = (CG_CONTEXT*) context;
-    CG_BUFFER  *dstbuf =  cgObjectTableGet(&ctx->BufferTable   , dst_buffer);
-    CG_BUFFER  *srcbuf =  cgObjectTableGet(&ctx->BufferTable   , src_buffer);
+    CG_BUFFER  *dstbuf =  cgObjectTableGet(&ctx->BufferTable, dst_buffer);
+    CG_BUFFER  *srcbuf =  cgObjectTableGet(&ctx->BufferTable, src_buffer);
+    if ((srcbuf == NULL) || (dstbuf == NULL) || (srcbuf == dstbuf))
+    {   // one or both buffer objects are invalid, or the same buffer.
+        return CG_INVALID_VALUE;
+    }
     if ((src_offset + copy_amount) > srcbuf->RequestedSize)
     {   // the offset or amount is invalid.
         return CG_INVALID_VALUE;
@@ -9898,6 +10115,222 @@ cgCopyBufferRegion
     cmd.TargetOffset   = dst_offset;
     cmd.CopyAmount     = copy_amount;
     return cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_BUFFER, sizeof(cmd), &cmd);
+}
+
+/// @summary Copies the entire contents of one image to another.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cmd_buffer The handle of the destination command buffer.
+/// @param dst_image The handle of the target image.
+/// @param dst_origin The x-coordinate, y-coordinate and slice or array index on the target image.
+/// @param src_image The handle of the source image.
+/// @param done_event The handle of an event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+/// @param wait_event The handle of an event to wait for before beginning the transfer, or CG_INVALID_HANDLE.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCopyImage
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    cg_handle_t dst_image, 
+    size_t      dst_origin[3],
+    cg_handle_t src_image, 
+    cg_handle_t done_event, 
+    cg_handle_t wait_event
+)
+{
+    CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
+    CG_IMAGE      *dstimg =  cgObjectTableGet(&ctx->ImageTable, dst_image);
+    CG_IMAGE      *srcimg =  cgObjectTableGet(&ctx->ImageTable, src_image);
+    if ((srcimg == NULL) || (dstimg == NULL) || (srcimg == dstimg))
+    {   // one or both image objects are invalid, or the same image.
+        return CG_INVALID_VALUE;
+    }
+    if ((dst_origin[0] + srcimg->ImageWidth ) > dstimg->PaddedWidth)
+    {   // the origin is invalid - it will write off the edge of the destination.
+        return CG_INVALID_VALUE;
+    }
+    if ((dst_origin[1] + srcimg->ImageHeight) > dstimg->PaddedHeight)
+    {   // the origin is invalid - it will write off the edge of the destination.
+        return CG_INVALID_VALUE;
+    }
+
+    cg_copy_image_cmd_t cmd;
+    cmd.WaitEvent       = wait_event;
+    cmd.CompleteEvent   = done_event;
+    cmd.SourceImage     = src_image;
+    cmd.TargetImage     = dst_image;
+    cmd.SourceOrigin[0] = 0;
+    cmd.SourceOrigin[1] = 0;
+    cmd.SourceOrigin[2] = 0;
+    cmd.TargetOrigin[0] = dst_origin[0];
+    cmd.TargetOrigin[1] = dst_origin[1];
+    cmd.TargetOrigin[2] = dst_origin[2];
+    cmd.Dimensions[0]   = srcimg->ImageWidth;
+    cmd.Dimensions[1]   = srcimg->ImageHeight;
+    cmd.Dimensions[2]   = max(srcimg->SliceCount, srcimg->ArrayCount);
+    return cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_IMAGE, sizeof(cmd), &cmd);
+}
+
+/// @summary Copies a subregion of one image to another.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cmd_buffer The handle of the destination command buffer.
+/// @param dst_image The handle of the target image.
+/// @param dst_origin The x-coordinate, y-coordinate and slice or array index on the target image.
+/// @param src_image The handle of the source image.
+/// @param done_event The handle of an event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+/// @param wait_event The handle of an event to wait for before beginning the transfer, or CG_INVALID_HANDLE.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCopyImageRegion
+(
+    uintptr_t   context, 
+    cg_handle_t cmd_buffer, 
+    cg_handle_t dst_image, 
+    size_t      dst_origin[3],
+    cg_handle_t src_image, 
+    size_t      src_origin[3], 
+    size_t      dimension[3],
+    cg_handle_t done_event, 
+    cg_handle_t wait_event
+)
+{
+    CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
+    CG_IMAGE      *dstimg =  cgObjectTableGet(&ctx->ImageTable, dst_image);
+    CG_IMAGE      *srcimg =  cgObjectTableGet(&ctx->ImageTable, src_image);
+    if ((srcimg == NULL) || (dstimg == NULL) || (srcimg == dstimg))
+    {   // one or both image objects are invalid, or the same image.
+        return CG_INVALID_VALUE;
+    }
+    if ((dst_origin[0] + dimension[0]) > dstimg->PaddedWidth)
+    {   // the origin is invalid - it will write off the edge of the destination.
+        return CG_INVALID_VALUE;
+    }
+    if ((dst_origin[1] + dimension[1]) > dstimg->PaddedHeight)
+    {   // the origin is invalid - it will write off the edge of the destination.
+        return CG_INVALID_VALUE;
+    }
+    if ((src_origin[0] + dimension[0]) > srcimg->PaddedWidth)
+    {   // the origin is invalid - it will read off the edge of the source.
+        return CG_INVALID_VALUE;
+    }
+    if ((src_origin[1] + dimension[1]) > srcimg->PaddedHeight)
+    {   // the origin is invalid - it will read off the edge of the source.
+        return CG_INVALID_VALUE;
+    }
+
+    cg_copy_image_cmd_t cmd;
+    cmd.WaitEvent       = wait_event;
+    cmd.CompleteEvent   = done_event;
+    cmd.SourceImage     = src_image;
+    cmd.TargetImage     = dst_image;
+    cmd.SourceOrigin[0] = src_origin[0];
+    cmd.SourceOrigin[1] = src_origin[1];
+    cmd.SourceOrigin[2] = src_origin[2];
+    cmd.TargetOrigin[0] = dst_origin[0];
+    cmd.TargetOrigin[1] = dst_origin[1];
+    cmd.TargetOrigin[2] = dst_origin[2];
+    cmd.Dimensions[0]   = dimension[0];
+    cmd.Dimensions[1]   = dimension[1];
+    cmd.Dimensions[2]   = dimension[2];
+    return cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_IMAGE, sizeof(cmd), &cmd);
+}
+
+/// @summary Copies the contents of a buffer object to an image object.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cmd_buffer The handle of the destination command buffer.
+/// @param dst_image The handle of the target image.
+/// @param dst_origin The x-coordinate, y-coordinate and slice or array index on the target image.
+/// @param dst_dimension The width (in pixels), height (in pixels) and number of slices to copy.
+/// @param src_buffer The handle of the source buffer object.
+/// @param src_offset The offset of the first byte to read from the source buffer.
+/// @param done_event The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+/// @param wait_event The handle of the event to wait on before proceeding with the transfer, or CG_INVALID_HANDLE.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCopyBufferToImage
+(
+    uintptr_t   context,
+    cg_handle_t cmd_buffer,
+    cg_handle_t dst_image,
+    size_t      dst_origin[3],
+    size_t      dst_dimension[3],
+    cg_handle_t src_buffer,
+    size_t      src_offset,
+    cg_handle_t done_event,
+    cg_handle_t wait_event
+)
+{
+    CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
+    CG_IMAGE      *dstimg =  cgObjectTableGet(&ctx->ImageTable , dst_image);
+    CG_BUFFER     *srcbuf =  cgObjectTableGet(&ctx->BufferTable, src_buffer);
+    if ((srcbuf == NULL) || (dstimg == NULL))
+    {   // one or both objects are invalid.
+        return CG_INVALID_VALUE;
+    }
+    // TODO(rlk): additional argument validation.
+
+    cg_copy_buffer_to_image_cmd_t cmd;
+    cmd.WaitEvent       = wait_event;
+    cmd.CompleteEvent   = done_event;
+    cmd.SourceBuffer    = src_buffer;
+    cmd.TargetImage     = dst_image;
+    cmd.SourceOffset    = src_offset;
+    cmd.TargetOrigin[0] = dst_origin[0];
+    cmd.TargetOrigin[1] = dst_origin[1];
+    cmd.TargetOrigin[2] = dst_origin[2];
+    cmd.Dimensions[0]   = dst_dimension[0];
+    cmd.Dimensions[1]   = dst_dimension[1];
+    cmd.Dimensions[2]   = dst_dimension[2];
+    return cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_BUFFER_TO_IMAGE, sizeof(cmd), &cmd);
+}
+
+/// @summary Copies a region from an image object into a buffer object.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param cmd_buffer The handle of the destination command buffer.
+/// @param dst_buffer The handle of the target buffer.
+/// @param dst_offset The offset of the first byte to write in the target buffer.
+/// @param src_image The handle of the source image.
+/// @param src_origin The x-coordinate, y-coordinate and slice or array index on the target image.
+/// @param src_dimension The width (in pixels), height (in pixels) and number of slices to copy.
+/// @param done_event The handle of the event to signal when the transfer has completed, or CG_INVALID_HANDLE.
+/// @param wait_event The handle of the event to wait on before proceeding with the transfer, or CG_INVALID_HANDLE.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BUFFER_TOO_SMALL or CG_OUT_OF_MEMORY.
+library_function int
+cgCopyImageToBuffer
+(
+    uintptr_t   context,
+    cg_handle_t cmd_buffer,
+    cg_handle_t dst_buffer,
+    size_t      dst_offset,
+    cg_handle_t src_image,
+    size_t      src_origin[3],
+    size_t      src_dimension[3],
+    cg_handle_t done_event,
+    cg_handle_t wait_event
+)
+{
+    CG_CONTEXT    *ctx    = (CG_CONTEXT*) context;
+    CG_BUFFER     *dstbuf =  cgObjectTableGet(&ctx->BufferTable, dst_buffer);
+    CG_IMAGE      *srcimg =  cgObjectTableGet(&ctx->ImageTable , src_image);
+    if ((srcimg == NULL) || (dstbuf == NULL))
+    {   // one or both objects are invalid.
+        return CG_INVALID_VALUE;
+    }
+    // TODO(rlk): additional argument validation.
+
+    cg_copy_image_to_buffer_cmd_t cmd;
+    cmd.WaitEvent       = wait_event;
+    cmd.CompleteEvent   = done_event;
+    cmd.SourceImage    = src_image;
+    cmd.TargetBuffer    = dst_buffer;
+    cmd.SourceOrigin[0] = src_origin[0];
+    cmd.SourceOrigin[1] = src_origin[1];
+    cmd.SourceOrigin[2] = src_origin[2];
+    cmd.Dimensions[0]   = src_dimension[0];
+    cmd.Dimensions[1]   = src_dimension[1];
+    cmd.Dimensions[2]   = src_dimension[2];
+    cmd.TargetOffset    = dst_offset;
+    return cgCommandBufferAppend(context, cmd_buffer, CG_COMMAND_COPY_IMAGE_TO_BUFFER, sizeof(cmd), &cmd);
 }
 
 /// @summary Submits a command buffer for asynchronous execution.
