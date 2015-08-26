@@ -465,6 +465,7 @@ enum cg_result_e : int
     CG_COMPILE_FAILED                  = -13,          /// The kernel source code compilation failed.
     CG_LINK_FAILED                     = -14,          /// The pipeline linking phase failed.
     CG_TOO_MANY_MEMREFS                = -15,          /// The command buffer references too many memory objects.
+    CG_COMMAND_NOT_IMPLEMENTED         = -16,          /// The command contains an unimplemented command ID.
 
     // EXTENSION API RESULT CODES - FAILURE
     CG_RESULT_FAILURE_EXT              = -100000,      /// The first valid failure result code for extensions.
@@ -1108,7 +1109,8 @@ struct cg_compute_dispatch_cmd_base_t
     uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id specifying the pipeline type.
     uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
     cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
-    cg_handle_t                  DoneEvent;            /// The handle of the event to signal when kernel execution is complete.
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when kernel execution is complete, or CG_INVALID_HANDLE.
     size_t                       WorkDimension;        /// The number of valid entries in LocalWorkSize and GlobalWorkSize.
     size_t                       LocalWorkSize[3];     /// The size of each work group in each dimension.
     size_t                       GlobalWorkSize[3];    /// The number of work items in each dimension.
@@ -1146,8 +1148,6 @@ struct cg_copy_buffer_cmd_t
     size_t                       SourceOffset;         /// The offset of the first byte to copy from the source buffer.
     size_t                       TargetOffset;         /// The offset of the first byte to write in the target buffer.
     size_t                       CopyAmount;           /// The number of bytes to copy.
-    size_t                       SourceBufferRef;      /// The zero-based index of the source buffer memory object reference, or CG_INVALID_MEMREF.
-    size_t                       TargetBufferRef;      /// The zero-based index of the target buffer memory object reference, or CG_INVALID_MEMREF.
 };
 
 /// @summary Defines the data passed with an asynchronous image-to-image copy command.
@@ -1908,7 +1908,6 @@ cgMakeDx10HeaderDDS                                 /// Generate a DX10 extended
 // still TODO:
 // 1. VAOs (graphics only)
 // 2. renderbuffers (maybe extend image support)
-// 3. command buffer synchronization commands
 // 4. graphics command buffer commands
 // 5. transfer command buffer commands
 

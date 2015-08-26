@@ -44,6 +44,9 @@
     <ClCompile Include="..\..\..\src\cgfx_kernel_compute.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\src\cgfx_w32_private.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\libcgfx.def" />

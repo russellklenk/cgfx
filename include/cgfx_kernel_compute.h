@@ -58,7 +58,8 @@ cgEnqueueComputeDispatchTest01        /// Enqueue a dispatch command for compute
     cg_handle_t cmd_buffer,           /// The handle of the command buffer to write to.
     cg_handle_t pipeline,             /// The handle of the pipeline to execute, returned by cgCreateComputePipelineTest01.
     cg_handle_t out_buffer,           /// The handle of the buffer to write to.
-    cg_handle_t done_event            /// The handle of the event to signal when the kernel has finished executing.
+    cg_handle_t done_event,           /// The handle of the event to signal when the pipeline has finished executing.
+    cg_handle_t wait_event            /// The handle of the event to wait on before executing the pipeline.
 );
 
 #ifdef __cplusplus

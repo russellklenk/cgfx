@@ -502,6 +502,7 @@ cgAcquireMemoryObjects
             // the graphics queue. this causes a device stall and can significantly
             // reduce performance. it is recommended to specify an explicit fence.
             glFinish(); glwait = NULL; glnum = 0;
+            UNREFERENCED_PARAMETER(display);
         }
 
         cl_event  ev = NULL;

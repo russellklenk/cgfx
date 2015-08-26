@@ -146,6 +146,10 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_SAMPLERS                          (4096)
 #define CG_MAX_MEM_REFS                          (2048)
 
+/// @summary Define a helper macro to specify the correct value for the event wait list to OpenCL commands.
+/// OpenCL requires that if n == 0, the supplied cl_event* is NULL.
+#define CG_OPENCL_WAIT_LIST(n, arr)              (((n) > 0) ? (arr) : NULL)
+
 /// @summary Define the registered name of the WNDCLASS used for hidden windows.
 #define CG_OPENGL_HIDDEN_WNDCLASS_NAME           _T("CGFX_GL_Hidden_WndClass")
 
@@ -442,11 +446,6 @@ struct CG_CMD_BUFFER
     size_t                       BytesUsed;            /// The number of bytes actually used for command data.
     size_t                       CommandCount;         /// The number of buffered commands.
     uint8_t                     *CommandData;          /// The start of the command data buffer.
-
-    cl_event                     InteropAcquire;       /// The OpenCL event signaled when OpenGL objects have been acquired. Valid for the current submission only.
-    size_t                       InteropListCount;     /// The number of items in the CL-GL interop list.
-    cl_mem                       GLMemRefs[CG_MAX_MEM_REFS]; /// Each item is the OpenCL handle of a shared memory object.
-    size_t                       RefCounts[CG_MAX_MEM_REFS]; /// Each item represents the number of commands referencing a shared memory object.
 };
 
 // the command buffer maintains a list of memory object references and increments reference counts. 
