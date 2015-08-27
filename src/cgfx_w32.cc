@@ -5333,7 +5333,7 @@ cgExecuteCopyBufferRegion
     CG_BUFFER         *srcbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->SourceBuffer);
     CG_BUFFER         *dstbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->TargetBuffer);
     int                result  =  CG_SUCCESS;
-    cl_uint           nmemrefs =  0;
+    size_t            nmemrefs =  0;
     cl_uint           nwaitevt =  0;
     cl_event          acquire  =  NULL;
     cl_mem            memrefs[2];
@@ -5395,7 +5395,7 @@ cgExecuteCopyImageRegion
     CG_IMAGE          *srcimg  =  cgObjectTableGet(&ctx->ImageTable, ddp->SourceImage);
     CG_IMAGE          *dstimg  =  cgObjectTableGet(&ctx->ImageTable, ddp->TargetImage);
     int                result  =  CG_SUCCESS;
-    cl_uint           nmemrefs =  0;
+    size_t            nmemrefs =  0;
     cl_uint           nwaitevt =  0;
     cl_event          acquire  =  NULL;
     cl_mem            memrefs[2];
@@ -5458,7 +5458,7 @@ cgExecuteCopyBufferToImage
     CG_BUFFER         *srcbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->SourceBuffer);
     CG_IMAGE          *dstimg  =  cgObjectTableGet(&ctx->ImageTable , ddp->TargetImage);
     int                result  =  CG_SUCCESS;
-    cl_uint           nmemrefs =  0;
+    size_t            nmemrefs =  0;
     cl_uint           nwaitevt =  0;
     cl_event          acquire  =  NULL;
     cl_mem            memrefs[2];
@@ -5522,7 +5522,7 @@ cgExecuteCopyImageToBuffer
     CG_IMAGE          *srcimg  =  cgObjectTableGet(&ctx->ImageTable , ddp->SourceImage);
     CG_BUFFER         *dstbuf  =  cgObjectTableGet(&ctx->BufferTable, ddp->TargetBuffer);
     int                result  =  CG_SUCCESS;
-    cl_uint           nmemrefs =  0;
+    size_t            nmemrefs =  0;
     cl_uint           nwaitevt =  0;
     cl_event          acquire  =  NULL;
     cl_mem            memrefs[2];
@@ -6758,7 +6758,7 @@ cgCreateExecutionGroup
         (cl_context_properties) 0
     };
     cl_int     cl_error = CL_SUCCESS;
-    cl_context cl_ctx   = clCreateContext(props, group.DeviceCount, group.DeviceIds, NULL, NULL, &cl_error);
+    cl_context cl_ctx   = clCreateContext(props, cl_uint(group.DeviceCount), group.DeviceIds, NULL, NULL, &cl_error);
     if (cl_ctx == NULL)
     {   cgDeleteExecutionGroup(ctx, &group);
         cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
@@ -8129,7 +8129,7 @@ cgCreateKernel
                 }
                 // compile the program for each device attached to the context.
                 // TODO(rlk): support passing compiler options and defines.
-                if ((clres = clBuildProgram(p, group->DeviceCount, group->DeviceIds, NULL, NULL, NULL)) != CL_SUCCESS)
+                if ((clres = clBuildProgram(p, cl_uint(group->DeviceCount), group->DeviceIds, NULL, NULL, NULL)) != CL_SUCCESS)
                 {
 #ifdef _DEBUG
                     if (clres == CL_BUILD_PROGRAM_FAILURE)

@@ -51,7 +51,7 @@ cgExecuteComputeDispatchTest01
     CG_COMPUTE_PIPELINE const       &cp =  pipeline->Compute;
     CG_BUFFER                   *output =  cgObjectTableGet(&ctx->BufferTable, ddp->OutputBuffer);
     int                          result =  CG_SUCCESS;
-    cl_uint                    nmemrefs =  0;
+    size_t                     nmemrefs =  0;
     cl_uint                    nwaitevt =  0;
     cl_event                    acquire =  NULL;
     cl_mem                      memrefs[2];
