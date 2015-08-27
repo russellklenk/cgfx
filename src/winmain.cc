@@ -85,6 +85,7 @@
 #include <stdio.h>
 
 #include "cgfx.h"
+#include "cgfx_ext_win.h"
 #include "cgfx_kernel_compute.h"
 
 /*/////////////////
@@ -96,6 +97,19 @@ static uint64_t const SEC_TO_NANOSEC = 1000000000ULL;
 /*///////////////////
 //   Local Types   //
 ///////////////////*/
+/// @summary Encapsulate CGFX state for the Window attached to the primary display.
+struct cgfx_state_t
+{
+    uintptr_t   Context;
+    cg_handle_t Display;
+    cg_handle_t DisplayDevice;
+    cg_handle_t ExecutionGroup;
+    cg_handle_t ComputeQueue;
+    cg_handle_t GraphicsQueue;
+    cg_handle_t TransferQueue;
+    HWND        Window;
+    HDC         Drawable;
+};
 
 /*///////////////
 //   Globals   //
@@ -105,6 +119,9 @@ global_variable bool            Global_IsRunning       = true;
 
 /// @summary The high-resolution timer frequency. This is queried once at startup.
 global_variable int64_t         Global_ClockFrequency  = {0};
+
+/// @summary The CGFX state for the primary window and display.
+global_variable cgfx_state_t    Global_CGFX            = {0};
 
 /// @summary Information about the window placement saved when entering fullscreen mode.
 /// This data is necessary to restore the window to the same position and size when 
@@ -268,6 +285,163 @@ internal_function LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
+/// @summary Performs one-time setup for CGFX and creates the main application window.
+/// @param cgfx On return, the fields of this structure reference CGFX resources.
+/// @return true if setup completed successfully.
+internal_function bool cgfx_setup(cgfx_state_t *cgfx)
+{
+    cg_application_info_t app = {};
+    cg_execution_group_t  grp = {};
+    cg_cpu_partition_t    cpd = {};
+    cg_cpu_info_t         cpu = {};
+    cg_handle_t            pd = CG_INVALID_HANDLE; // the primary display
+    cg_handle_t            dd = CG_INVALID_HANDLE; // the primary display device
+    cg_handle_t            dg = CG_INVALID_HANDLE; // the execution group including the primary display
+    uintptr_t             ctx = NULL;
+    size_t               ndev = 0;
+    HWND                  wnd = NULL;
+    HDC                    dc = NULL;
+    int                   res = CG_SUCCESS;
+
+    // initialize the output state to invalid everything.
+    memset(cgfx, 0, sizeof(cgfx_state_t));
+
+    // retrieve a description of CPU resources on the local system.
+    if ((res = cgGetCpuInfo(&cpu)) != CG_SUCCESS)
+    {
+        OutputDebugString(_T("ERROR: Unable to retrieve CPU device information:\n  "));
+        OutputDebugStringA(cgResultString(res));
+        OutputDebugString(_T("\n"));
+        return false;
+    }
+
+    // fill our some basic information about our application:
+    app.AppName        = "cgfxTest";
+    app.AppVersion     =  CG_MAKE_VERSION(1, 0, 0);
+    app.DriverName     = "cgfxTest Driver";
+    app.DriverVersion  =  CG_MAKE_VERSION(1, 0, 0);
+    app.ApiVersion     =  CG_API_VERSION;
+
+    // fill out information describing how the CPU should be partitioned.
+    // we'll set it up for data-parallel operation, but with a single 
+    // physical reserved for running all application logic.
+    cpd.PartitionType  =  CG_CPU_PARTITION_NONE;
+    cpd.ReserveThreads =  cpu.ThreadsPerCore;
+    cpd.PartitionCount =  0;
+    cpd.ThreadCounts   =  NULL;
+
+    // ask CGFX to enumerate the devices in the system according to our preferences.
+    // this returns a CGFX context that is used during resource creation.
+    if ((res = cgEnumerateDevices(&app, NULL, &cpd, ndev, NULL, 0, ctx)) != CG_SUCCESS)
+    {
+        OutputDebugString(_T("ERROR: Unable to enumerate CGFX devices:\n  "));
+        OutputDebugStringA(cgResultString(res));
+        OutputDebugString(_T("\n"));
+        return false;
+    }
+    if (ndev == 0)
+    {   cgDestroyContext(ctx);
+        OutputDebugString(_T("ERROR: No CGFX-compatible devices found.\n"));
+        return false;
+    }
+
+    // retrieve the default display and ensure there's a device attached.
+    // the device will be a GPU device. use this device to create an 
+    // execution group, including all available CPU cores. the display 
+    // device becomes the root device of the execution group, which defines
+    // the share group. device resource can be shared amongst all devices 
+    // in the share group, but cannot be accessed outside of the group 
+    // without host intervention (the host must map and copy data manually.)
+    // since we'll use the devices in this group for display purposes, the 
+    // CG_EXECUTION_GROUP_DISPLAY_OUTPUT flag must be specified.
+    if ((pd = cgGetPrimaryDisplay(ctx)) == CG_INVALID_HANDLE)
+    {   cgDestroyContext(ctx);
+        OutputDebugString(_T("ERROR: No display devices attached to the local system.\n"));
+        return false;
+    }
+    if ((dd = cgGetDisplayDevice(ctx, pd)) == CG_INVALID_HANDLE)
+    {   cgDestroyContext(ctx);
+        OutputDebugString(_T("ERROR: No CGFX-compatible device attached to the primary display.\n"));
+        return false;
+    }
+    grp.RootDevice      = dd;   // the GPU defines the share group
+    grp.DeviceCount     = 0;    // don't explicitly include any other devices
+    grp.DeviceList      = NULL; // don't explicitly include any other devices
+    grp.ExtensionCount  = 0;    // we aren't configuring any optional extensions
+    grp.ExtensionNames  = NULL; // we aren't configuring any optional extensions
+    grp.CreateFlags     = CG_EXECUTION_GROUP_CPUS | CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
+    grp.ValidationLevel = 0;    // don't enable thorough validation
+    if ((dg = cgCreateExecutionGroup(ctx, &grp, res)) == CG_INVALID_HANDLE)
+    {   cgDestroyContext(ctx);
+        OutputDebugString(_T("ERROR: Unable to create the default execution group:\n  "));
+        OutputDebugStringA(cgResultString(res));
+        OutputDebugString(_T("\n"));
+        return false;
+    }
+
+    // use the Win32 extension API to create and configure an OpenGL display window.
+    // note that the application is still responsible for creating the window class 
+    // and has full control over the newly-created window. if you have an existing 
+    // window that you want to use for display output, you can use cgAttachWindowToDisplayEXT
+    // instead, which will ensure that the window can be used for OpenGL output.
+    // the cgMakeWindowOnDisplay arguments are equivalent to those for CreateWindowEx.
+    DWORD const  style   = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE;
+    DWORD const  styleex = 0;
+    TCHAR const *clsname = _T("cgfxTestWndClass");
+    TCHAR const *wndname = _T("CGFX");
+    HINSTANCE    exeinst = GetModuleHandle(NULL);
+    WNDCLASSEX   wndcls  = {};
+    if (!GetClassInfoEx(exeinst, clsname, &wndcls))
+    {   // the window class has not been registered yet.
+        wndcls.cbSize         = sizeof(WNDCLASSEX);
+        wndcls.cbClsExtra     = 0;
+        wndcls.cbWndExtra     = sizeof(void*);
+        wndcls.hInstance      = exeinst;
+        wndcls.lpszClassName  = clsname;
+        wndcls.lpszMenuName   = NULL;
+        wndcls.lpfnWndProc    = MainWndProc;
+        wndcls.hIcon          = LoadIcon  (0, IDI_APPLICATION);
+        wndcls.hIconSm        = LoadIcon  (0, IDI_APPLICATION);
+        wndcls.hCursor        = LoadCursor(0, IDC_ARROW);
+        wndcls.style          = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+        wndcls.hbrBackground  = NULL;
+        if (!RegisterClassEx(&wndcls))
+        {   // unable to register the hidden window class - don't proceed.
+            return CG_SUCCESS;
+        }
+    }
+    if ((wnd = cgMakeWindowOnDisplayEXT(ctx, pd, clsname, wndname, style, styleex, 0, 0, 800, 600, NULL, NULL, exeinst, NULL, NULL)) == NULL)
+    {   cgDestroyContext(ctx);
+        OutputDebugString(_T("ERROR: Unable to create window on primary display.\n"));
+        return false;
+    }
+
+    // done with basic initialization:
+    cgfx->Context        = ctx;
+    cgfx->Display        =  pd;
+    cgfx->DisplayDevice  =  dd;
+    cgfx->ExecutionGroup =  dg;
+    cgfx->ComputeQueue   = cgGetQueueForDevice(ctx, dd, CG_QUEUE_TYPE_COMPUTE , res);
+    cgfx->GraphicsQueue  = cgGetQueueForDevice(ctx, dd, CG_QUEUE_TYPE_GRAPHICS, res);
+    cgfx->TransferQueue  = cgGetQueueForDevice(ctx, dd, CG_QUEUE_TYPE_TRANSFER, res);
+    cgfx->Window         = wnd;
+    cgfx->Drawable       = GetDC(wnd);
+    return true;
+}
+
+// three of each (frame n-2, n-1, n)
+// always writing to frame n
+// interop buffer, write-only by compute and read-only by graphics
+// fence (graphics frame end)
+// fence (compute update end)
+// VAO (need to add support for this)
+// 
+// one of each total:
+// compute pipeline
+// graphics pipeline
+//
+// need support for graphics queue draw command
+
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
@@ -298,107 +472,12 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     UINT desired_granularity = 1; // millisecond
     BOOL sleep_is_granular   =(timeBeginPeriod(desired_granularity) == TIMERR_NOERROR);
 
-    // enumerate CGFX execution resources.
-    uintptr_t             context      = 0;
-    size_t                device_count = 0;
-    cg_handle_t          *device_list  = NULL;
-    cg_handle_t           exec_ctx     = CG_INVALID_HANDLE;
-    cg_handle_t           display      = CG_INVALID_HANDLE;
-    cg_handle_t           display_dev  = CG_INVALID_HANDLE;
-    cg_cpu_info_t         cpu_info;      cgGetCpuInfo(&cpu_info);
-    cg_cpu_partition_t    cpu_part;
-    cg_application_info_t app_info;
-    app_info.AppName        = "cgfxTest";
-    app_info.AppVersion     =  CG_MAKE_VERSION(1, 0, 0);
-    app_info.DriverName     = "cgfxTest Driver";
-    app_info.DriverVersion  =  CG_MAKE_VERSION(1, 0, 0);
-    app_info.ApiVersion     =  CG_API_VERSION;
-    cpu_part.PartitionType  =  CG_CPU_PARTITION_NONE;
-    cpu_part.ReserveThreads =  cpu_info.ThreadsPerCore; // reserve 1 core for application use
-    cpu_part.PartitionCount =  0;
-    cpu_part.ThreadCounts   =  NULL;
-    if ((cgres = cgEnumerateDevices(&app_info, NULL, &cpu_part, device_count, NULL, 0, context)) != CG_SUCCESS)
-    {
-        OutputDebugString(_T("ERROR: Unable to enumerate CGFX devices: "));
-        OutputDebugStringA(cgResultString(cgres));
-        OutputDebugString(_T(".\n"));
-        return 0;
-    }
-    if (device_count == 0)
-    {
-        cgDestroyContext(context);
-        OutputDebugString(_T("ERROR: No CGFX devices available on the system.\n"));
-        return 0;
-    }
-    
-    display     = cgGetPrimaryDisplay(context);
-    display_dev = cgGetDisplayDevice (context, display);
-
-    cg_execution_group_t  exec_info;
-    exec_info.RootDevice      = display_dev;
-    exec_info.DeviceCount     = 0;
-    exec_info.DeviceList      = NULL;
-    exec_info.ExtensionCount  = 0;
-    exec_info.ExtensionNames  = NULL;
-    exec_info.CreateFlags     = CG_EXECUTION_GROUP_CPUS | CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
-    exec_info.ValidationLevel = 0;
-    if ((exec_ctx = cgCreateExecutionGroup(context, &exec_info, cgres)) == CG_INVALID_HANDLE)
-    {
-        cgDestroyContext(context);
-        OutputDebugString(_T("ERROR: Unable to create execution group: "));
-        OutputDebugStringA(cgResultString(cgres));
-        OutputDebugString(_T(".\n"));
-        return 0;
-    }
-
-    cg_handle_t display_gfx_queue = cgGetQueueForDisplay(context, display, CG_QUEUE_TYPE_GRAPHICS, cgres);
-    cg_handle_t device_gfx_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_GRAPHICS, cgres);
-    assert(display_gfx_queue == device_gfx_queue);
-    assert(display_gfx_queue != CG_INVALID_HANDLE);
-    cg_handle_t display_cpu_queue = cgGetQueueForDisplay(context, display, CG_QUEUE_TYPE_COMPUTE, cgres);
-    cg_handle_t device_cpu_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_COMPUTE, cgres);
-    assert(display_cpu_queue == device_cpu_queue);
-    assert(display_cpu_queue != CG_INVALID_HANDLE);
-    cg_handle_t display_dma_queue = cgGetQueueForDisplay(context, display, CG_QUEUE_TYPE_TRANSFER, cgres);
-    cg_handle_t device_dma_queue = cgGetQueueForDevice(context, display_dev, CG_QUEUE_TYPE_TRANSFER, cgres);
-    assert(display_dma_queue == device_dma_queue);
-    assert(display_dma_queue != CG_INVALID_HANDLE);
-
-    cg_handle_t pipeline = cgCreateComputePipelineTest01(context, exec_ctx, cgres);
-    assert(pipeline != NULL);
-
-    cg_handle_t inp_buf = cgCreateDataBuffer(context, exec_ctx, 32, CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_PINNED, CG_MEMORY_UPDATE_ONCE, cgres);
-    cg_handle_t out_buf = cgCreateDataBuffer(context, exec_ctx, 32, CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_ACCESS_READ, CG_MEMORY_PLACEMENT_PINNED, CG_MEMORY_UPDATE_ONCE, cgres);
-    assert(inp_buf != CG_INVALID_HANDLE);
-    assert(out_buf != CG_INVALID_HANDLE);
-
-    cg_handle_t cmd_buf = cgCreateCommandBuffer(context, CG_QUEUE_TYPE_COMPUTE, cgres);
-    assert(cmd_buf != CG_INVALID_HANDLE);
-
-    cg_handle_t done_evt = cgCreateEvent(context, exec_ctx, cgres);
-    assert(done_evt != CG_INVALID_HANDLE);
-
-    cgBeginCommandBuffer(context, cmd_buf, 0);
-    {
-        cgEnqueueComputeDispatchTest01(context, cmd_buf, pipeline, out_buf, done_evt, CG_INVALID_HANDLE);
-    }
-    cgEndCommandBuffer  (context, cmd_buf);
-
-    cgExecuteCommandBuffer(context, device_cpu_queue, cmd_buf);
-    // specify done_evt to map the data buffer, which will prevent the map operation from starting 
-    // until the pipeline has finished executing (and writing to the buffer.) since mapping a buffer
-    // is always performed as a blocking command, the host thread blocks until the map completes.
-    char* ptr = (char*) cgMapDataBuffer(context, device_dma_queue, out_buf, done_evt, 0, 32, CG_MEMORY_ACCESS_READ, cgres);
-    OutputDebugStringA(ptr);
-    OutputDebugString(_T("\n"));
-    cgUnmapDataBuffer(context, device_dma_queue, out_buf, ptr, NULL);
-
-    cgDestroyContext(context);
-
-    return 0;
-
     // create the main application window on the primary display.
     HWND main_window = NULL;
+    if (!cgfx_setup(&Global_CGFX))
+    {
+        return 0;
+    }
 
     // query the monitor refresh rate and use that as our target frame rate.
     int monitor_refresh_hz =  60;
