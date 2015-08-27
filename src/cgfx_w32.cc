@@ -6789,8 +6789,14 @@ cgCreateExecutionGroup
         cg_handle_t  tq_hnd = CG_INVALID_HANDLE;
         CG_QUEUE    *cq_ref = NULL;
         CG_QUEUE    *tq_ref = NULL;
+        cl_command_queue_properties flags  = CL_QUEUE_PROFILING_ENABLE;
 
-        if ((cq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &cl_err)) == NULL)
+        if (group.DeviceList[i]->Capabilities.CmdQueueConfig & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)
+        {   // prefer out-of-order execution if supported by the device.
+            flags |= CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+        }
+
+        if ((cq = clCreateCommandQueue(cl_ctx, cl_dev, flags, &cl_err)) == NULL)
         {   // unable to create the command queue for some reason.
             switch (cl_err)
             {
@@ -6824,7 +6830,7 @@ cgCreateExecutionGroup
         // create the command queue used for submitting data transfer operations.
         if (group.DeviceList[i]->Capabilities.UnifiedMemory == CL_FALSE)
         {   // also create a transfer queue for the device.
-            if ((tq = clCreateCommandQueue(cl_ctx, cl_dev, CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, &cl_err)) == NULL)
+            if ((tq = clCreateCommandQueue(cl_ctx, cl_dev, flags, &cl_err)) == NULL)
             {
                 switch (cl_err)
                 {
@@ -6857,6 +6863,7 @@ cgCreateExecutionGroup
         }
         else
         {   // use the existing compute queue for transfers, but create a distinct CG_QUEUE.
+            // the compute queue object needs to be retained as it will be released twice.
             CG_QUEUE queue;
             queue.QueueType           = CG_QUEUE_TYPE_TRANSFER;
             queue.ComputeContext      = cl_ctx;
@@ -6868,6 +6875,7 @@ cgCreateExecutionGroup
             tq_ref = cgObjectTableGet(&ctx->QueueTable, tq_hnd);
             group.TransferQueues[i]        = tq_ref;
             group.QueueList[queue_index++] = tq_ref;
+            clRetainCommandQueue(cq);
         }
     }
 
@@ -8919,7 +8927,7 @@ cgMapDataBuffer
         if (obj->GraphicsBuffer != 0)
         {   // the buffer first needs to be acquired by OpenCL for use.
             cl_event gl_wait = NULL;
-            if ((clres = clEnqueueAcquireGLObjects(queue->CommandQueue, 1, &obj->ComputeBuffer, wait_count, &wait_event, &gl_wait)) != CL_SUCCESS)
+            if ((clres = clEnqueueAcquireGLObjects(queue->CommandQueue, 1, &obj->ComputeBuffer, wait_count, CG_OPENCL_WAIT_LIST(wait_count, &wait_event), &gl_wait)) != CL_SUCCESS)
             {
                 switch (clres)
                 {
@@ -8950,7 +8958,7 @@ cgMapDataBuffer
             release_ev = true; // release gl_wait after the buffer map is enqueued.
         }
 
-        if ((mapped = clEnqueueMapBuffer(queue->CommandQueue, obj->ComputeBuffer, CL_TRUE, map_flags, offset, amount, wait_count, &wait_event, NULL, &clres)) == NULL)
+        if ((mapped = clEnqueueMapBuffer(queue->CommandQueue, obj->ComputeBuffer, CL_TRUE, map_flags, offset, amount, wait_count, CG_OPENCL_WAIT_LIST(wait_count, &wait_event), NULL, &clres)) == NULL)
         {
             switch (clres)
             {
@@ -9600,7 +9608,7 @@ cgMapImageRegion
         if (obj->GraphicsImage != 0)
         {   // the buffer first needs to be acquired by OpenCL for use.
             cl_event gl_wait = NULL;
-            if ((clres = clEnqueueAcquireGLObjects(queue->CommandQueue, 1, &obj->ComputeImage, wait_count, &wait_event, &gl_wait)) != CL_SUCCESS)
+            if ((clres = clEnqueueAcquireGLObjects(queue->CommandQueue, 1, &obj->ComputeImage, wait_count, CG_OPENCL_WAIT_LIST(wait_count, &wait_event), &gl_wait)) != CL_SUCCESS)
             {
                 switch (clres)
                 {
@@ -9631,7 +9639,7 @@ cgMapImageRegion
             release_ev = true; // release gl_wait after the image map is enqueued.
         }
 
-        if ((mapped = clEnqueueMapImage(queue->CommandQueue, obj->ComputeImage, CL_TRUE, map_flags, xyz, whd, &row_pitch, &slice_pitch, wait_count, &wait_event, NULL, &clres)) == NULL)
+        if ((mapped = clEnqueueMapImage(queue->CommandQueue, obj->ComputeImage, CL_TRUE, map_flags, xyz, whd, &row_pitch, &slice_pitch, wait_count, CG_OPENCL_WAIT_LIST(wait_count, &wait_event), NULL, &clres)) == NULL)
         {
             switch (clres)
             {
@@ -10354,8 +10362,8 @@ cgExecuteCommandBuffer
     {
         return CG_INVALID_VALUE;
     }
-    int queue_type  = cgCmdBufferGetQueueType(cmdbuf);
-    if (queue_type != fifo->QueueType)
+    int  queue_type  = cgCmdBufferGetQueueType(cmdbuf);
+    if ((fifo->QueueType & queue_type) == 0)
     {
         return CG_INVALID_VALUE;
     }

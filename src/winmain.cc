@@ -314,7 +314,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     app_info.DriverVersion  =  CG_MAKE_VERSION(1, 0, 0);
     app_info.ApiVersion     =  CG_API_VERSION;
     cpu_part.PartitionType  =  CG_CPU_PARTITION_NONE;
-    cpu_part.ReserveThreads =  0; // cpu_info.ThreadsPerCore; // reserve 1 core for application use
+    cpu_part.ReserveThreads =  cpu_info.ThreadsPerCore; // reserve 1 core for application use
     cpu_part.PartitionCount =  0;
     cpu_part.ThreadCounts   =  NULL;
     if ((cgres = cgEnumerateDevices(&app_info, NULL, &cpu_part, device_count, NULL, 0, context)) != CG_SUCCESS)
@@ -375,31 +375,20 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     cg_handle_t cmd_buf = cgCreateCommandBuffer(context, CG_QUEUE_TYPE_COMPUTE, cgres);
     assert(cmd_buf != CG_INVALID_HANDLE);
 
-    cg_handle_t done_evt = cgCreateEvent(context, exec_ctx, CG_EVENT_USAGE_COMPUTE, cgres);
+    cg_handle_t done_evt = cgCreateEvent(context, exec_ctx, cgres);
     assert(done_evt != CG_INVALID_HANDLE);
 
     cgBeginCommandBuffer(context, cmd_buf, 0);
     {
-        cgEnqueueComputeDispatchTest01(context, cmd_buf, pipeline, out_buf, done_evt);
+        cgEnqueueComputeDispatchTest01(context, cmd_buf, pipeline, out_buf, done_evt, CG_INVALID_HANDLE);
     }
     cgEndCommandBuffer  (context, cmd_buf);
 
-    // dispatch {
-    //     cg_handle_t pipeline
-    //     cg_handle_t event;
-    //     size_t      args_size;
-    //     ...         args;
-    // }
-
-    cg_memory_ref_t refs[2] = 
-    {
-        { inp_buf, CG_MEMORY_ACCESS_READ  }, 
-        { out_buf, CG_MEMORY_ACCESS_WRITE }
-    };
-    cgExecuteCommandBuffer(context, device_cpu_queue, cmd_buf, 2, refs);
-    cgHostWaitForEvent(context, done_evt);
-
-    char* ptr = (char*) cgMapDataBuffer(context, device_dma_queue, out_buf, 0, 32, CG_MEMORY_ACCESS_READ, cgres);
+    cgExecuteCommandBuffer(context, device_cpu_queue, cmd_buf);
+    // specify done_evt to map the data buffer, which will prevent the map operation from starting 
+    // until the pipeline has finished executing (and writing to the buffer.) since mapping a buffer
+    // is always performed as a blocking command, the host thread blocks until the map completes.
+    char* ptr = (char*) cgMapDataBuffer(context, device_dma_queue, out_buf, done_evt, 0, 32, CG_MEMORY_ACCESS_READ, cgres);
     OutputDebugStringA(ptr);
     OutputDebugString(_T("\n"));
     cgUnmapDataBuffer(context, device_dma_queue, out_buf, ptr, NULL);
