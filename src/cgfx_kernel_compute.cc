@@ -89,6 +89,7 @@ cgExecuteComputeDispatchTest01
         }
         return cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, &cl_done, 1, bdp->CompleteEvent);
     }
+    else return result;
 }
 
 /*////////////////////////

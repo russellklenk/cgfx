@@ -1172,125 +1172,122 @@ cgCmdBufferCommandAt
 /*////////////////////////
 //   External Symbols   //
 ////////////////////////*/
-/// @summary Internal function to register a callback to perform all kernel setup for a compute pipeline.
-/// @param pipeline_id The pre-defined compute pipeline ID, one of cg_compute_pipeline_id_e.
-/// @param dispatch_func The function called to perform all clSetKernelArg and enqueue any device kernels.
 extern void 
-cgRegisterComputeDispatch
+cgRegisterComputeDispatch                           /// Register a compute pipeline setup callback.
 (
-    uint16_t             pipeline_id, 
-    cgComputeDispatch_fn dispatch_func
+    uint16_t             pipeline_id,               /// One of cg_compute_pipeline_id_e specifying the compute pipeline identifier.
+    cgComputeDispatch_fn dispatch_func              /// The callback function to invoke to perform all kernel setup and enqueue execution.
 );
 
 
 extern int
-cgGetWaitEvent
+cgGetWaitEvent                                      /// Retrieve an OpenCL event handle for a CGFX event or fence.
 (
-    CG_CONTEXT          *ctx, 
-    CG_QUEUE            *queue, 
-    cg_handle_t          wait_handle,
-    cl_event            *wait_list, 
-    cl_uint             &wait_count, 
-    cl_uint              max_events, 
-    bool                &release_ev
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The command queue being updated.
+    cg_handle_t          wait_handle,               /// The handle of a CGFX event or fence object to wait on, or CG_INVALID_HANDLE.
+    cl_event            *wait_list,                 /// The OpenCL event wait list to update.
+    cl_uint             &wait_count,                /// The number of events in the wait list. On return, will be incremented by 1 if the wait_handle is valid.
+    cl_uint              max_events,                /// The maximum number of events in the wait list.
+    bool                &release_ev                 /// On return, set to true if the returned event should be released after use.
 );
 
 extern int
-cgSetupExistingEvent
+cgSetupExistingEvent                                /// Initializes an existing CGFX event object based on an OpenCL event or OpenGL fence.
 (
-    CG_QUEUE            *queue, 
-    CG_EVENT            *event, 
-    cl_event             cl_sync, 
-    GLsync               gl_sync, 
-    int                  result
+    CG_QUEUE            *queue,                     /// The command queue associated with synchronization object backing the event.
+    CG_EVENT            *event,                     /// The CGFX event object to update.
+    cl_event             cl_sync,                   /// The OpenCL event object, or NULL. Only one of cl_sync or gl_sync may be non-NULL.
+    GLsync               gl_sync,                   /// The OpenGL fence object, or NULL. Only one of cl_sync or gl_sync may be non-NULL.
+    int                  result                     /// The CGFX result code to return.
 );
 
 extern int
-cgSetupCompleteEvent
+cgSetupCompleteEvent                                /// Initializes an existing CGFX event object used to signal command completion.
 (
-    CG_CONTEXT          *ctx, 
-    CG_QUEUE            *queue, 
-    cg_handle_t          complete_event, 
-    cl_event             cl_sync, 
-    GLsync               gl_sync, 
-    int                  result
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The command queue associated with the synchronization object backing the event.
+    cg_handle_t          complete_event,            /// The handle of the existing CGFX completion event, or CG_INVALID_HANDLE.
+    cl_event             cl_sync,                   /// The OpenCL event object, or NULL. Only one of cl_sync or gl_sync may be non-NULL.
+    GLsync               gl_sync,                   /// The OpenGL fence object, or NULL. Only one of cl_sync or gl_sync may be non-NULL.
+    int                  result                     /// The CGFX result code to return.
 );
 
 extern int
-cgSetupCompleteEventWithWaitList
+cgSetupCompleteEventWithWaitList                    /// Initializes an existing CGFX event object that waits for multiple OpenCL events before signaling completion.
 (
-    CG_CONTEXT          *ctx, 
-    CG_QUEUE            *queue, 
-    cg_handle_t          complete_event,
-    cl_event            *wait_list, 
-    size_t const         wait_count, 
-    int                  result
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The command queue associated with the synchronization object backing the event.
+    cg_handle_t          complete_event,            /// The handle of the existing CGFX completion event, or CG_INVALID_HANDLE.
+    cl_event            *wait_list,                 /// The set of OpenCL event objects that must become signaled before the completion event is signaled.
+    size_t const         wait_count,                /// The number of OpenCL event objects in the wait list.
+    int                  result                     /// The CGFX result code to return.
 );
 
 extern int
-cgSetupNewCompleteEvent
+cgSetupNewCompleteEvent                             /// Creates a new CGFX event object to signal command completion. 
 (
-    CG_CONTEXT          *ctx, 
-    CG_QUEUE            *queue, 
-    cg_handle_t         *event_handle,
-    cl_event             cl_sync,
-    GLsync               gl_sync, 
-    int                  result
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The command queue associated with the synchronization object backing the event.
+    cg_handle_t         *event_handle,              /// On return, stores the handle of the created event object. If NULL, no event is created.
+    cl_event             cl_sync,                   /// The OpenCL event object, or NULL. Only one of cl_sync or gl_sync may be non-NULL.
+    GLsync               gl_sync,                   /// The OpenGL fence object, or NULL. Only one of cl_sync or gl_sync may be non-NULL.
+    int                  result                     /// The CGFX result code to return.
 );
 
 extern void
-cgMemRefListAddMem
+cgMemRefListAddMem                                  /// Adds an item to a memory object reference list.
 (
-    cl_mem               memref, 
-    cl_mem              *memref_list, 
-    size_t              &memref_count, 
-    size_t const         max_memrefs, 
-    bool                 check_list
+    cl_mem               memref,                    /// The OpenCL memory object to append to the memref list.
+    cl_mem              *memref_list,               /// The set of OpenCL memory objects that are shared with OpenGL.
+    size_t              &memref_count,              /// The number of items in the memref list. If a new item is appended, this value is incremented by 1.
+    size_t const         max_memrefs,               /// The maximum number of memory object references that can be stored in the memref list.
+    bool                 check_list                 /// Specify true to check existing items and prevent duplicates from being added.
 );
 
 extern void
-cgMemRefListAddBuffer
+cgMemRefListAddBuffer                               /// Adds a buffer object to a memory object reference list if it is shared with OpenGL.
 (
-    CG_BUFFER           *buffer, 
-    cl_mem              *memref_list,
-    size_t              &memref_count, 
-    size_t const         max_memrefs, 
-    bool                 check_list
+    CG_BUFFER           *buffer,                    /// The CGFX buffer object.
+    cl_mem              *memref_list,               /// The set of OpenCL memory objects that are shared with OpenGL.
+    size_t              &memref_count,              /// The number of items in the memref list. If a new item is appended, this value is incremented by 1.
+    size_t const         max_memrefs,               /// The maximum number of memory object references that can be stored in the memref list.
+    bool                 check_list                 /// Specify true to check existing items and prevent duplicates from being added.
 );
 
 extern void
-cgMemRefListAddImage
+cgMemRefListAddImage                                /// Adds an image object to a memory object reference list if it is shared with OpenGL.
 (
-    CG_IMAGE           *image, 
-    cl_mem             *memref_list, 
-    size_t             &memref_count, 
-    size_t const        max_memrefs, 
-    bool                check_list
+    CG_IMAGE           *image,                      /// The CGFX image object.
+    cl_mem             *memref_list,                /// The set of OpenCL memory objects that are shared with OpenGL.
+    size_t             &memref_count,               /// The number of items in the memref list. If a new item is appended, this value is incremented by 1.
+    size_t const        max_memrefs,                /// The maximum number of memory object references that can be stored in the memref list.
+    bool                check_list                  /// Specify true to check existing items and prevent duplicates from being added.
 );
 
 extern int 
-cgAcquireMemoryObjects
+cgAcquireMemoryObjects                              /// Obtains compute access to memory objects shared with OpenGL.
 (
-    CG_CONTEXT          *ctx, 
-    CG_QUEUE            *queue, 
-    cl_mem              *memref_list, 
-    size_t  const        memref_count, 
-    cg_handle_t          sync_event, 
-    cl_event            *wait_events, 
-    cl_uint             &wait_count, 
-    cl_uint const        max_wait_events
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The CGFX compute or transfer command queue into which the clAcquireGLObjects command will be enqueued.
+    cl_mem              *memref_list,               /// The set of OpenCL memory objects that are shared with OpenGL.
+    size_t  const        memref_count,              /// The number of OpenCL memory objects shared with OpenGL. If 0, no acquire command is issued.
+    cg_handle_t          sync_event,                /// The handle of the CGFX event signaled when a graphics queue fence is passed indicating that OpenGL is done accessing the specified memory objects. If CG_INVALID_HANDLE, the OpenGL queue is drained prior to acquiring the memory objects.
+    cl_event            *wait_events,               /// The OpenCL event wait list to update. If an acquire command is enqueued, the acquire completion event is appended to this list.
+    cl_uint             &wait_count,                /// The number of items in the OpenCL event wait list. If an acquire command is enqueued, this value is incremented by 1.
+    cl_uint const        max_wait_events            /// The maximum number of items that can be stored in the OpenCL event wait list.
 );
 
 extern int
-cgReleaseMemoryObjects
+cgReleaseMemoryObjects                              /// Indicates that compute is finished with shared memory objects and returns control to OpenGL.
 (
-    CG_CONTEXT          *ctx, 
-    CG_QUEUE            *queue, 
-    cl_mem              *memref_list, 
-    size_t const         memref_count, 
-    cl_event            *wait_events,
-    size_t const         wait_count, 
-    cg_handle_t          done_event
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The CGFX compute or transfer command queue into which the clReleaseGLObjects command will be enqueued.
+    cl_mem              *memref_list,               /// The set of OpenCL memory objects that are shared with OpenGL.
+    size_t const         memref_count,              /// The number of OpenCL memory objects shared with OpenGL. If 0, no release command is issued.
+    cl_event            *wait_events,               /// The set of OpenCL command events that must become signaled prior to executing the release command.
+    size_t const         wait_count,                /// The number of OpenCL command events that must become signaled prior to executing the release command.
+    cg_handle_t          done_event                 /// The handle of an existing CGFX event that will become signaled when OpenGL can access the memory objects again.
 );
 
 #undef  CGFX_WIN32_INTERNALS_DEFINED
