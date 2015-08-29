@@ -129,6 +129,7 @@ struct CG_EXEC_GROUP;
 #define CG_EVENT_TABLE_ID                        (9)
 #define CG_IMAGE_TABLE_ID                        (10)
 #define CG_SAMPLER_TABLE_ID                      (11)
+#define CG_VERTEX_LAYOUT_TABLE_ID                (12)
 
 /// @summary Define object table sizes within a context. Different maximum numbers of objects help control memory usage.
 /// Each size value must be a power-of-two, and the maximum number of objects of that type is one less than the stated value.
@@ -144,6 +145,7 @@ struct CG_EXEC_GROUP;
 #define CG_MAX_EVENTS                            (32768)
 #define CG_MAX_IMAGES                            (16384)
 #define CG_MAX_SAMPLERS                          (4096)
+#define CG_MAX_VERTEX_LAYOUTS                    (4096)
 #define CG_MAX_MEM_REFS                          (2048)
 
 /// @summary Define a helper macro to specify the correct value for the event wait list to OpenCL commands.
@@ -173,7 +175,7 @@ struct CG_EXEC_GROUP;
 /// @summary Macro to convert a byte offset into a pointer.
 /// @param x The byte offset value.
 /// @return The offset value, as a pointer.
-#define CG_GL_BUFFER_OFFSET(x)                  ((GLvoid*)(((uint8_t*)NULL)+(x)))
+#define CG_GL_BUFFER_OFFSET(x)                  ((GLvoid*)(((uint8_t*)0)+(x)))
 
 /// @summary Preprocessor identifier for OpenGL version 3.2 (GLSL 1.50).
 #define CG_OPENGL_VERSION_32                      32 
@@ -722,6 +724,29 @@ struct CG_EVENT
     cl_event                     ComputeEvent;         /// The OpenCL event object handle, or NULL.
 };
 
+/// @summary Defines the data associated with a single vertex attribute.
+struct CG_VERTEX_ATTRIBUTE
+{
+    GLenum                       DataType;             /// The OpenGL data type defining the storage format for the vertex attribute data.
+    GLsizei                      Dimension;            /// The number of components in the vertex attribute, between 1 and 4.
+    size_t                       ByteOffset;           /// The byte offset of the start of the first component from the start of the vertex.
+    GLboolean                    Normalized;           /// GL_TRUE if the data is normalized; otherwise, GL_FALSE.
+};
+
+/// @summary Defines a vertex layout, encapsulated in an OpenGL vertex array object used to configure the input assembler stage.
+struct CG_VERTEX_LAYOUT
+{
+    uint32_t                     ObjectId;             /// The CGFX internal object identifier.
+    GLuint                       VertexArray;          /// The OpenGL vertex array object.
+    size_t                       BufferCount;          /// The number of data buffers used for specifying vertex data.
+    size_t                       AttributeCount;       /// The number of vertex attributes defining the vertex layout.
+    size_t                      *BufferStrides;        /// An array of BufferCount items specifying the number of bytes between adjacent vertices in each buffer.
+    size_t                      *BufferIndices;        /// An array of AttributeCount buffer indices for each vertex attribute.
+    GLuint                      *ShaderLocations;      /// An array of AttributeCount shader bindings for each vertex attribute.
+    CG_VERTEX_ATTRIBUTE         *AttributeData;        /// An array of AttributeCount vertex attribute descriptors.
+    CG_DISPLAY                  *AttachedDisplay;      /// The display object associated with the OpenGL rendering context.
+};
+
 /// @summary Defines the basic structure of a compute pipeline dispatch within a command buffer.
 struct CG_COMPUTE_DISPATCH_CMD
 {
@@ -731,18 +756,19 @@ struct CG_COMPUTE_DISPATCH_CMD
 };
 
 /// @summary Typedef the object tables held by a context object.
-typedef CG_OBJECT_TABLE<CG_DEVICE    , CG_MAX_DEVICES    > CG_DEVICE_TABLE;
-typedef CG_OBJECT_TABLE<CG_DISPLAY   , CG_MAX_DISPLAYS   > CG_DISPLAY_TABLE;
-typedef CG_OBJECT_TABLE<CG_QUEUE     , CG_MAX_QUEUES     > CG_QUEUE_TABLE;
-typedef CG_OBJECT_TABLE<CG_CMD_BUFFER, CG_MAX_CMD_BUFFERS> CG_CMD_BUFFER_TABLE;
-typedef CG_OBJECT_TABLE<CG_EXEC_GROUP, CG_MAX_EXEC_GROUPS> CG_EXEC_GROUP_TABLE;
-typedef CG_OBJECT_TABLE<CG_KERNEL    , CG_MAX_KERNELS    > CG_KERNEL_TABLE;
-typedef CG_OBJECT_TABLE<CG_PIPELINE  , CG_MAX_PIPELINES  > CG_PIPELINE_TABLE;
-typedef CG_OBJECT_TABLE<CG_BUFFER    , CG_MAX_BUFFERS    > CG_BUFFER_TABLE;
-typedef CG_OBJECT_TABLE<CG_FENCE     , CG_MAX_FENCES     > CG_FENCE_TABLE;
-typedef CG_OBJECT_TABLE<CG_EVENT     , CG_MAX_EVENTS     > CG_EVENT_TABLE;
-typedef CG_OBJECT_TABLE<CG_IMAGE     , CG_MAX_IMAGES     > CG_IMAGE_TABLE;
-typedef CG_OBJECT_TABLE<CG_SAMPLER   , CG_MAX_SAMPLERS   > CG_SAMPLER_TABLE;
+typedef CG_OBJECT_TABLE<CG_DEVICE       , CG_MAX_DEVICES       > CG_DEVICE_TABLE;
+typedef CG_OBJECT_TABLE<CG_DISPLAY      , CG_MAX_DISPLAYS      > CG_DISPLAY_TABLE;
+typedef CG_OBJECT_TABLE<CG_QUEUE        , CG_MAX_QUEUES        > CG_QUEUE_TABLE;
+typedef CG_OBJECT_TABLE<CG_CMD_BUFFER   , CG_MAX_CMD_BUFFERS   > CG_CMD_BUFFER_TABLE;
+typedef CG_OBJECT_TABLE<CG_EXEC_GROUP   , CG_MAX_EXEC_GROUPS   > CG_EXEC_GROUP_TABLE;
+typedef CG_OBJECT_TABLE<CG_KERNEL       , CG_MAX_KERNELS       > CG_KERNEL_TABLE;
+typedef CG_OBJECT_TABLE<CG_PIPELINE     , CG_MAX_PIPELINES     > CG_PIPELINE_TABLE;
+typedef CG_OBJECT_TABLE<CG_BUFFER       , CG_MAX_BUFFERS       > CG_BUFFER_TABLE;
+typedef CG_OBJECT_TABLE<CG_FENCE        , CG_MAX_FENCES        > CG_FENCE_TABLE;
+typedef CG_OBJECT_TABLE<CG_EVENT        , CG_MAX_EVENTS        > CG_EVENT_TABLE;
+typedef CG_OBJECT_TABLE<CG_IMAGE        , CG_MAX_IMAGES        > CG_IMAGE_TABLE;
+typedef CG_OBJECT_TABLE<CG_SAMPLER      , CG_MAX_SAMPLERS      > CG_SAMPLER_TABLE;
+typedef CG_OBJECT_TABLE<CG_VERTEX_LAYOUT, CG_MAX_VERTEX_LAYOUTS> CG_VERTEX_LAYOUT_TABLE;
 
 /// @summary Define the state associated with a CGFX instance, created when devices are enumerated.
 struct CG_CONTEXT
@@ -766,6 +792,7 @@ struct CG_CONTEXT
     CG_EVENT_TABLE               EventTable;           /// The object table of all synchronization events.
     CG_IMAGE_TABLE               ImageTable;           /// The object table of all image objects.
     CG_SAMPLER_TABLE             SamplerTable;         /// The object table of all image sampler objects.
+    CG_VERTEX_LAYOUT_TABLE       LayoutTable;          /// The object table of all vertex layout objects.
 };
 
 /*/////////////////

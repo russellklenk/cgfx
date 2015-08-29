@@ -1133,6 +1133,28 @@ cgDeleteSampler
     memset(sampler, 0, sizeof(CG_SAMPLER));
 }
 
+/// @summary Frees all resources associated with a vertex layout object.
+/// @param ctx The CGFX context that owns the vertex layout object.
+/// @param layout The vertex layout object to delete.
+internal_function void
+cgDeleteVertexLayout
+(
+    CG_CONTEXT       *ctx, 
+    CG_VERTEX_LAYOUT *layout
+)
+{
+    CG_DISPLAY *display = layout->AttachedDisplay;
+    if (layout->VertexArray != 0)
+    {
+        glDeleteVertexArrays(1, &layout->VertexArray);
+    }
+    cgFreeHostMemory(&ctx->HostAllocator, layout->AttributeData  , layout->AttributeCount * sizeof(CG_VERTEX_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, layout->ShaderLocations, layout->AttributeCount * sizeof(GLuint)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, layout->BufferIndices  , layout->AttributeCount * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, layout->BufferStrides  , layout->BufferCount    * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    memset(layout, 0, sizeof(CG_VERTEX_LAYOUT));
+}
+
 /// @summary Allocates memory for and initializes an empty CGFX context object.
 /// @param app_info Information about the application associated with the context.
 /// @param alloc_cb User-supplied host memory allocator callbacks, or NULL.
@@ -1172,6 +1194,7 @@ cgCreateContext
     cgObjectTableInit(&ctx->EventTable    , CG_OBJECT_EVENT          , CG_EVENT_TABLE_ID);
     cgObjectTableInit(&ctx->ImageTable    , CG_OBJECT_IMAGE          , CG_IMAGE_TABLE_ID);
     cgObjectTableInit(&ctx->SamplerTable  , CG_OBJECT_SAMPLER        , CG_SAMPLER_TABLE_ID);
+    cgObjectTableInit(&ctx->LayoutTable   , CG_OBJECT_VERTEX_FORMAT  , CG_VERTEX_LAYOUT_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -1188,6 +1211,12 @@ cgDeleteContext
 )
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
+    // free all vertex layout objects:
+    for (size_t i = 0, n = ctx->LayoutTable.ObjectCount; i < n; ++i)
+    {
+        CG_VERTEX_LAYOUT *obj = &ctx->LayoutTable.Objects[i];
+        cgDeleteVertexLayout(ctx, obj);
+    }
     // free all sampler objects:
     for (size_t i = 0, n = ctx->SamplerTable.ObjectCount; i < n; ++i)
     {

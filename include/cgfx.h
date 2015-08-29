@@ -513,6 +513,7 @@ enum cg_object_e : uint32_t
     CG_OBJECT_BUFFER                   = (1 <<  9),    /// The object type identifier for a data buffer.
     CG_OBJECT_IMAGE                    = (1 << 10),    /// The object type identifier for an image.
     CG_OBJECT_SAMPLER                  = (1 << 11),    /// The object type identifier for an image sampler.
+    CG_OBJECT_VERTEX_FORMAT            = (1 << 12),    /// The object type identifier for a vertex layout.
 };
 
 /// @summary Define the queryable data on a CGFX context object.
@@ -782,6 +783,19 @@ enum cg_image_sampler_type : int
     CG_IMAGE_SAMPLER_CUBEMAP           =  7,           /// The image being sampled is accessed as a cubemap using normalized coordinates.
     CG_IMAGE_SAMPLER_CUBEMAP_ARRAY     =  8,           /// The image being sampled is accessed as a cubemap image array using normalized coordinates. Requires an OpenGL 4.0 context or ARB_texture_cube_map_array support.
     CG_IMAGE_SAMPLER_BUFFER            =  9,           /// The image being sampled is a texture buffer using integer coordinates.
+};
+
+/// @summary Define the supported vertex attribute types.
+enum cg_attribute_format_e : int
+{
+    CG_ATTRIBUTE_FORMAT_FLOAT32        =  1,           /// Each component is stored as a 32-bit single-precision floating point value. Never normalized.
+    CG_ATTRIBUTE_FORMAT_FLOAT16        =  2,           /// Each component is stored as a 16-bit half-precision floating point value. Never normalized.
+    CG_ATTRIBUTE_FORMAT_SINT8          =  3,           /// Each component is stored as a signed 8-bit integer value. May be normalized.
+    CG_ATTRIBUTE_FORMAT_UINT8          =  4,           /// Each component is stored as an unsigned 8-bit integer value. May be normalized.
+    CG_ATTRIBUTE_FORMAT_SINT16         =  5,           /// Each component is stored as a signed 16-bit integer value. May be normalized.
+    CG_ATTRIBUTE_FORMAT_UINT16         =  6,           /// Each component is stored as an unsigned  16-bit integer value. May be normalized.
+    CG_ATTRIBUTE_FORMAT_SINT32         =  7,           /// Each component is stored as a signed 32-bit integer value. May be normalized.
+    CG_ATTRIBUTE_FORMAT_UINT32         =  8,           /// Each component is stored as an unsigned 32-bit integer value. May be normalized.
 };
 
 /// @summary Define flags that can be specified when creating an execution group.
@@ -1114,6 +1128,25 @@ struct cg_compute_dispatch_cmd_base_t
     size_t                       WorkDimension;        /// The number of valid entries in LocalWorkSize and GlobalWorkSize.
     size_t                       LocalWorkSize[3];     /// The size of each work group in each dimension.
     size_t                       GlobalWorkSize[3];    /// The number of work items in each dimension.
+};
+
+/// @summary Defines the data associated with a single vertex attribute.
+struct cg_vertex_attribute_t
+{
+    unsigned int                 ShaderLocation;       /// The zero-based index of the register to which the attribute is bound in the shader.
+    int                          ComponentType;        /// One of cg_attribute_type_e specifying the storage format of each component.
+    size_t                       ComponentCount;       /// The number of components in the attribute.
+    size_t                       ByteOffset;           /// The byte offset of the start of the component from the start of the vertex.
+    bool                         Normalized;           /// If true, components are normalized to floats prior to access in the shader.
+};
+
+/// @summary Describes the layout of vertex data in a buffer object.
+struct cg_vertex_layout_t
+{
+    size_t                       VertexSize;           /// The total size of all vertex attributes comprising a single vertex in the buffer.
+    size_t                       VertexStride;         /// The number of bytes between adjacent verticies in the buffer.
+    size_t                       AttributeCount;       /// The number of vertex attrtibutes defined for the buffer.
+    cg_vertex_attribute_t const *AttributeList;        /// The array of vertex attribute descriptors, ordered by offset. 
 };
 
 /// @summary Define the runtime data view of a compute dispatch command in a command buffer.
@@ -1530,6 +1563,27 @@ cgDeviceFenceWithWaitList                           /// Block the device from ex
     size_t                        wait_count,       /// The number of events or fences to wait on before the fence becomes passable.
     cg_handle_t const            *wait_handles,     /// An array of wait_count event or fence handles that, when all are signaled, allow execution of commands past the fence.
     cg_handle_t                   done_event        /// The handle of the event to signal when the fence is passed, or CG_INVALID_HANDLE.
+);
+
+cg_handle_t
+cgCreateVertexLayout                                /// Create a new vertex layout object.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   exec_group,       /// The handle of the execution group where the vertex layout will be used.
+    size_t                        num_buffers,      /// The number of data buffers defining vertex components.
+    size_t const                 *attrib_counts,    /// An array of num_buffers values defining the number of vertex attributes in each data buffer.
+    cg_vertex_attribute_t const **attrib_data,      /// An array of num_buffers arrays defining the vertex attributes in each data buffer.
+    int                          &result            /// On return, set to CG_SUCCESS or another result code.
+);
+
+int
+cgChangeVertexLayout                                /// Change the active vertex layout prior to issuing an explicit draw call.
+(
+    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
+    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
+    cg_handle_t                   new_layout,       /// The handle of the vertex layout descriptor to apply to the input assembler.
+    cg_handle_t                   done_event,       /// The handle of the event to signal when the vertex layout is applied, or CG_INVALID_HANDLE.
+    cg_handle_t                   wait_event        /// The handle of an event or fence to wait to become signaled before changing the vertex layout, or CG_INVALID_HANDLE.
 );
 
 cg_handle_t
