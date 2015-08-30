@@ -1133,26 +1133,26 @@ cgDeleteSampler
     memset(sampler, 0, sizeof(CG_SAMPLER));
 }
 
-/// @summary Frees all resources associated with a vertex layout object.
-/// @param ctx The CGFX context that owns the vertex layout object.
-/// @param layout The vertex layout object to delete.
+/// @summary Frees all resources associated with an input assembler configuration object.
+/// @param ctx The CGFX context that owns the vertex data source object.
+/// @param source The input assembler configuration object to delete.
 internal_function void
-cgDeleteVertexLayout
+cgDeleteVertexDataSource
 (
-    CG_CONTEXT       *ctx, 
-    CG_VERTEX_LAYOUT *layout
+    CG_CONTEXT            *ctx, 
+    CG_VERTEX_DATA_SOURCE *source
 )
 {
-    CG_DISPLAY *display = layout->AttachedDisplay;
-    if (layout->VertexArray != 0)
+    CG_DISPLAY *display = source->AttachedDisplay;
+    if (source->VertexArray != 0)
     {
-        glDeleteVertexArrays(1, &layout->VertexArray);
+        glDeleteVertexArrays(1, &source->VertexArray);
     }
-    cgFreeHostMemory(&ctx->HostAllocator, layout->AttributeData  , layout->AttributeCount * sizeof(CG_VERTEX_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, layout->ShaderLocations, layout->AttributeCount * sizeof(GLuint)             , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, layout->BufferIndices  , layout->AttributeCount * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
-    cgFreeHostMemory(&ctx->HostAllocator, layout->BufferStrides  , layout->BufferCount    * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
-    memset(layout, 0, sizeof(CG_VERTEX_LAYOUT));
+    cgFreeHostMemory(&ctx->HostAllocator, source->AttributeData  , source->AttributeCount * sizeof(CG_VERTEX_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, source->ShaderLocations, source->AttributeCount * sizeof(GLuint)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, source->BufferIndices  , source->AttributeCount * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, source->BufferStrides  , source->BufferCount    * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    memset(source, 0, sizeof(CG_VERTEX_DATA_SOURCE));
 }
 
 /// @summary Allocates memory for and initializes an empty CGFX context object.
@@ -1182,19 +1182,19 @@ cgCreateContext
     memset(ctx, 0, sizeof(CG_CONTEXT));
 
     // initialize the various object tables on the context to empty.
-    cgObjectTableInit(&ctx->DeviceTable   , CG_OBJECT_DEVICE         , CG_DEVICE_TABLE_ID);
-    cgObjectTableInit(&ctx->DisplayTable  , CG_OBJECT_DISPLAY        , CG_DISPLAY_TABLE_ID);
-    cgObjectTableInit(&ctx->QueueTable    , CG_OBJECT_QUEUE          , CG_QUEUE_TABLE_ID);
-    cgObjectTableInit(&ctx->CmdBufferTable, CG_OBJECT_COMMAND_BUFFER , CG_CMD_BUFFER_TABLE_ID);
-    cgObjectTableInit(&ctx->ExecGroupTable, CG_OBJECT_EXECUTION_GROUP, CG_EXEC_GROUP_TABLE_ID);
-    cgObjectTableInit(&ctx->KernelTable   , CG_OBJECT_KERNEL         , CG_KERNEL_TABLE_ID);
-    cgObjectTableInit(&ctx->PipelineTable , CG_OBJECT_PIPELINE       , CG_PIPELINE_TABLE_ID);
-    cgObjectTableInit(&ctx->BufferTable   , CG_OBJECT_BUFFER         , CG_BUFFER_TABLE_ID);
-    cgObjectTableInit(&ctx->FenceTable    , CG_OBJECT_FENCE          , CG_FENCE_TABLE_ID);
-    cgObjectTableInit(&ctx->EventTable    , CG_OBJECT_EVENT          , CG_EVENT_TABLE_ID);
-    cgObjectTableInit(&ctx->ImageTable    , CG_OBJECT_IMAGE          , CG_IMAGE_TABLE_ID);
-    cgObjectTableInit(&ctx->SamplerTable  , CG_OBJECT_SAMPLER        , CG_SAMPLER_TABLE_ID);
-    cgObjectTableInit(&ctx->LayoutTable   , CG_OBJECT_VERTEX_FORMAT  , CG_VERTEX_LAYOUT_TABLE_ID);
+    cgObjectTableInit(&ctx->DeviceTable      , CG_OBJECT_DEVICE            , CG_DEVICE_TABLE_ID);
+    cgObjectTableInit(&ctx->DisplayTable     , CG_OBJECT_DISPLAY           , CG_DISPLAY_TABLE_ID);
+    cgObjectTableInit(&ctx->QueueTable       , CG_OBJECT_QUEUE             , CG_QUEUE_TABLE_ID);
+    cgObjectTableInit(&ctx->CmdBufferTable   , CG_OBJECT_COMMAND_BUFFER    , CG_CMD_BUFFER_TABLE_ID);
+    cgObjectTableInit(&ctx->ExecGroupTable   , CG_OBJECT_EXECUTION_GROUP   , CG_EXEC_GROUP_TABLE_ID);
+    cgObjectTableInit(&ctx->KernelTable      , CG_OBJECT_KERNEL            , CG_KERNEL_TABLE_ID);
+    cgObjectTableInit(&ctx->PipelineTable    , CG_OBJECT_PIPELINE          , CG_PIPELINE_TABLE_ID);
+    cgObjectTableInit(&ctx->BufferTable      , CG_OBJECT_BUFFER            , CG_BUFFER_TABLE_ID);
+    cgObjectTableInit(&ctx->FenceTable       , CG_OBJECT_FENCE             , CG_FENCE_TABLE_ID);
+    cgObjectTableInit(&ctx->EventTable       , CG_OBJECT_EVENT             , CG_EVENT_TABLE_ID);
+    cgObjectTableInit(&ctx->ImageTable       , CG_OBJECT_IMAGE             , CG_IMAGE_TABLE_ID);
+    cgObjectTableInit(&ctx->SamplerTable     , CG_OBJECT_SAMPLER           , CG_SAMPLER_TABLE_ID);
+    cgObjectTableInit(&ctx->VertexSourceTable, CG_OBJECT_VERTEX_DATA_SOURCE, CG_VERTEX_DATA_SOURCE_TABLE_ID);
 
     // the context has been fully initialized.
     result             = CG_SUCCESS;
@@ -1212,10 +1212,10 @@ cgDeleteContext
 {
     CG_HOST_ALLOCATOR *host_alloc = &ctx->HostAllocator;
     // free all vertex layout objects:
-    for (size_t i = 0, n = ctx->LayoutTable.ObjectCount; i < n; ++i)
+    for (size_t i = 0, n = ctx->VertexSourceTable.ObjectCount; i < n; ++i)
     {
-        CG_VERTEX_LAYOUT *obj = &ctx->LayoutTable.Objects[i];
-        cgDeleteVertexLayout(ctx, obj);
+        CG_VERTEX_DATA_SOURCE *obj = &ctx->VertexSourceTable.Objects[i];
+        cgDeleteVertexDataSource(ctx, obj);
     }
     // free all sampler objects:
     for (size_t i = 0, n = ctx->SamplerTable.ObjectCount; i < n; ++i)
@@ -7494,6 +7494,17 @@ cgDeleteObject
         }
         break;
 
+    case CG_OBJECT_VERTEX_DATA_SOURCE:
+        {
+            CG_VERTEX_DATA_SOURCE source;
+            if (cgObjectTableRemove(&ctx->VertexSourceTable, object, source))
+            {
+                cgDeleteVertexDataSource(ctx, &source);
+                return CG_SUCCESS;
+            }
+        }
+        break;
+
     default:
         break;
     }
@@ -8029,6 +8040,275 @@ cgDeviceFenceWithWaitList
     bdp->WaitListCount  = wait_count;
     memcpy(bdp->WaitList, wait_handles, wait_count * sizeof(cg_handle_t));
     return cgCommandBufferUnmapAppend(context, cmd_buffer, cmd_size);
+}
+
+/// @summary Create a vertex data source object that can be used to configure the input assembler stage of a graphics pipeline.
+/// @param context A CGFX context returned by cgEnumerateDevices.
+/// @param exec_group The handle of the execution group that owns the layout object.
+/// @param num_buffers The number of data buffers expected to be used for providing vertex data.
+/// @param buffer_list An array of @a num_buffers data buffer object handles specifying the data buffers that contain the vertex data.
+/// @param index_buffer A data buffer object handle specifying the data buffer that contains primitive indices, or CG_INVALID_HANDLE if indexed rendering is not used.
+/// @param attrib_counts An array of @a num_buffers counts, each specifying the number of vertex attributes in each buffer.
+/// @param attrib_data An array of @a num_buffers arrays, each specifying the vertex attribute definitions for the corresponding buffer.
+/// @param result On return, set to CG_SUCCESS, CG_INVALID_VALUE, ...
+library_function cg_handle_t
+cgCreateVertexDataSource
+(
+    uintptr_t                     context,
+    cg_handle_t                   exec_group, 
+    size_t                        num_buffers, 
+    cg_handle_t                  *buffer_list,
+    cg_handle_t                   index_buffer,
+    size_t const                 *attrib_counts, 
+    cg_vertex_attribute_t const **attrib_data,
+    int                          &result
+)
+{
+    CG_CONTEXT    *ctx   = (CG_CONTEXT*) context;
+    CG_EXEC_GROUP *group =  cgObjectTableGet(&ctx->ExecGroupTable, exec_group);
+    if (group == NULL)
+    {   // an invalid execution group was specified.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+    if (num_buffers > 16)
+    {   // implementations typically only support 16 vertex attributes.
+        result = CG_INVALID_VALUE;
+        return CG_INVALID_HANDLE;
+    }
+
+    // retrieve pointers to all of the referenced buffer objects.
+    CG_BUFFER *indexbuf = NULL;
+    if (index_buffer != CG_INVALID_HANDLE)
+    {   // indexed rendering will be used; retrieve the index buffer object.
+        if ((indexbuf = cgObjectTableGet(&ctx->BufferTable, index_buffer)) == NULL)
+        {   // the supplied buffer object handle is not valid.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+        if  (indexbuf->GraphicsBuffer == 0)
+        {   // no OpenGL buffer object is associated with the specified data buffer.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+    }
+
+    CG_BUFFER *buffers[16];
+    for (size_t i  = 0, n = num_buffers; i < n; ++i)
+    {
+        buffers[i] = cgObjectTableGet(&ctx->BufferTable, buffer_list[i]);
+        if (buffers[i] == NULL || buffers[i]->GraphicsBuffer == 0)
+        {   // an invalid buffer handle was specified.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+    }
+
+    // calculate the total number of vertex attributes.
+    size_t  num_attribs  =  0;
+    for (size_t i = 0, n = num_buffers, a = 0; i < n; ++i)
+    {
+        cg_vertex_attribute_t const *attrib_list = attrib_data[i];
+        if (attrib_counts[i] == 0)
+        {   // each buffer must define at least one vertex attribute.
+            result = CG_INVALID_VALUE;
+            return CG_INVALID_HANDLE;
+        }
+        // run through the vertex attribute definitions and perform basic validation.
+        for (size_t j = 0, m = attrib_counts[i]; j < m; ++j, ++a)
+        {
+            if (attrib_list[j].BufferIndex != i)
+            {   // the buffer index is specified incorrectly.
+                result = CG_INVALID_VALUE;
+                return CG_INVALID_HANDLE;
+            }
+        }
+        num_attribs += attrib_counts[i];
+    }
+
+    // allocate memory for the vertex attribute metadata.
+    GLuint                 buf      =  0;
+    GLuint                 vao      =  0;
+    size_t                *strides  = (size_t              *) cgAllocateHostMemory(&ctx->HostAllocator, num_buffers * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    size_t                *indices  = (size_t              *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    GLuint                *regs     = (GLuint              *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs * sizeof(GLuint)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    CG_VERTEX_ATTRIBUTE   *attribs  = (CG_VERTEX_ATTRIBUTE *) cgAllocateHostMemory(&ctx->HostAllocator, num_attribs * sizeof(CG_VERTEX_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+    CG_DISPLAY            *display  =  group->AttachedDisplay;
+    cg_handle_t            handle   =  CG_INVALID_HANDLE;
+    CG_VERTEX_DATA_SOURCE  source;
+    if (strides == NULL || indices == NULL || regs == NULL || attribs == NULL)
+    {   // unable to allocate the required memory.
+        result = CG_OUT_OF_MEMORY;
+        goto error_cleanup;
+    }
+    glGenVertexArrays(1, &vao);
+    if (vao == 0)
+    {   // unable to allocate a vertex array object name.
+        result = CG_BAD_GLCONTEXT;
+        goto error_cleanup;
+    }
+
+    // calculate OpenGL types and compute stride values.
+    for (size_t buffer_index = 0, global_attrib = 0; buffer_index < num_buffers; ++buffer_index)
+    {
+        cg_vertex_attribute_t const *local_attribs = attrib_data  [buffer_index];
+        size_t                       local_count   = attrib_counts[buffer_index];
+
+        // loop over all of the vertex attributes in the buffer. convert to OpenGL types and update the stride.
+        strides[buffer_index] = 0;
+        for (size_t local_attrib  = 0; local_attrib < local_count; ++local_attrib, ++global_attrib)
+        {
+            GLenum  type = GL_NONE;
+            GLsizei dim  = 0;
+            GLuint  reg  = 0;
+            size_t  ofs  = 0;
+            size_t  siz  = 0;
+            GLboolean n  = GL_FALSE;
+
+            switch (local_attribs[local_attrib].ComponentType)
+            {
+            case CG_ATTRIBUTE_FORMAT_FLOAT32:
+                type = GL_FLOAT;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(float);
+                n    = GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_FLOAT16:
+                type = GL_HALF_FLOAT;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(uint16_t);
+                n    = GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_SINT8:
+                type = GL_BYTE;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(int8_t);
+                n    = local_attribs[local_attrib].Normalized ? GL_TRUE : GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_UINT8:
+                type = GL_UNSIGNED_BYTE;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(uint8_t);
+                n    = local_attribs[local_attrib].Normalized ? GL_TRUE : GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_SINT16:
+                type = GL_SHORT;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(int16_t);
+                n    = local_attribs[local_attrib].Normalized ? GL_TRUE : GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_UINT16:
+                type = GL_UNSIGNED_SHORT;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(uint16_t);
+                n    = local_attribs[local_attrib].Normalized ? GL_TRUE : GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_SINT32:
+                type = GL_INT;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(int32_t);
+                n    = local_attribs[local_attrib].Normalized ? GL_TRUE : GL_FALSE;
+                break;
+            case CG_ATTRIBUTE_FORMAT_UINT32:
+                type = GL_UNSIGNED_INT;
+                dim  =(GLsizei) local_attribs[local_attrib].ComponentCount;
+                reg  =(GLuint ) local_attribs[local_attrib].ShaderLocation;
+                ofs  =(size_t ) local_attribs[local_attrib].ByteOffset;
+                siz  = sizeof(uint32_t);
+                n    = local_attribs[local_attrib].Normalized ? GL_TRUE : GL_FALSE;
+                break;
+            default:
+                break;
+            }
+            if (dim < 1 || dim > 4 || siz == 0)
+            {   // the type was invalid, or the dimension was invalid.
+                result = CG_INVALID_VALUE;
+                goto error_cleanup;
+            }
+
+            // copy data out into our object-local storage.
+            strides[buffer_index ]           += siz * dim;
+            indices[global_attrib]            = buffer_index;
+            regs   [global_attrib]            = reg;
+            attribs[global_attrib].DataType   = type;
+            attribs[global_attrib].Dimension  = dim;
+            attribs[global_attrib].ByteOffset = ofs;
+            attribs[global_attrib].Normalized = n;
+        }
+    }
+
+    // set up the OpenGL vertex array object. the VAO stores which attributes 
+    // are enabled, where they come from (buffer bindings, types, offsets, strides)
+    // and also which index array is active. OpenGL 3.3+ also stores instancing state.
+    glBindVertexArray(vao);
+    if  (indexbuf != NULL)
+    {   // the VAO captures the element array buffer binding immediately.
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexbuf->GraphicsBuffer);
+    }
+    for (size_t i  = 0, n = num_attribs; i < n; ++i)
+    {
+        CG_BUFFER *attrib_source = buffers[indices[i]];
+        if (buf != attrib_source->GraphicsBuffer)
+        {   // bind the buffer containing the vertex attribute data. note that 
+            // the VAO doesn't capture this binding until glVertexAttribPointer.
+            glBindBuffer(GL_ARRAY_BUFFER, attrib_source->GraphicsBuffer);
+            buf = attrib_source->GraphicsBuffer;
+        }
+        glVertexAttribPointer
+        (   regs   [i], 
+            attribs[i].Dimension, 
+            attribs[i].DataType, 
+            attribs[i].Normalized, 
+            strides[indices[i]], 
+            CG_GL_BUFFER_OFFSET(attribs[i].ByteOffset)
+        );
+    }
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    // fill out and add the new vertex layout object.
+    source.VertexArray    = vao;
+    source.BufferCount    = num_buffers;
+    source.AttributeCount = num_attribs;
+    source.BufferStrides  = strides;
+    source.BufferIndices  = indices;
+    source.ShaderLocations= regs;
+    source.AttributeData  = attribs;
+    source.AttachedDisplay= display;
+    if ((handle = cgObjectTableAdd(&ctx->VertexSourceTable, source)) == CG_INVALID_HANDLE)
+    {   // the object table is full.
+        result = CG_OUT_OF_OBJECTS;
+        goto error_cleanup;
+    }
+    result = CG_SUCCESS;
+    return handle;
+
+error_cleanup:
+    if (vao != 0)
+    {
+        glBindVertexArray(0);
+        glDeleteVertexArrays(1, &vao);
+    }
+    cgFreeHostMemory(&ctx->HostAllocator, attribs, num_attribs * sizeof(CG_VERTEX_ATTRIBUTE), 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, regs   , num_attribs * sizeof(GLuint)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, indices, num_attribs * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    cgFreeHostMemory(&ctx->HostAllocator, strides, num_buffers * sizeof(size_t)             , 0, CG_ALLOCATION_TYPE_OBJECT);
+    return CG_INVALID_HANDLE;
 }
 
 /// @summary Create a kernel object and load graphics or compute shader code into it.

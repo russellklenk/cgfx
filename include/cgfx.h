@@ -513,7 +513,7 @@ enum cg_object_e : uint32_t
     CG_OBJECT_BUFFER                   = (1 <<  9),    /// The object type identifier for a data buffer.
     CG_OBJECT_IMAGE                    = (1 << 10),    /// The object type identifier for an image.
     CG_OBJECT_SAMPLER                  = (1 << 11),    /// The object type identifier for an image sampler.
-    CG_OBJECT_VERTEX_FORMAT            = (1 << 12),    /// The object type identifier for a vertex layout.
+    CG_OBJECT_VERTEX_DATA_SOURCE       = (1 << 12),    /// The object type identifier for a vertex data and input assembler configuration.
 };
 
 /// @summary Define the queryable data on a CGFX context object.
@@ -877,6 +877,7 @@ enum cg_command_id_e : uint16_t
     CG_COMMAND_COPY_IMAGE              =       3 ,     /// Copy data from one image to another.
     CG_COMMAND_COPY_BUFFER_TO_IMAGE    =       4 ,     /// Copy data from a buffer into an image object.
     CG_COMMAND_COPY_IMAGE_TO_BUFFER    =       5 ,     /// Copy data from an image object into a buffer.
+    CG_COMMAND_FLUSH_PIPELINE          =       6 ,     /// Flush any buffered data for a pipeline object to the device.
 };
 
 /// @summary The equivalent of the DDS_PIXELFORMAT structure. See MSDN at:
@@ -1117,22 +1118,10 @@ struct cg_compute_pipeline_t
     cg_handle_t                  KernelProgram;        /// The handle of the kernel code to execute.
 };
 
-/// @summary Defines the basic data passed with a compute dispatch command in a command buffer.
-struct cg_compute_dispatch_cmd_base_t
-{
-    uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id specifying the pipeline type.
-    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
-    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
-    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
-    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when kernel execution is complete, or CG_INVALID_HANDLE.
-    size_t                       WorkDimension;        /// The number of valid entries in LocalWorkSize and GlobalWorkSize.
-    size_t                       LocalWorkSize[3];     /// The size of each work group in each dimension.
-    size_t                       GlobalWorkSize[3];    /// The number of work items in each dimension.
-};
-
 /// @summary Defines the data associated with a single vertex attribute.
 struct cg_vertex_attribute_t
 {
+    size_t                       BufferIndex;          /// The zero-based index of the stream in which this vertex attribute is present.
     unsigned int                 ShaderLocation;       /// The zero-based index of the register to which the attribute is bound in the shader.
     int                          ComponentType;        /// One of cg_attribute_type_e specifying the storage format of each component.
     size_t                       ComponentCount;       /// The number of components in the attribute.
@@ -1140,13 +1129,17 @@ struct cg_vertex_attribute_t
     bool                         Normalized;           /// If true, components are normalized to floats prior to access in the shader.
 };
 
-/// @summary Describes the layout of vertex data in a buffer object.
-struct cg_vertex_layout_t
+/// @summary Defines the basic data passed with a compute dispatch command in a command buffer.
+struct cg_compute_dispatch_cmd_base_t
 {
-    size_t                       VertexSize;           /// The total size of all vertex attributes comprising a single vertex in the buffer.
-    size_t                       VertexStride;         /// The number of bytes between adjacent verticies in the buffer.
-    size_t                       AttributeCount;       /// The number of vertex attrtibutes defined for the buffer.
-    cg_vertex_attribute_t const *AttributeList;        /// The array of vertex attribute descriptors, ordered by offset. 
+    uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id specifying the pipeline type.
+    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when kernel execution is complete, or CG_INVALID_HANDLE.
+    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
+    size_t                       WorkDimension;        /// The number of valid entries in LocalWorkSize and GlobalWorkSize.
+    size_t                       LocalWorkSize[3];     /// The size of each work group in each dimension.
+    size_t                       GlobalWorkSize[3];    /// The number of work items in each dimension.
 };
 
 /// @summary Define the runtime data view of a compute dispatch command in a command buffer.
@@ -1217,6 +1210,23 @@ struct cg_copy_image_to_buffer_cmd_t
     size_t                       SourceOrigin[3];      /// The x-coordinate, y-coordinate and slice index on the source image.
     size_t                       Dimensions[3];        /// The width (in pixels), height (in pixels) and number of slices to copy.
     size_t                       TargetOffset;         /// The offset of the first byte to write in the target buffer.
+};
+
+/// @summary Defines the basic data passed with a pipeline flush command in a command buffer.
+struct cg_flush_pipeline_cmd_base_t
+{
+    uint16_t                     PipelineId;           /// One of cg_[compute|graphics]_pipeline_id_e specifying the pipeline type.
+    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when pipeline execution is complete, or CG_INVALID_HANDLE.
+    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
+};
+
+/// @summary Define the runtime data view of a pipeline flush command in a command buffer.
+struct cg_flush_pipeline_cmd_data_t :
+    public cg_flush_pipeline_cmd_base_t
+{
+    uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
 };
 
 /*/////////////////
@@ -1566,24 +1576,16 @@ cgDeviceFenceWithWaitList                           /// Block the device from ex
 );
 
 cg_handle_t
-cgCreateVertexLayout                                /// Create a new vertex layout object.
+cgCreateVertexDataSource                            /// Create a new vertex data source object and input assembler configuration.
 (
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   exec_group,       /// The handle of the execution group where the vertex layout will be used.
     size_t                        num_buffers,      /// The number of data buffers defining vertex components.
+    cg_handle_t                  *buffer_list,      /// An array of num_buffers handles of data buffers containing the vertex data.
+    cg_handle_t                   index_buffer,     /// The handle of the data buffer to use for specifying primitive index data, or CG_INVALID_HANDLE.
     size_t const                 *attrib_counts,    /// An array of num_buffers values defining the number of vertex attributes in each data buffer.
     cg_vertex_attribute_t const **attrib_data,      /// An array of num_buffers arrays defining the vertex attributes in each data buffer.
     int                          &result            /// On return, set to CG_SUCCESS or another result code.
-);
-
-int
-cgChangeVertexLayout                                /// Change the active vertex layout prior to issuing an explicit draw call.
-(
-    uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
-    cg_handle_t                   cmd_buffer,       /// The handle of the destination command buffer.
-    cg_handle_t                   new_layout,       /// The handle of the vertex layout descriptor to apply to the input assembler.
-    cg_handle_t                   done_event,       /// The handle of the event to signal when the vertex layout is applied, or CG_INVALID_HANDLE.
-    cg_handle_t                   wait_event        /// The handle of an event or fence to wait to become signaled before changing the vertex layout, or CG_INVALID_HANDLE.
 );
 
 cg_handle_t
