@@ -166,7 +166,7 @@ cgCreateComputePipelineTest01
     cg_compute_pipeline_t cp;
     cp.KernelName    = "hello_world";
     cp.KernelProgram = kernel;
-    cg_handle_t pipeline = cgCreateComputePipeline(context, exec_group, &cp, result);
+    cg_handle_t pipeline = cgCreateComputePipeline(context, exec_group, &cp, NULL, NULL, result);
     if (pipeline == CG_INVALID_HANDLE)
     {
         cgDeleteObject(context, kernel);

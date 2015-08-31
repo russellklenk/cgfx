@@ -634,11 +634,13 @@ struct CG_PIPELINE
 {
     uint32_t                     ObjectId;             /// The CGFX internal object identifier.
     int                          PipelineType;         /// One of cg_pipeline_type_e specifying the type of pipeline data.
+    void                        *PrivateState;         /// Opaque storage for data internal to the pipeline implementation.
     union
     {
         CG_COMPUTE_PIPELINE      Compute;              /// The state for a compute pipeline.
         CG_GRAPHICS_PIPELINE     Graphics;             /// The state for a graphics pipeline.
     };
+    cgPipelineTeardown_fn        DestroyState;         /// Callback function invoked to free private state when the pipeline is destroyed.
 };
 
 /// @summary Defines the data associated with a data buffer object.

@@ -995,7 +995,9 @@ cgDeletePipeline
     CG_CONTEXT  *ctx, 
     CG_PIPELINE *pipeline
 )
-{
+{   // clean up the internal pipeline state first:
+    pipeline->DestroyState((uintptr_t) ctx, (uintptr_t) pipeline, pipeline->PrivateState);
+    // then clean up the state common to all implementations:
     switch (pipeline->PipelineType)
     {
     case CG_PIPELINE_TYPE_COMPUTE:
@@ -5131,6 +5133,23 @@ cgCalculateImageAllocatedSize
     return align_up(allocated_size, image->SourceHeap->DeviceAlignment);
 }
 
+/// @summary Provides a default teardown callback for a pipeline that doesn't need to perform any cleanup.
+/// @param ctx A CGFX context returned by cgEnumerateDevices.
+/// @param pipeline A pointer to the CG_PIPELINE object.
+/// @param opaque The opaque state data supplied when the pipeline was created.
+internal_function void
+cgPipelineTeardownNoOp
+(
+    uintptr_t  ctx, 
+    uintptr_t  pipeline, 
+    void      *opaque
+)
+{
+    UNREFERENCED_PARAMETER(ctx);
+    UNREFERENCED_PARAMETER(pipeline);
+    UNREFERENCED_PARAMETER(opaque);
+}
+
 /// @summary Implements the DEVICE_FENCE command, inserting a fence in an in-order graphics queue or an out-of-order compute or transfer queue.
 /// The fence ensures that some or all of the commands inserted into the queue prior to the fence have completed before executing commands enqueued after the fence.
 /// @param ctx The CGFX context returned by cgEnumerateDevices.
@@ -8531,6 +8550,8 @@ cgCreateKernel
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group defining the devices the kernel may execute on.
 /// @param create Information about the pipeline configuration.
+/// @param opaque Opaque state internal to the pipeline implementation.
+/// @param teardown The callback function to invoke when the pipeline is destroyed.
 /// @param result On return, set to CG_SUCCESS, ...
 /// @return The handle of the compute pipeline, or CG_INVALID_HANDLE.
 library_function cg_handle_t
@@ -8539,6 +8560,8 @@ cgCreateComputePipeline
     uintptr_t                    context,
     cg_handle_t                  exec_group,
     cg_compute_pipeline_t const *create,
+    void                        *opaque,
+    cgPipelineTeardown_fn        teardown,
     int                         &result
 )
 {
@@ -8559,11 +8582,19 @@ cgCreateComputePipeline
         return CG_INVALID_HANDLE;
     }
 
+    // use the no-op teardown callback if none is supplied.
+    if (teardown == NULL)
+    {   // using the no-op prevents having to NULL-check.
+        teardown  = cgPipelineTeardownNoOp;
+    }
+
     // allocate resources for the compute pipeline description:
     CG_PIPELINE          pipe;
     CG_COMPUTE_PIPELINE &cp= pipe.Compute;
     memset(&pipe.Compute, 0, sizeof(CG_COMPUTE_PIPELINE));
     pipe.PipelineType   = CG_PIPELINE_TYPE_COMPUTE;
+    pipe.PrivateState   = opaque;
+    pipe.DestroyState   = teardown;
     cp.ComputeContext   = group->ComputeContext;
     cp.ComputeKernel    = NULL;
 
@@ -8645,6 +8676,8 @@ error_cleanup:
 /// @param context A CGFX context returned by cgEnumerateDevices.
 /// @param exec_group The handle of the execution group defining the rendering contexts.
 /// @param create Information about the pipeline configuration.
+/// @param opaque Opaque state internal to the pipeline implementation.
+/// @param teardown The callback function to invoke when the pipeline is destroyed.
 /// @param result On return, set to CG_SUCCESS, CG_UNSUPPORTED, ...
 /// @return The handle of the graphics pipeline, or CG_INVALID_HANDLE.
 library_function cg_handle_t
@@ -8653,6 +8686,8 @@ cgCreateGraphicsPipeline
     uintptr_t                     context,
     cg_handle_t                   exec_group,
     cg_graphics_pipeline_t const *create,
+    void                         *opaque, 
+    cgPipelineTeardown_fn         teardown,
     int                          &result
 )
 {
@@ -8695,12 +8730,20 @@ cgCreateGraphicsPipeline
         return CG_INVALID_HANDLE;
     }
 
+    // use the no-op teardown callback if none is supplied.
+    if (teardown == NULL)
+    {   // using the no-op prevents having to NULL-check.
+        teardown  = cgPipelineTeardownNoOp;
+    }
+
     // allocate resources for the graphics pipeline description:
     CG_DISPLAY      *display= group->AttachedDisplay;
     CG_PIPELINE         pipe;
     CG_GRAPHICS_PIPELINE &gp= pipe.Graphics;
     memset(&pipe.Graphics, 0, sizeof(CG_GRAPHICS_PIPELINE));
     pipe.PipelineType       = CG_PIPELINE_TYPE_GRAPHICS;
+    pipe.PrivateState       = opaque;
+    pipe.DestroyState       = teardown;
     gp.AttachedDisplay      = group->AttachedDisplay;
     gp.DeviceCount          = group->DeviceCount;
     gp.DeviceList           = group->DeviceList;

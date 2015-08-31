@@ -108,6 +108,7 @@ struct cg_vertex_attribute_t;
 ////////////////////////////*/
 typedef void*        (CG_API *cgMemoryAlloc_fn                 )(size_t, size_t, int, uintptr_t);
 typedef void         (CG_API *cgMemoryFree_fn                  )(void *, size_t, size_t, int, uintptr_t);
+typedef void         (CG_API *cgPipelineTeardown_fn            )(uintptr_t, uintptr_t, void *);
 typedef char const*  (CG_API *cgResultString_fn                )(int);
 typedef int          (CG_API *cgGetCpuInfo_fn                  )(cg_cpu_info_t *);
 typedef int          (CG_API *cgDefaultCpuPartition_fn         )(cg_cpu_partition_t *);
@@ -150,8 +151,8 @@ typedef int          (CG_API *cgDeviceFence_fn                 )(uintptr_t, cg_h
 typedef int          (CG_API *cgDeviceFenceWithWaitList_fn     )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t const *, cg_handle_t);
 typedef cg_handle_t  (CG_API *cgCreateVertexDataSource_fn      )(uintptr_t, cg_handle_t, size_t, cg_handle_t *, cg_handle_t, size_t const *, cg_vertex_attribute_t const **, int &);
 typedef cg_handle_t  (CG_API *cgCreateKernel_fn                )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
-typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, int &);
-typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, int &);
+typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, void *, cgPipelineTeardown_fn, int &);
+typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, void *, cgPipelineTeardown_fn, int &);
 typedef cg_handle_t  (CG_API *cgCreateDataBuffer_fn            )(uintptr_t, cg_handle_t, size_t, uint32_t, uint32_t, uint32_t, int, int, int &);
 typedef int          (CG_API *cgGetDataBufferInfo_fn           )(uintptr_t, cg_handle_t, int, void *, size_t, size_t *);
 typedef void*        (CG_API *cgMapDataBuffer_fn               )(uintptr_t, cg_handle_t, cg_handle_t, cg_handle_t, size_t, size_t, uint32_t, int);
@@ -1584,6 +1585,8 @@ cgCreateComputePipeline                             /// Create a new compute pip
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
     cg_compute_pipeline_t const  *create_info,      /// A description of the compute pipeline to create.
+    void                         *opaque_state,     /// Opaque state internal to the pipeline implementation.
+    cgPipelineTeardown_fn         teardown_func,    /// A callback to invoke when the pipeline is being disposed of.
     int                          &result            /// On return, set to CG_SUCCESS or another value.
 );
 
@@ -1593,6 +1596,8 @@ cgCreateGraphicsPipeline                            /// Create a new graphics pi
     uintptr_t                     context,          /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t                   exec_group,       /// The handle of the execution group that will execute the pipeline.
     cg_graphics_pipeline_t const *create_info,      /// A description of the graphics pipeline to create.
+    void                         *opaque_state,     /// Opaque state internal to the pipeline implementation.
+    cgPipelineTeardown_fn         teardown_func,    /// A callback to invoke when the pipeline is being disposed of.
     int                          &result            /// On return, set to CG_SUCCESS, CG_UNSUPPORTED or another value.
 );
 
