@@ -89,6 +89,7 @@ struct cg_depth_stencil_state_t;
 struct cg_image_sampler_t;
 struct cg_graphics_pipeline_t;
 struct cg_compute_pipeline_t;
+struct cg_vertex_attribute_t;
 
 /*/////////////////
 //   Constants   //
@@ -147,6 +148,7 @@ typedef cg_handle_t  (CG_API *cgCreateEvent_fn                 )(uintptr_t, cg_h
 typedef int          (CG_API *cgHostWaitForEvent_fn            )(uintptr_t, cg_handle_t);
 typedef int          (CG_API *cgDeviceFence_fn                 )(uintptr_t, cg_handle_t, cg_handle_t, cg_handle_t);
 typedef int          (CG_API *cgDeviceFenceWithWaitList_fn     )(uintptr_t, cg_handle_t, cg_handle_t, size_t, cg_handle_t const *, cg_handle_t);
+typedef cg_handle_t  (CG_API *cgCreateVertexDataSource_fn      )(uintptr_t, cg_handle_t, size_t, cg_handle_t *, cg_handle_t, size_t const *, cg_vertex_attribute_t const **, int &);
 typedef cg_handle_t  (CG_API *cgCreateKernel_fn                )(uintptr_t, cg_handle_t, cg_kernel_code_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateComputePipeline_fn       )(uintptr_t, cg_handle_t, cg_compute_pipeline_t const *, int &);
 typedef cg_handle_t  (CG_API *cgCreateGraphicsPipeline_fn      )(uintptr_t, cg_handle_t, cg_graphics_pipeline_t const *, int &);
@@ -1149,6 +1151,23 @@ struct cg_compute_dispatch_cmd_data_t :
     uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
 };
 
+/// @summary Defines the basic data passed with a graphics pipeline dispatch in a command buffer.
+struct cg_graphics_dispatch_cmd_base_t
+{
+    uint16_t                     PipelineId;           /// One of cg_graphics_pipeline_id_e specifying the pipeline type.
+    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
+    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
+    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when pipeline execution is complete, or CG_INVALID_HANDLE.
+    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
+};
+
+/// @summary Define the runtime data view of a graphics pipeline dispatch command in a command buffer.
+struct cg_graphics_dispatch_cmd_data_t :
+    public cg_graphics_dispatch_cmd_base_t
+{
+    uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
+};
+
 /// @summary Defines the basic data passed with a device fence command in a command buffer.
 struct cg_device_fence_cmd_base_t
 {
@@ -1210,23 +1229,6 @@ struct cg_copy_image_to_buffer_cmd_t
     size_t                       SourceOrigin[3];      /// The x-coordinate, y-coordinate and slice index on the source image.
     size_t                       Dimensions[3];        /// The width (in pixels), height (in pixels) and number of slices to copy.
     size_t                       TargetOffset;         /// The offset of the first byte to write in the target buffer.
-};
-
-/// @summary Defines the basic data passed with a pipeline flush command in a command buffer.
-struct cg_flush_pipeline_cmd_base_t
-{
-    uint16_t                     PipelineId;           /// One of cg_[compute|graphics]_pipeline_id_e specifying the pipeline type.
-    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
-    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
-    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when pipeline execution is complete, or CG_INVALID_HANDLE.
-    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
-};
-
-/// @summary Define the runtime data view of a pipeline flush command in a command buffer.
-struct cg_flush_pipeline_cmd_data_t :
-    public cg_flush_pipeline_cmd_base_t
-{
-    uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
 };
 
 /*/////////////////
