@@ -186,6 +186,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\..\src\cgfx_ext_win.cc" />
     <ClCompile Include="..\..\..\src\cgfx_kernel_compute.cc" />
+    <ClCompile Include="..\..\..\src\cgfx_kernel_graphics.cc" />
     <ClCompile Include="..\..\..\src\cgfx_w32.cc" />
     <ClCompile Include="..\..\..\src\cgfx_w32_private.cc" />
   </ItemGroup>
