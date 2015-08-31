@@ -30,9 +30,13 @@
 /*//////////////////
 //   Data Types   //
 //////////////////*/
-/// @summary Define the arguments for the Test01 graphics kernel. This kernel draws a triangle 
+/// @summary Define the arguments for the Test01 graphics kernel. This kernel draws an indexed triangle list.
+/// Each vertex is 16 bytes and comprised of three FLOAT32 components specifying x,y,z position, plus an RGBA 
+/// color value expressed as 4 UINT8 values (normalized.) Indices are 16-bit unsigned integer values.
 struct cg_graphics_pipeline_test01_t
 {
+    cg_handle_t VertexData;           /// The handle of the buffer containing the vertex data.
+    cg_handle_t IndexData;            /// The handle of the buffer containing the index data.
 };
 
 /*/////////////////
@@ -51,21 +55,16 @@ cgCreateGraphicsPipelineTest01        /// Compile the kernel(s) and generate the
 );
 
 int
-cgEnqueueComputeDispatchTest01        /// Enqueue a dispatch command for compute kernel Test01.
+cgDrawVertexColorTriangleList         /// Enqueue an explicit draw command for graphics pipeline Test01.
 (
     uintptr_t   context,              /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t cmd_buffer,           /// The handle of the command buffer to write to.
-    cg_handle_t pipeline,             /// The handle of the pipeline to execute, returned by cgCreateComputePipelineTest01.
-    cg_handle_t out_buffer,           /// The handle of the buffer to write to.
+    cg_handle_t pipeline,             /// The handle of the pipeline to execute, returned by cgCreateGraphicsPipelineTest01.
+    cg_handle_t vertex_buffer,        /// The handle of the buffer containing the vertex data.
+    cg_handle_t index_buffer,         /// The handle of the buffer containing the index data.
     cg_handle_t done_event,           /// The handle of the event to signal when the pipeline has finished executing.
     cg_handle_t wait_event            /// The handle of the event to wait on before executing the pipeline.
 );
-
-// problem: we need to insert pipeline-specific commands into the generic command stream.
-// for each pipeline, we need to have some function pointers.
-// the existing dispatch commands are basically flush commands.
-// pipelines may define their own custom commands.
-// aside from the transfer and synchronization commands, all commands are custom pipeline commands.
 
 #ifdef __cplusplus
 };     /* extern "C"  */

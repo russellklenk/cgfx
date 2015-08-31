@@ -30,8 +30,14 @@
 /*//////////////////
 //   Data Types   //
 //////////////////*/
+/// @summary Define the TEST01 compute pipeline command identifiers.
+enum cg_compute_pipeline_test01_command_id_e : uint16_t
+{
+    CG_COMPUTE_TEST01_CMD_DISPATCH     = 0,    /// Invoke the TEST01 kernel.
+};
+
 /// @summary Define the arguments for the Test01 compute kernel. This kernel simply writes the string 'Hello!\0' to an output buffer.
-struct cg_compute_pipeline_test01_t
+struct cg_compute_pipeline_test01_dispatch_t
 {
     cg_handle_t OutputBuffer;         /// The handle of the buffer to write to. The buffer must be at least 7 bytes.
 };
@@ -52,7 +58,7 @@ cgCreateComputePipelineTest01         /// Compile the kernel(s) and generate the
 );
 
 int
-cgEnqueueComputeDispatchTest01        /// Enqueue a dispatch command for compute kernel Test01.
+cgComputeDispatchTest01               /// Enqueue a dispatch command for compute kernel Test01.
 (
     uintptr_t   context,              /// A CGFX context returned by cgEnumerateDevices.
     cg_handle_t cmd_buffer,           /// The handle of the command buffer to write to.

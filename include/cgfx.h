@@ -1134,7 +1134,9 @@ struct cg_vertex_attribute_t
 struct cg_pipeline_cmd_base_t
 {
     uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id specifying the pipeline type.
+    uint16_t                     PipelineCmd;          /// The pipeline-specific command identifier.
     uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
+    uint16_t                     ReservedU16;          /// Reserved for pipeline use.
     cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
     cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when kernel execution is complete, or CG_INVALID_HANDLE.
     cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.

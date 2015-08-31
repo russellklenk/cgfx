@@ -39,18 +39,15 @@
 /// @param cmd The compute pipeline dispatch command data.
 /// @return CG_SUCCESS, CG_INVALID_VALUE, CG_COMPILE_FAILED, CG_BAD_CLCONTEXT, CG_OUT_OF_MEMORY, CG_ERROR or another result code.
 internal_function int
-cgExecuteComputeDispatchTest01
+cgExecuteComputeTest01Dispatch
 (
-    CG_CONTEXT    *ctx, 
-    CG_QUEUE      *queue, 
-    CG_CMD_BUFFER *cmdbuf,
-    CG_PIPELINE   *pipeline, 
-    cg_command_t  *cmd
+    CG_CONTEXT             *ctx, 
+    CG_QUEUE               *queue, 
+    CG_COMPUTE_PIPELINE    *pipeline, 
+    cg_pipeline_cmd_data_t *bdp
 )
-{   UNREFERENCED_PARAMETER(cmdbuf);
-    cg_pipeline_cmd_data_t         *bdp = (cg_pipeline_cmd_data_t      *) cmd->Data;
-    cg_compute_pipeline_test01_t   *ddp = (cg_compute_pipeline_test01_t*) bdp->ArgsData;
-    CG_COMPUTE_PIPELINE const       &cp =  pipeline->Compute;
+{
+    cg_compute_pipeline_test01_dispatch_t *ddp = (cg_compute_pipeline_test01_dispatch_t*) bdp->ArgsData;
     CG_BUFFER                   *output =  cgObjectTableGet(&ctx->BufferTable, ddp->OutputBuffer);
     int                          result =  CG_SUCCESS;
     size_t                     nmemrefs =  0;
@@ -66,8 +63,8 @@ cgExecuteComputeDispatchTest01
         size_t   gsz[1]  ={1};
         size_t   lsz[1]  ={1};
 
-        clSetKernelArg(cp.ComputeKernel, 0, sizeof(cl_mem), &output->ComputeBuffer);
-        if ((cl_res = clEnqueueNDRangeKernel(queue->CommandQueue, cp.ComputeKernel, dim, NULL, gsz, lsz, nwaitevt, CG_OPENCL_WAIT_LIST(nwaitevt, &acquire), &cl_done)) != CL_SUCCESS)
+        clSetKernelArg(pipeline->ComputeKernel, 0, sizeof(cl_mem),  &output->ComputeBuffer);
+        if ((cl_res = clEnqueueNDRangeKernel(queue->CommandQueue , pipeline->ComputeKernel, dim, NULL, gsz, lsz, nwaitevt, CG_OPENCL_WAIT_LIST(nwaitevt, &acquire), &cl_done)) != CL_SUCCESS)
         {   // the kernel could not be enqueued.
             switch (cl_res)
             {
@@ -92,6 +89,39 @@ cgExecuteComputeDispatchTest01
         return cgReleaseMemoryObjects(ctx, queue, memrefs, nmemrefs, &cl_done, 1, bdp->CompleteEvent);
     }
     else return result;
+}
+
+/// @summary Primary command dispatch function for the TEST01 compute pipeline.
+/// @param ctx The CGFX context defining the command queue.
+/// @param queue The CGFX compute command queue.
+/// @param cmdbuf The CGFX command buffer being submitted to the command queue.
+/// @param pipeline The CGFX pipeline object being executed.
+/// @param cmd The compute pipeline dispatch command data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_COMPILE_FAILED, CG_BAD_CLCONTEXT, CG_OUT_OF_MEMORY, CG_ERROR or another result code.
+internal_function int
+cgExecuteComputePipelineTest01
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf,
+    CG_PIPELINE   *pipeline, 
+    cg_command_t  *cmd
+)
+{
+    int                     res =  CG_SUCCESS;
+    cg_pipeline_cmd_data_t *bdp = (cg_pipeline_cmd_data_t*) cmd->Data;
+    CG_COMPUTE_PIPELINE     *cp = &pipeline->Compute;
+    switch (bdp->PipelineCmd)
+    {
+    case CG_COMPUTE_TEST01_CMD_DISPATCH:
+        res = cgExecuteComputeTest01Dispatch(ctx, queue, cp, bdp);
+        break;
+    default:
+        res = CG_COMMAND_NOT_IMPLEMENTED;
+        break;
+    }
+    UNREFERENCED_PARAMETER(cmdbuf);
+    return res;
 }
 
 /*////////////////////////
@@ -143,7 +173,7 @@ cgCreateComputePipelineTest01
         return CG_INVALID_HANDLE;
     }
 
-    cgSetComputePipelineCallback(CG_COMPUTE_PIPELINE_TEST01, cgExecuteComputeDispatchTest01);
+    cgSetComputePipelineCallback(CG_COMPUTE_PIPELINE_TEST01, cgExecuteComputePipelineTest01);
     return pipeline;
 }
 
@@ -156,7 +186,7 @@ cgCreateComputePipelineTest01
 /// @param wait_event The handle of the event to wait on before executing the kernel, or CG_INVALID_HANDLE.
 /// @return CG_SUCCESS or another result code.
 library_function int
-cgEnqueueComputeDispatchTest01
+cgComputeDispatchTest01
 (
     uintptr_t   context, 
     cg_handle_t cmd_buffer, 
@@ -168,16 +198,18 @@ cgEnqueueComputeDispatchTest01
 {
     int           result   = CG_SUCCESS;
     cg_command_t *cmd      = NULL;
-    size_t const  cmd_size = sizeof(cg_pipeline_cmd_base_t) + sizeof(cg_compute_pipeline_test01_t);
+    size_t const  cmd_size = sizeof(cg_pipeline_cmd_base_t) + sizeof(cg_compute_pipeline_test01_dispatch_t);
     if ((result = cgCommandBufferMapAppend(context, cmd_buffer, cmd_size, &cmd)) != CG_SUCCESS)
         return result;
 
-    cg_pipeline_cmd_data_t       *bdp = (cg_pipeline_cmd_data_t      *) cmd->Data;
-    cg_compute_pipeline_test01_t *ddp = (cg_compute_pipeline_test01_t*) bdp->ArgsData;
+    cg_pipeline_cmd_data_t                *bdp = (cg_pipeline_cmd_data_t               *) cmd->Data;
+    cg_compute_pipeline_test01_dispatch_t *ddp = (cg_compute_pipeline_test01_dispatch_t*) bdp->ArgsData;
     cmd->CommandId         = CG_COMMAND_PIPELINE_DISPATCH;
     cmd->DataSize          = uint16_t(cmd_size);
     bdp->PipelineId        = CG_COMPUTE_PIPELINE_TEST01;
-    bdp->ArgsDataSize      = sizeof(cg_compute_pipeline_test01_t);
+    bdp->PipelineCmd       = CG_COMPUTE_TEST01_CMD_DISPATCH;
+    bdp->ArgsDataSize      = sizeof(cg_compute_pipeline_test01_dispatch_t);
+    bdp->ReservedU16       = 0; // unused
     bdp->WaitEvent         = wait_event;
     bdp->CompleteEvent     = done_event;
     bdp->Pipeline          = pipeline;
