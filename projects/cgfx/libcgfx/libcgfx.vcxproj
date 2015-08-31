@@ -178,6 +178,7 @@
     <ClInclude Include="..\..\..\include\atomicfifo.h" />
     <ClInclude Include="..\..\..\include\cgfx_ext_win.h" />
     <ClInclude Include="..\..\..\include\cgfx_kernel_compute.h" />
+    <ClInclude Include="..\..\..\include\cgfx_kernel_graphics.h" />
     <ClInclude Include="..\..\..\include\cgfx_w32_private.h" />
     <ClInclude Include="..\..\..\include\intrinsics.h" />
     <ClInclude Include="..\..\..\include\cgfx.h" />
