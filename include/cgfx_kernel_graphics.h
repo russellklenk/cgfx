@@ -61,6 +61,12 @@ cgEnqueueComputeDispatchTest01        /// Enqueue a dispatch command for compute
     cg_handle_t wait_event            /// The handle of the event to wait on before executing the pipeline.
 );
 
+// problem: we need to insert pipeline-specific commands into the generic command stream.
+// for each pipeline, we need to have some function pointers.
+// the existing dispatch commands are basically flush commands.
+// pipelines may define their own custom commands.
+// aside from the transfer and synchronization commands, all commands are custom pipeline commands.
+
 #ifdef __cplusplus
 };     /* extern "C"  */
 #endif /* __cplusplus */

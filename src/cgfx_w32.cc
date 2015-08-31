@@ -72,13 +72,6 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #error   Need to define __ImageBase for your compiler in cgfx_w32.cc!
 #endif
 
-/// @summary A global table used for looking up a compute kernel dispatch function based on pipeline ID.
-global_variable cgComputeDispatch_fn 
-COMPUTE_DISPATCH_TABLE[CG_COMPUTE_PIPELINE_COUNT] = 
-{
-    NULL
-};
-
 /*///////////////////////
 //   Local Functions   //
 ///////////////////////*/
@@ -5312,35 +5305,62 @@ cgExecuteDeviceFence
     }
 }
 
-/// @summary Implements the COMPUTE_DISPATCH command, which sets up kernel arguments and executes a compute pipeline.
+/// @summary Implements the PIPELINE_DISPATCH command for a compute command queue.
 /// @param ctx The CGFX context returned by cgEnumerateDevices.
 /// @param queue The command queue into which the command is being inserted.
 /// @param cmdbuf The command buffer defining the command.
 /// @param cmd The command and any associated data.
 /// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS or CG_ERROR.
 internal_function int
-cgExecuteComputeDispatch
+cgExecuteComputePipelineDispatch
 (
     CG_CONTEXT    *ctx, 
     CG_QUEUE      *queue, 
     CG_CMD_BUFFER *cmdbuf, 
     cg_command_t  *cmd
 )
-{   UNREFERENCED_PARAMETER(cmdbuf);
-    cg_compute_dispatch_cmd_data_t *bdp = (cg_compute_dispatch_cmd_data_t*) cmd->Data;
-    if (bdp->PipelineId >= CG_COMPUTE_PIPELINE_COUNT || COMPUTE_DISPATCH_TABLE[bdp->PipelineId] == NULL)
+{
+    CG_PIPELINE         *pipeline =  NULL;
+    cg_pipeline_cmd_base_t *cdata = (cg_pipeline_cmd_base_t*) cmd->Data;
+    cgPipelineExecute_fn    cfunc =  cgGetComputePipelineCallback(cdata->PipelineId);
+    if (cfunc == NULL)
     {   // this pipeline hasn't been registered yet.
         return CG_INVALID_VALUE;
     }
-
-    cgComputeDispatch_fn dispatch = COMPUTE_DISPATCH_TABLE[bdp->PipelineId];
-    CG_PIPELINE         *pipeline = cgObjectTableGet(&ctx->PipelineTable, bdp->Pipeline);
-    if (pipeline == NULL)
-    {   // the ID is valid, but the pipeline object is not.
+    if ((pipeline = cgObjectTableGet(&ctx->PipelineTable, cdata->Pipeline)) == NULL)
+    {   // the pipeline ID is valid, but the pipeline state handle is not valid.
         return CG_INVALID_VALUE;
     }
+    return cfunc(ctx, queue, cmdbuf, pipeline, cmd);
+}
 
-    return dispatch(ctx, queue , pipeline, cmd);
+/// @summary Implements the PIPELINE_DISPATCH command for a graphics command queue.
+/// @param ctx The CGFX context returned by cgEnumerateDevices.
+/// @param queue The command queue into which the command is being inserted.
+/// @param cmdbuf The command buffer defining the command.
+/// @param cmd The command and any associated data.
+/// @return CG_SUCCESS, CG_INVALID_VALUE, CG_INVALID_STATE, CG_BAD_CLCONTEXT, CG_UNSUPPORTED, CG_OUT_OF_MEMORY, CG_OUT_OF_OBJECTS or CG_ERROR.
+internal_function int
+cgExecuteGraphicsPipelineDispatch
+(
+    CG_CONTEXT    *ctx, 
+    CG_QUEUE      *queue, 
+    CG_CMD_BUFFER *cmdbuf, 
+    cg_command_t  *cmd
+)
+{
+    CG_PIPELINE         *pipeline =  NULL;
+    cg_pipeline_cmd_base_t *cdata = (cg_pipeline_cmd_base_t*) cmd->Data;
+    cgPipelineExecute_fn    cfunc =  cgGetGraphicsPipelineCallback(cdata->PipelineId);
+    if (cfunc == NULL)
+    {   // this pipeline hasn't been registered yet.
+        return CG_INVALID_VALUE;
+    }
+    if ((pipeline = cgObjectTableGet(&ctx->PipelineTable, cdata->Pipeline)) == NULL)
+    {   // the pipeline ID is valid, but the pipeline state handle is not valid.
+        return CG_INVALID_VALUE;
+    }
+    return cfunc(ctx, queue, cmdbuf, pipeline, cmd);
 }
 
 /// @summary Implements the COPY_BUFFER command, which copies data from one buffer to another.
@@ -5664,9 +5684,6 @@ cgExecuteComputeCommandBuffer
     {
         switch (cmd->CommandId)
         {
-        case CG_COMMAND_COMPUTE_DISPATCH:
-            res = cgExecuteComputeDispatch(ctx, queue, cmdbuf, cmd);
-            break;
         case CG_COMMAND_DEVICE_FENCE:
             res = cgExecuteDeviceFence(ctx, queue, cmdbuf, cmd);
             break;
@@ -5681,6 +5698,9 @@ cgExecuteComputeCommandBuffer
             break;
         case CG_COMMAND_COPY_IMAGE_TO_BUFFER:
             res = cgExecuteCopyBufferToImage(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_PIPELINE_DISPATCH:
+            res = cgExecuteComputePipelineDispatch(ctx, queue, cmdbuf, cmd);
             break;
         default:
             res = CG_COMMAND_NOT_IMPLEMENTED;
@@ -5716,6 +5736,9 @@ cgExecuteGraphicsCommandBuffer
         {
         case CG_COMMAND_DEVICE_FENCE:
             res = cgExecuteDeviceFence(ctx, queue, cmdbuf, cmd);
+            break;
+        case CG_COMMAND_PIPELINE_DISPATCH:
+            res = cgExecuteGraphicsPipelineDispatch(ctx, queue, cmdbuf, cmd);
             break;
         default:
             res = CG_COMMAND_NOT_IMPLEMENTED;
@@ -11551,19 +11574,6 @@ cgMakeDx10HeaderDDS
     {
         dx10->Dimension = D3D11_RESOURCE_DIMENSION_TEXTURE2D;
     }
-}
-
-/// @summary Registers a compute pipeline dispatch function.
-/// @param pipeline_id One of cg_compute_pipeline_id.
-/// @param dispatch_func The callback function to invoke for kernel invocation.
-library_function void
-cgRegisterComputeDispatch
-(
-    uint16_t             pipeline_id, 
-    cgComputeDispatch_fn dispatch_func
-)
-{
-    COMPUTE_DISPATCH_TABLE[pipeline_id] = dispatch_func;
 }
 
 // A headless configuration is going to find CPUs first, including any GPUs in the share group.

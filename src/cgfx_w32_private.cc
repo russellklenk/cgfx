@@ -33,6 +33,19 @@
 /*///////////////
 //   Globals   //
 ///////////////*/
+/// @summary A global table used for looking up a compute pipeline command execution function based on pipeline ID.
+global_variable cgPipelineExecute_fn 
+COMPUTE_DISPATCH_TABLE[CG_COMPUTE_PIPELINE_COUNT]   = 
+{
+    NULL
+};
+
+/// @summary A global table used for looking up a graphics pipeline command execution function based on pipeline ID.
+global_variable cgPipelineExecute_fn
+GRAPHICS_DISPATCH_TABLE[CG_GRAPHICS_PIPELINE_COUNT] = 
+{
+    NULL
+};
 
 /*///////////////////////
 //   Local Functions   //
@@ -84,6 +97,64 @@ cgReleaseWaitList
 /*////////////////////////
 //   Public Functions   //
 ////////////////////////*/
+/// @summary Registers a compute pipeline command execution callback.
+/// @param pipeline_id One of cg_compute_pipeline_id_e identifying the pipeline type.
+/// @param execute_cmd The callback function to invoke for when a custom compute pipeline command is encountered.
+export_function void
+cgSetComputePipelineCallback
+(
+    uint16_t             pipeline_id, 
+    cgPipelineExecute_fn execute_cmd
+)
+{
+    COMPUTE_DISPATCH_TABLE[pipeline_id] = execute_cmd;
+}
+
+/// @summary Registers a graphics pipeline command execution callback.
+/// @param pipeline_id One of cg_graphics_pipeline_id_e identifying the pipeline type.
+/// @param execute_cmd The callback function to invoke for when a custom graphics pipeline command is encountered.
+export_function void
+cgSetGraphicsPipelineCallback
+(
+    uint16_t             pipeline_id, 
+    cgPipelineExecute_fn execute_cmd
+)
+{
+    GRAPHICS_DISPATCH_TABLE[pipeline_id] = execute_cmd;
+}
+
+/// @summary Retrieve the custom command execution callback for a compute pipeline.
+/// @param pipeline_id One of cg_compute_pipeline_id_e identifying the pipeline type.
+/// @return The corresponding command execution callback, or NULL.
+export_function cgPipelineExecute_fn
+cgGetComputePipelineCallback
+(
+    uint16_t pipeline_id
+)
+{
+    if (pipeline_id < CG_COMPUTE_PIPELINE_COUNT)
+    {   // this is a valid pipeline identifier, though the callback may still be NULL.
+        return COMPUTE_DISPATCH_TABLE[pipeline_id];
+    }
+    else return NULL;
+}
+
+/// @summary Retrieve the custom command execution callback for a graphics pipeline.
+/// @param pipeline_id One of cg_compute_pipeline_id_e identifying the pipeline type.
+/// @return The corresponding command execution callback, or NULL.
+export_function cgPipelineExecute_fn
+cgGetGraphicsPipelineCallback
+(
+    uint16_t pipeline_id
+)
+{
+    if (pipeline_id < CG_GRAPHICS_PIPELINE_COUNT)
+    {   // this is a valid pipeline identifier, though the callback may still be NULL.
+        return GRAPHICS_DISPATCH_TABLE[pipeline_id];
+    }
+    else return NULL;
+}
+
 /// @summary Retrieves the cl_event associated with a CGFX event object. The returned event object is intended to be used in an OpenCL event wait list.
 /// @param ctx A CGFX context returned by cgEnumerateDevices.
 /// @param queue The compute or transfer command queue to which the command is being subitted.

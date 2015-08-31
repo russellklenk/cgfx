@@ -239,7 +239,7 @@ struct CG_EXEC_GROUP;
 //  Function Pointer Types  //
 ////////////////////////////*/
 typedef int  (CG_API *cgCommandExecute_fn )(CG_CONTEXT *, CG_QUEUE *, CG_CMD_BUFFER *, cg_command_t *);
-typedef int  (CG_API *cgComputeDispatch_fn)(CG_CONTEXT *, CG_QUEUE *, CG_PIPELINE   *, cg_command_t *);
+typedef int  (CG_API *cgPipelineExecute_fn)(CG_CONTEXT *, CG_QUEUE *, CG_CMD_BUFFER *, CG_PIPELINE  *, cg_command_t *);
 
 /*//////////////////
 //   Data Types   //
@@ -1200,12 +1200,30 @@ cgCmdBufferCommandAt
 //   External Symbols   //
 ////////////////////////*/
 extern void 
-cgRegisterComputeDispatch                           /// Register a compute pipeline setup callback.
+cgSetComputePipelineCallback                        /// Register a compute pipeline command execution callback.
 (
-    uint16_t             pipeline_id,               /// One of cg_compute_pipeline_id_e specifying the compute pipeline identifier.
-    cgComputeDispatch_fn dispatch_func              /// The callback function to invoke to perform all kernel setup and enqueue execution.
+    uint16_t             pipeline_id,               /// One of cg_compute_pipeline_id_e specifying the pipeline identifier.
+    cgPipelineExecute_fn execute_cmd                /// The callback function to invoke when a pipeline-specific command is encountered.
 );
 
+extern void
+cgSetGraphicsPipelineCallback                       /// Register a graphics pipeline command execution callback.
+(
+    uint16_t             pipeline_id,               /// One of cg_graphics_pipeline_id_e specifying the pipeline identifier.
+    cgPipelineExecute_fn execute_cmd                /// The callback function to invoke when a pipeline-specific command is encountered.
+);
+
+extern cgPipelineExecute_fn
+cgGetComputePipelineCallback                        /// Retrieve the callback registered to execute a compute pipeline command.
+(
+    uint16_t             pipeline_id                /// One of cg_compute_pipeline_id_e specifying the pipeline identifier.
+);
+
+extern cgPipelineExecute_fn
+cgGetGraphicsPipelineCallback                       /// Retrieve the callback registered to execute a graphics pipeline command.
+(
+    uint16_t             pipeline_id                /// One of cg_graphics_pipeline_id_e specifying the pipeline identifier.
+);
 
 extern int
 cgGetWaitEvent                                      /// Retrieve an OpenCL event handle for a CGFX event or fence.

@@ -873,13 +873,12 @@ enum cg_graphics_pipeline_id_e : uint16_t
 /// @summary Define the recognized command buffer command identifiers.
 enum cg_command_id_e : uint16_t
 {
-    CG_COMMAND_COMPUTE_DISPATCH        =       0 ,     /// Dispatch a compute pipeline invocation.
     CG_COMMAND_DEVICE_FENCE            =       1 ,     /// Insert a fence in a command queue.
     CG_COMMAND_COPY_BUFFER             =       2 ,     /// Copy data from one buffer to another.
     CG_COMMAND_COPY_IMAGE              =       3 ,     /// Copy data from one image to another.
     CG_COMMAND_COPY_BUFFER_TO_IMAGE    =       4 ,     /// Copy data from a buffer into an image object.
     CG_COMMAND_COPY_IMAGE_TO_BUFFER    =       5 ,     /// Copy data from an image object into a buffer.
-    CG_COMMAND_FLUSH_PIPELINE          =       6 ,     /// Flush any buffered data for a pipeline object to the device.
+    CG_COMMAND_PIPELINE_DISPATCH       =       6 ,     /// Execute a pipeline-specific command.
 };
 
 /// @summary The equivalent of the DDS_PIXELFORMAT structure. See MSDN at:
@@ -1131,39 +1130,18 @@ struct cg_vertex_attribute_t
     bool                         Normalized;           /// If true, components are normalized to floats prior to access in the shader.
 };
 
-/// @summary Defines the basic data passed with a compute dispatch command in a command buffer.
-struct cg_compute_dispatch_cmd_base_t
+/// @summary Defines the basic data passed with a custom pipeline command in a command buffer.
+struct cg_pipeline_cmd_base_t
 {
     uint16_t                     PipelineId;           /// One of cg_compute_pipeline_id specifying the pipeline type.
     uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
     cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
     cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when kernel execution is complete, or CG_INVALID_HANDLE.
     cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
-    size_t                       WorkDimension;        /// The number of valid entries in LocalWorkSize and GlobalWorkSize.
-    size_t                       LocalWorkSize[3];     /// The size of each work group in each dimension.
-    size_t                       GlobalWorkSize[3];    /// The number of work items in each dimension.
 };
 
 /// @summary Define the runtime data view of a compute dispatch command in a command buffer.
-struct cg_compute_dispatch_cmd_data_t : 
-    public cg_compute_dispatch_cmd_base_t
-{
-    uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
-};
-
-/// @summary Defines the basic data passed with a graphics pipeline dispatch in a command buffer.
-struct cg_graphics_dispatch_cmd_base_t
-{
-    uint16_t                     PipelineId;           /// One of cg_graphics_pipeline_id_e specifying the pipeline type.
-    uint16_t                     ArgsDataSize;         /// The size of the internal argument data, in bytes.
-    cg_handle_t                  WaitEvent;            /// The handle of the event to wait on before submitting work to the device, or CG_INVALID_HANDLE.
-    cg_handle_t                  CompleteEvent;        /// The handle of the event to signal when pipeline execution is complete, or CG_INVALID_HANDLE.
-    cg_handle_t                  Pipeline;             /// The handle of the pipeline to execute.
-};
-
-/// @summary Define the runtime data view of a graphics pipeline dispatch command in a command buffer.
-struct cg_graphics_dispatch_cmd_data_t :
-    public cg_graphics_dispatch_cmd_base_t
+struct cg_pipeline_cmd_data_t : public cg_pipeline_cmd_base_t
 {
     uint8_t                      ArgsData[1];          /// Additional data specific to the pipeline.
 };
@@ -1177,8 +1155,7 @@ struct cg_device_fence_cmd_base_t
 };
 
 /// @summary Define the runtime data view of a device fence command in a command buffer.
-struct cg_device_fence_cmd_data_t : 
-    public cg_device_fence_cmd_base_t
+struct cg_device_fence_cmd_data_t : public cg_device_fence_cmd_base_t
 {
     cg_handle_t                  WaitList[1];          /// The set of handles of event objects that must become signaled before the fence can be passed.
 };
