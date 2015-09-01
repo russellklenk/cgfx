@@ -556,7 +556,7 @@ struct CG_GLSL_SAMPLER
 struct CG_GLSL_UNIFORM
 {
     GLenum                       DataType;             /// The data type, for example, GL_FLOAT.
-    GLenum                       Location;             /// The assigned location within the program.
+    GLint                        Location;             /// The assigned location within the program.
     size_t                       DataSize;             /// The size of the attribute data, in bytes.
     size_t                       DataOffset;           /// The byte offset of the attribute data.
     GLsizei                      Dimension;            /// The data dimension for array types.
@@ -1096,6 +1096,63 @@ cgMakeHandle
 )
 {
     return cgMakeHandle(table->Objects[object_index].ObjectId, table->ObjectType, table->TableIndex);
+}
+
+/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms, samplers and compute kernel arguments, allowing for more efficient look-up by name.
+/// @param name A NULL-terminated ASCII string identifier.
+/// @return A 32-bit unsigned integer hash of the name.
+internal_function inline uint32_t
+cgHashName
+(
+    char const *name
+)
+{
+    #define HAS_NULL_BYTE(x) (((x) - 0x01010101) & (~(x) & 0x80808080))
+    #define ROTL32(x, y)     _rotl((x), (y))
+
+    uint32_t hash = 0;
+    if (name != NULL)
+    {
+        // hash the majority of the data in 4-byte chunks.
+        while (!HAS_NULL_BYTE(*((uint32_t*)name)))
+        {
+            hash  = ROTL32(hash, 7) + name[0];
+            hash  = ROTL32(hash, 7) + name[1];
+            hash  = ROTL32(hash, 7) + name[2];
+            hash  = ROTL32(hash, 7) + name[3];
+            name += 4;
+        }
+        // hash the remaining 0-3 bytes.
+        while (*name) hash = ROTL32(hash, 7) + *name++;
+    }
+    #undef HAS_NULL_BYTE
+    #undef ROTL32
+    return hash;
+}
+
+/// @summary Search a fixed list of name hashes for a given item.
+/// @param name_str The NULL-terminated ASCII string to search for.
+/// @param name_list The list of string hash values to search.
+/// @param name_count The number of items in the name and value lists.
+/// @param value_list The list of values corresponding to the entries in the name list.
+/// @return A pointer to the named value, or NULL.
+template <typename T>
+internal_function inline T*
+cgFindItemByName
+(
+    char     const *name_str,
+    uint32_t const *name_list, 
+    size_t   const  name_count, 
+    T              *value_list
+)
+{
+    uint32_t const name = cgHashName(name_str);
+    for (size_t  i = 0; i < name_count; ++i)
+    {
+        if (name_list[i] == name)
+            return &value_list[i];
+    }
+    return NULL;
 }
 
 /// @summary Retrieves the current state of a command buffer.
