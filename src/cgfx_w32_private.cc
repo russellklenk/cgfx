@@ -387,6 +387,44 @@ cgSetupCompleteEventWithWaitList
     }
 }
 
+/// @summary Initialize an existing command completion event linked to a new fence inserted in the GPU command queue.
+/// @param ctx The CGFX context that created the event object.
+/// @param queue The command queue to which the command was submitted.
+/// @param display The display object linked to the OpenGL rendering context.
+/// @param complete_event The handle of the CGFX event object to initialize. Any existing event will be released.
+/// @param result The result code of the caller.
+/// @return The value @a result.
+export_function int
+cgSetupGraphicsCompleteEvent
+(
+    CG_CONTEXT *ctx, 
+    CG_QUEUE   *queue, 
+    CG_DISPLAY *display,
+    cg_handle_t complete_event, 
+    int         result
+)
+{
+    if (result != CG_SUCCESS)
+    {   // don't bother setting up the completion event - just return the result.
+        return result;
+    }
+    if (complete_event == CG_INVALID_HANDLE)
+    {   // no completion event is required - just return the result.
+        return result;
+    }
+    CG_EVENT *done = cgObjectTableGet(&ctx->EventTable, complete_event);
+    if (done == NULL)
+    {   // the supplied handle doesn't identify a valid event.
+        return result;
+    }
+    GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (fence == NULL)
+    {   // unable to create a new sync object.
+        return CG_BAD_GLCONTEXT;
+    }
+    return cgSetupExistingEvent(queue, done, NULL, fence, result);
+}
+
 /// @summary Create and initialize a new command completion event.
 /// @param ctx The CGFX context that created the event object.
 /// @param queue The command queue to which the command was submitted.

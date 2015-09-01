@@ -1272,6 +1272,16 @@ cgSetupCompleteEventWithWaitList                    /// Initializes an existing 
 );
 
 extern int
+cgSetupGraphicsCompleteEvent                        /// Insert a fence in the GPU command queue and link it to an existing completion event.
+(
+    CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
+    CG_QUEUE            *queue,                     /// The GPU command queue into which the command was inserted.
+    CG_DISPLAY          *display,                   /// The display object attached to the OpenGL rendering context.
+    cg_handle_t          complete_event,            /// The handle of the existing CGFX completion event, or CG_INVALID_HANDLE.
+    int                  result                     /// The CGFX result code to return.
+);
+
+extern int
 cgSetupNewCompleteEvent                             /// Creates a new CGFX event object to signal command completion. 
 (
     CG_CONTEXT          *ctx,                       /// The CGFX context that created the command queue.
