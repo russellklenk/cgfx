@@ -87,6 +87,7 @@
 #include "cgfx.h"
 #include "cgfx_ext_win.h"
 #include "cgfx_kernel_compute.h"
+#include "cgfx_kernel_graphics.h"
 
 /*/////////////////
 //   Constants   //
@@ -478,6 +479,22 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     {
         return 0;
     }
+
+    cg_handle_t vb = CG_INVALID_HANDLE;
+    cg_handle_t ib = CG_INVALID_HANDLE;
+    cg_handle_t vs = CG_INVALID_HANDLE;
+    cg_handle_t gp = CG_INVALID_HANDLE;
+    size_t                 attrib_counts[1] = { 2 };
+    cg_vertex_attribute_t  attrib_pos       = { 0, 0, CG_ATTRIBUTE_FORMAT_FLOAT32, 3,  0, false };
+    cg_vertex_attribute_t  attrib_clr       = { 0, 1, CG_ATTRIBUTE_FORMAT_UINT8  , 4, 12, true  };
+    cg_vertex_attribute_t  attrib_buf0[2]   = { attrib_pos, attrib_clr };
+    cg_vertex_attribute_t *attrib_data[1]   = { attrib_buf0 };
+
+    cgSetActiveDrawableEXT(Global_CGFX.Context , Global_CGFX.Drawable);
+    vb = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_OBJECT_KERNEL_GRAPHICS, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
+    ib = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(uint16_t)             * 6, CG_MEMORY_OBJECT_KERNEL_GRAPHICS, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
+    vs = cgCreateVertexDataSource(Global_CGFX.Context, Global_CGFX.ExecutionGroup, 1, &vb, ib, attrib_counts ,(cg_vertex_attribute_t const **) attrib_data, cgres);
+    gp = cgCreateGraphicsPipelineTest01(Global_CGFX.Context, Global_CGFX.ExecutionGroup, cgres);
 
     // query the monitor refresh rate and use that as our target frame rate.
     int monitor_refresh_hz =  60;

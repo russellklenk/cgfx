@@ -91,3 +91,7 @@ EXPORTS
     cgMakeDx10HeaderDDS            @89
     cgCreateComputePipelineTest01  @90
     cgComputeDispatchTest01        @91
+    cgCreateGraphicsPipelineTest01 @92
+    cgGraphicsTest01SetViewport    @93
+    cgGraphicsTest01SetProjection  @94
+    cgGraphicsTest01DrawTriangles  @95

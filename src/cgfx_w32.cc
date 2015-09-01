@@ -307,38 +307,6 @@ cgStrdup
     return mem;
 }
 
-/// @summary Given an ASCII string name, calculates a 32-bit hash value. This function is used for generating names for shader attributes, uniforms, samplers and compute kernel arguments, allowing for more efficient look-up by name.
-/// @param name A NULL-terminated ASCII string identifier.
-/// @return A 32-bit unsigned integer hash of the name.
-internal_function uint32_t
-cgHashName
-(
-    char const *name
-)
-{
-    #define HAS_NULL_BYTE(x) (((x) - 0x01010101) & (~(x) & 0x80808080))
-    #define ROTL32(x, y)     _rotl((x), (y))
-
-    uint32_t hash = 0;
-    if (name != NULL)
-    {
-        // hash the majority of the data in 4-byte chunks.
-        while (!HAS_NULL_BYTE(*((uint32_t*)name)))
-        {
-            hash  = ROTL32(hash, 7) + name[0];
-            hash  = ROTL32(hash, 7) + name[1];
-            hash  = ROTL32(hash, 7) + name[2];
-            hash  = ROTL32(hash, 7) + name[3];
-            name += 4;
-        }
-        // hash the remaining 0-3 bytes.
-        while (*name) hash = ROTL32(hash, 7) + *name++;
-    }
-    #undef HAS_NULL_BYTE
-    #undef ROTL32
-    return hash;
-}
-
 /// @summary Generates a little-endian FOURCC.
 /// @param a...d The four characters comprising the code.
 /// @return The packed four-cc value, in little-endian format.
@@ -8754,9 +8722,9 @@ cgCreateGraphicsPipeline
     // link all of the shaders into a program object.
     CG_GLSL_PROGRAM  &glsl  = gp.ShaderProgram;
     GLuint         program  = glCreateProgram();
-    GLuint              vs  = vs_kernel->GraphicsShader; // vertex shader object
-    GLuint              fs  = fs_kernel->GraphicsShader; // fragment shader object
-    GLuint              gs  = gs_kernel->GraphicsShader; // geometry shader object
+    GLuint              vs  = vs_kernel != NULL ? vs_kernel->GraphicsShader : 0; // vertex shader object
+    GLuint              fs  = fs_kernel != NULL ? fs_kernel->GraphicsShader : 0; // fragment shader object
+    GLuint              gs  = gs_kernel != NULL ? gs_kernel->GraphicsShader : 0; // geometry shader object
     GLint          linkres  = GL_FALSE;
     GLsizei       log_size  = 0;
     GLint            a_max  = 0; // length of longest active vertex attribute name
