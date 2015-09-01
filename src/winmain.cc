@@ -370,7 +370,7 @@ internal_function bool cgfx_setup(cgfx_state_t *cgfx)
     grp.DeviceList      = NULL; // don't explicitly include any other devices
     grp.ExtensionCount  = 0;    // we aren't configuring any optional extensions
     grp.ExtensionNames  = NULL; // we aren't configuring any optional extensions
-    grp.CreateFlags     = CG_EXECUTION_GROUP_CPUS | CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
+    grp.CreateFlags     = CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
     grp.ValidationLevel = 0;    // don't enable thorough validation
     if ((dg = cgCreateExecutionGroup(ctx, &grp, res)) == CG_INVALID_HANDLE)
     {   cgDestroyContext(ctx);
@@ -484,17 +484,68 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     cg_handle_t ib = CG_INVALID_HANDLE;
     cg_handle_t vs = CG_INVALID_HANDLE;
     cg_handle_t gp = CG_INVALID_HANDLE;
+    cg_handle_t cb = CG_INVALID_HANDLE;
     size_t                 attrib_counts[1] = { 2 };
     cg_vertex_attribute_t  attrib_pos       = { 0, 0, CG_ATTRIBUTE_FORMAT_FLOAT32, 3,  0, false };
     cg_vertex_attribute_t  attrib_clr       = { 0, 1, CG_ATTRIBUTE_FORMAT_UINT8  , 4, 12, true  };
     cg_vertex_attribute_t  attrib_buf0[2]   = { attrib_pos, attrib_clr };
     cg_vertex_attribute_t *attrib_data[1]   = { attrib_buf0 };
 
+    // @note
+    // cgSetActiveDrawableEXT is necessary to make the context current; otherwise, GL calls will fail.
+    // CG_MEMORY_OBJECT_KERNEL_COMPUTE must be specified or the buffers will not be mappable.
     cgSetActiveDrawableEXT(Global_CGFX.Context , Global_CGFX.Drawable);
-    vb = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_OBJECT_KERNEL_GRAPHICS, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
-    ib = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(uint16_t)             * 6, CG_MEMORY_OBJECT_KERNEL_GRAPHICS, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
+    vb = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_OBJECT_KERNEL_GRAPHICS | CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
+    ib = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(uint16_t)             * 6, CG_MEMORY_OBJECT_KERNEL_GRAPHICS | CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
     vs = cgCreateVertexDataSource(Global_CGFX.Context, Global_CGFX.ExecutionGroup, 1, &vb, ib, attrib_counts ,(cg_vertex_attribute_t const **) attrib_data, cgres);
     gp = cgCreateGraphicsPipelineTest01(Global_CGFX.Context, Global_CGFX.ExecutionGroup, cgres);
+    cb = cgCreateCommandBuffer(Global_CGFX.Context, CG_QUEUE_TYPE_GRAPHICS, cgres);
+
+    CG_GFX_TEST01_VERTEX *vtx = (CG_GFX_TEST01_VERTEX*) cgMapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, vb, CG_INVALID_HANDLE, 0, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_ACCESS_WRITE, cgres);
+    if (vtx != NULL)
+    {
+        vtx[0].Position[0] = 0.0f;
+        vtx[0].Position[1] = 0.0f;
+        vtx[0].Position[2] = 0.0f;
+        vtx[0].RGBA = 0xFF0000FF;
+
+        vtx[1].Position[0] = 800.0f;
+        vtx[1].Position[1] = 0.0f;
+        vtx[1].Position[2] = 0.0f;
+        vtx[1].RGBA = 0xFFFF00FF;
+
+        vtx[2].Position[0] = 800.0f;
+        vtx[2].Position[1] = 600.0f;
+        vtx[2].Position[2] = 0.0f;
+        vtx[2].RGBA = 0xFF00FFFF;
+
+        vtx[3].Position[0] = 0.0f;
+        vtx[3].Position[1] = 600.0f;
+        vtx[3].Position[2] = 0.0f;
+        vtx[3].RGBA = 0xFFFFFFFF;
+        cgUnmapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, vb, vtx, NULL);
+    }
+
+    uint16_t *idx = (uint16_t*) cgMapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, ib, CG_INVALID_HANDLE, 0, sizeof(uint16_t) * 6, CG_MEMORY_ACCESS_WRITE, cgres);
+    if (idx != NULL)
+    {
+        idx[0] = 0; idx[1] = 3; idx[2] = 2;
+        idx[3] = 0; idx[4] = 2; idx[5] = 1;
+        cgUnmapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, ib, idx, NULL);
+    }
+
+    float  dst16[16];
+    float  s_x = 1.0f / (800.0f  * 0.5f);
+    float  s_y = 1.0f / (600.0f  * 0.5f);
+    dst16[ 0]  = s_x ; dst16[ 1] = 0.0f; dst16[ 2] = 0.0f; dst16[ 3] = 0.0f;
+    dst16[ 4]  = 0.0f; dst16[ 5] = -s_y; dst16[ 6] = 0.0f; dst16[ 7] = 0.0f;
+    dst16[ 8]  = 0.0f; dst16[ 9] = 0.0f; dst16[10] = 1.0f; dst16[11] = 0.0f;
+    dst16[12]  =-1.0f; dst16[13] = 1.0f; dst16[14] = 0.0f; dst16[15] = 1.0f;
+    cgBeginCommandBuffer(Global_CGFX.Context, cb, 0);
+    cgGraphicsTest01SetViewport(Global_CGFX.Context, cb, gp, 0, 0, 800, 600, CG_INVALID_HANDLE, CG_INVALID_HANDLE);
+    cgGraphicsTest01SetProjection(Global_CGFX.Context, cb, gp, dst16, CG_INVALID_HANDLE, CG_INVALID_HANDLE);
+    cgGraphicsTest01DrawTriangles(Global_CGFX.Context, cb, gp, vs, 0, 5, 0, 2, CG_INVALID_HANDLE, CG_INVALID_HANDLE);
+    cgEndCommandBuffer(Global_CGFX.Context, cb);
 
     // query the monitor refresh rate and use that as our target frame rate.
     int monitor_refresh_hz =  60;
@@ -558,6 +609,9 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
         // now perform the actual presentation of the display buffer to the window.
         // this may take some non-negligible amount of time, as it involves processing
         // queued command buffers to construct the current frame.
+        cgSetActiveDrawableEXT(Global_CGFX.Context, Global_CGFX.Drawable);
+        cgExecuteCommandBuffer(Global_CGFX.Context, Global_CGFX.GraphicsQueue, cb);
+        cgPresentDrawableEXT(Global_CGFX.Drawable);
 
         // update timestamps to calculate the total presentation time.
         int64_t present_ticks = elapsed_ticks(flip_clock, ticktime());
