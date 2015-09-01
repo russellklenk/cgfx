@@ -6758,6 +6758,7 @@ cgCreateExecutionGroup
 
     // initialize the execution group object.
     CG_EXEC_GROUP group;
+    HDC           display_dc = NULL;
     if ((result = cgAllocExecutionGroup(ctx, &group, config->RootDevice, devices, device_count)) != CG_SUCCESS)
     {   // result has been set to the reason for the failure.
         cgFreeExecutionGroupDeviceList(ctx, devices, device_count);
@@ -6773,6 +6774,7 @@ cgCreateExecutionGroup
             {
                 group.RenderingContext = group.DeviceList[i]->DisplayRC;
                 group.AttachedDisplay  = group.DeviceList[i]->AttachedDisplays[0];
+                display_dc             = group.DeviceList[i]->AttachedDisplays[0]->DisplayDC;
                 break;
             }
         }
@@ -6787,15 +6789,40 @@ cgCreateExecutionGroup
     else
     {   // if not used for display output, only OpenCL kernels may be executed.
         group.RenderingContext = NULL;
+        display_dc             = NULL;
     }
 
-    // create a single context that's shared between all devices.
-    cl_context_properties props[] =
+    // create a single context that's shared between all devices. if OpenGL interop 
+    // is required, we have to create the context with different properties.
+    // NOTE(rlk): Intel OpenCL compatibility - 
+    // - it seems that you cannot have any CPU devices in your share group
+    // - it seems that you must make the GL context current on the thread
+    cl_context_properties *props = NULL;
+    cl_context_properties  props_glshare[] = 
+    {
+        (cl_context_properties) CL_CONTEXT_PLATFORM, 
+        (cl_context_properties) group.PlatformId, 
+        (cl_context_properties) CL_GL_CONTEXT_KHR, 
+        (cl_context_properties) group.RenderingContext, 
+        (cl_context_properties) CL_WGL_HDC_KHR, 
+        (cl_context_properties) display_dc, 
+        (cl_context_properties) 0
+    };
+    cl_context_properties  props_noshare[] =
     {
         (cl_context_properties) CL_CONTEXT_PLATFORM,
         (cl_context_properties) group.PlatformId,
         (cl_context_properties) 0
     };
+    if (group.RenderingContext != NULL)
+    {   // use the interop-capable context properties.
+        props = &props_glshare[0];
+        wglMakeCurrent(display_dc, group.RenderingContext);
+    }
+    else
+    {   // use the standard, non-interop context properties.
+        props = &props_noshare[0];
+    }
     cl_int     cl_error = CL_SUCCESS;
     cl_context cl_ctx   = clCreateContext(props, cl_uint(group.DeviceCount), group.DeviceIds, NULL, NULL, &cl_error);
     if (cl_ctx == NULL)
@@ -6941,6 +6968,12 @@ cgCreateExecutionGroup
         {   // there's no OpenGL available on this display, so no presentation queue.
             group.GraphicsQueues[i] = NULL;
         }
+    }
+
+    // if we created an interop-capable OpenCL context, deactivate the OpenGL context.
+    if (group.RenderingContext != NULL)
+    {
+        wglMakeCurrent(NULL, NULL);
     }
 
     // insert the execution group into the object table.
@@ -8278,6 +8311,7 @@ cgCreateVertexDataSource
             glBindBuffer(GL_ARRAY_BUFFER, attrib_source->GraphicsBuffer);
             buf = attrib_source->GraphicsBuffer;
         }
+        glEnableVertexAttribArray(regs[i]);
         glVertexAttribPointer
         (   regs   [i], 
             attribs[i].Dimension, 
