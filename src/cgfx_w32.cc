@@ -5170,7 +5170,7 @@ cgExecuteDeviceFence
                 return CG_INVALID_STATE;
             }
             if (GLEW_ARB_cl_event)
-            {
+            {   // create the OpenGL sync object and insert it into the command stream.
                 if ((sync = glCreateSyncFromCLeventARB(queue->ComputeContext, event->ComputeEvent, 0)) == NULL)
                 {
                     GLenum  glerr = glGetError();
@@ -5202,6 +5202,10 @@ cgExecuteDeviceFence
                 return CG_ERROR;
             }
         }
+        // insert a wait command to act as a barrier in the GPU command queue.
+        // issue a glFlush prior to the barrier to ensure that the sync object
+        // has been flushed to the GPU command queue by the driver.
+        glFlush();  glWaitSync(sync, 0, GL_TIMEOUT_IGNORED);
         fence->GraphicsFence = sync;
         return cgSetupCompleteEvent(ctx, queue, ddp->CompleteEvent, NULL, sync, CG_SUCCESS);
     }
