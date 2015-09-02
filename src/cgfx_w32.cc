@@ -8853,11 +8853,13 @@ cgCreateGraphicsPipeline
         glsl.SamplerNames   == NULL || glsl.Samplers   == NULL ||
         glsl.UniformNames   == NULL || glsl.Uniforms   == NULL)
     {   // unable to allocate the required memory.
+        cgFreeHostMemory(&ctx->HostAllocator, name_buf, name_max, 0, CG_ALLOCATION_TYPE_TEMP);
         glDeleteProgram(program);
         result = CG_OUT_OF_MEMORY;
         goto error_cleanup;
     }
     cgGlslReflectProgramMetadata(display, program, name_buf, name_max, false, &glsl);
+    cgFreeHostMemory(&ctx->HostAllocator, name_buf, name_max, 0, CG_ALLOCATION_TYPE_TEMP);
 
     // all data has been retrieved, so store the program reference.
     glsl.Program = program;
