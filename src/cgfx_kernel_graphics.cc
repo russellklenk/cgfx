@@ -159,26 +159,18 @@ cgExecuteGraphicsTest01DrawTriangles
     CG_DISPLAY *display = pipeline->AttachedDisplay;
     glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     glClearDepth(1.0f);
-    glDisable(GL_CULL_FACE);
-    glDisable(GL_DEPTH_TEST);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    int e0 = glGetError();
     glUseProgram(pipeline->ShaderProgram.Program);
-    int e1 = glGetError();
     glBindVertexArray(vds->VertexArray);
-    int e2 = glGetError();
     glViewport(
         GLint  (state->Viewport[0]), GLint  (state->Viewport[1]), 
         GLsizei(state->Viewport[2]), GLsizei(state->Viewport[3]));
-    int e3 = glGetError();
 
     // update uniform values.
     glUniformMatrix4fv(state->uMSS->Location, 1, GL_FALSE, state->MVP);
-    int e4 = glGetError();
 
     // submit the draw call to the GPU command queue.
     glDrawRangeElementsBaseVertex(GL_TRIANGLES, ddp->MinIndex, ddp->MaxIndex, ddp->PrimitiveCount * 3, GL_UNSIGNED_SHORT, (GLvoid*) 0, ddp->BaseVertex);
-    int e5 = glGetError();
     return CG_SUCCESS;
 }
 
