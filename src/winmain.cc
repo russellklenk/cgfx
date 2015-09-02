@@ -104,10 +104,13 @@ struct cgfx_state_t
     uintptr_t   Context;
     cg_handle_t Display;
     cg_handle_t DisplayDevice;
-    cg_handle_t ExecutionGroup;
-    cg_handle_t ComputeQueue;
-    cg_handle_t GraphicsQueue;
-    cg_handle_t TransferQueue;
+    cg_handle_t GPUGroup;
+    cg_handle_t GPUComputeQueue;
+    cg_handle_t GPUGraphicsQueue;
+    cg_handle_t GPUTransferQueue;
+    cg_handle_t CPUGroup;
+    cg_handle_t CPUComputeQueue;
+    cg_handle_t CPUTransferQueue;
     HWND        Window;
     HDC         Drawable;
 };
@@ -254,7 +257,14 @@ internal_function LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
     switch (uMsg)
     {
     case WM_DESTROY:
-        {	
+        {	// 
+            if (hWnd == Global_CGFX.Window && Global_CGFX.Drawable != NULL)
+            {   // deactivate the rendering context on the current thread.
+                cgSetActiveDrawableEXT(Global_CGFX.Context, NULL);
+                ReleaseDC(hWnd, Global_CGFX.Drawable);
+                Global_CGFX.Drawable = NULL;
+                Global_CGFX.Window   = NULL;
+            }
             // post the quit message with the application exit code.
 			// this will be picked up back in WinMain and cause the
 			// message pump and display update loop to terminate.
@@ -291,24 +301,28 @@ internal_function LRESULT CALLBACK MainWndProc(HWND hWnd, UINT uMsg, WPARAM wPar
 /// @return true if setup completed successfully.
 internal_function bool cgfx_setup(cgfx_state_t *cgfx)
 {
-    cg_application_info_t app = {};
-    cg_execution_group_t  grp = {};
-    cg_cpu_partition_t    cpd = {};
-    cg_cpu_info_t         cpu = {};
-    cg_handle_t            pd = CG_INVALID_HANDLE; // the primary display
-    cg_handle_t            dd = CG_INVALID_HANDLE; // the primary display device
-    cg_handle_t            dg = CG_INVALID_HANDLE; // the execution group including the primary display
-    uintptr_t             ctx = NULL;
-    size_t               ndev = 0;
-    HWND                  wnd = NULL;
-    HDC                    dc = NULL;
-    int                   res = CG_SUCCESS;
+    cg_application_info_t app             = {};
+    cg_execution_group_t  gpu_group_def   = {};
+    cg_execution_group_t  cpu_group_def   = {};
+    cg_cpu_partition_t    cpu_partition   = {};
+    cg_cpu_info_t         cpu_info        = {};
+    cg_handle_t           primary_display = CG_INVALID_HANDLE;
+    cg_handle_t           display_device  = CG_INVALID_HANDLE;
+    cg_handle_t           primary_cpu     = CG_INVALID_HANDLE;
+    cg_handle_t           gpu_group       = CG_INVALID_HANDLE;
+    cg_handle_t           cpu_group       = CG_INVALID_HANDLE;
+    uintptr_t             ctx             = NULL;
+    size_t                num_devices_all = 0;
+    size_t                num_devices_cpu = 0;
+    HWND                  wnd             = NULL;
+    HDC                   dc              = NULL;
+    int                   res             = CG_SUCCESS;
 
     // initialize the output state to invalid everything.
     memset(cgfx, 0, sizeof(cgfx_state_t));
 
     // retrieve a description of CPU resources on the local system.
-    if ((res = cgGetCpuInfo(&cpu)) != CG_SUCCESS)
+    if ((res = cgGetCpuInfo(&cpu_info)) != CG_SUCCESS)
     {
         OutputDebugString(_T("ERROR: Unable to retrieve CPU device information:\n  "));
         OutputDebugStringA(cgResultString(res));
@@ -326,21 +340,21 @@ internal_function bool cgfx_setup(cgfx_state_t *cgfx)
     // fill out information describing how the CPU should be partitioned.
     // we'll set it up for data-parallel operation, but with a single 
     // physical reserved for running all application logic.
-    cpd.PartitionType  =  CG_CPU_PARTITION_NONE;
-    cpd.ReserveThreads =  cpu.ThreadsPerCore;
-    cpd.PartitionCount =  0;
-    cpd.ThreadCounts   =  NULL;
+    cpu_partition.PartitionType  =  CG_CPU_PARTITION_NONE;
+    cpu_partition.ReserveThreads =  cpu_info.ThreadsPerCore;
+    cpu_partition.PartitionCount =  0;
+    cpu_partition.ThreadCounts   =  NULL;
 
     // ask CGFX to enumerate the devices in the system according to our preferences.
     // this returns a CGFX context that is used during resource creation.
-    if ((res = cgEnumerateDevices(&app, NULL, &cpd, ndev, NULL, 0, ctx)) != CG_SUCCESS)
+    if ((res = cgEnumerateDevices(&app, NULL, &cpu_partition, num_devices_all, NULL, 0, ctx)) != CG_SUCCESS)
     {
         OutputDebugString(_T("ERROR: Unable to enumerate CGFX devices:\n  "));
         OutputDebugStringA(cgResultString(res));
         OutputDebugString(_T("\n"));
         return false;
     }
-    if (ndev == 0)
+    if (num_devices_all == 0)
     {   cgDestroyContext(ctx);
         OutputDebugString(_T("ERROR: No CGFX-compatible devices found.\n"));
         return false;
@@ -348,36 +362,64 @@ internal_function bool cgfx_setup(cgfx_state_t *cgfx)
 
     // retrieve the default display and ensure there's a device attached.
     // the device will be a GPU device. use this device to create an 
-    // execution group, including all available CPU cores. the display 
+    // execution group, including all available GPUs. the display 
     // device becomes the root device of the execution group, which defines
-    // the share group. device resource can be shared amongst all devices 
+    // the share group. device resources can be shared amongst all devices 
     // in the share group, but cannot be accessed outside of the group 
     // without host intervention (the host must map and copy data manually.)
     // since we'll use the devices in this group for display purposes, the 
     // CG_EXECUTION_GROUP_DISPLAY_OUTPUT flag must be specified.
-    if ((pd = cgGetPrimaryDisplay(ctx)) == CG_INVALID_HANDLE)
+    if ((primary_display = cgGetPrimaryDisplay(ctx)) == CG_INVALID_HANDLE)
     {   cgDestroyContext(ctx);
         OutputDebugString(_T("ERROR: No display devices attached to the local system.\n"));
         return false;
     }
-    if ((dd = cgGetDisplayDevice(ctx, pd)) == CG_INVALID_HANDLE)
+    if ((display_device  = cgGetDisplayDevice(ctx, primary_display)) == CG_INVALID_HANDLE)
     {   cgDestroyContext(ctx);
         OutputDebugString(_T("ERROR: No CGFX-compatible device attached to the primary display.\n"));
         return false;
     }
-    grp.RootDevice      = dd;   // the GPU defines the share group
-    grp.DeviceCount     = 0;    // don't explicitly include any other devices
-    grp.DeviceList      = NULL; // don't explicitly include any other devices
-    grp.ExtensionCount  = 0;    // we aren't configuring any optional extensions
-    grp.ExtensionNames  = NULL; // we aren't configuring any optional extensions
-    grp.CreateFlags     = CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
-    grp.ValidationLevel = 0;    // don't enable thorough validation
-    if ((dg = cgCreateExecutionGroup(ctx, &grp, res)) == CG_INVALID_HANDLE)
+    gpu_group_def.RootDevice      = display_device;   // the GPU defines the share group
+    gpu_group_def.DeviceCount     = 0;    // don't explicitly include any other devices
+    gpu_group_def.DeviceList      = NULL; // don't explicitly include any other devices
+    gpu_group_def.ExtensionCount  = 0;    // we aren't configuring any optional extensions
+    gpu_group_def.ExtensionNames  = NULL; // we aren't configuring any optional extensions
+    gpu_group_def.CreateFlags     = CG_EXECUTION_GROUP_DISPLAY_OUTPUT;
+    gpu_group_def.ValidationLevel = 0;    // don't enable thorough validation
+    if ((gpu_group = cgCreateExecutionGroup(ctx, &gpu_group_def, res)) == CG_INVALID_HANDLE)
     {   cgDestroyContext(ctx);
-        OutputDebugString(_T("ERROR: Unable to create the default execution group:\n  "));
+        OutputDebugString(_T("ERROR: Unable to create the GPU execution group:\n  "));
         OutputDebugStringA(cgResultString(res));
         OutputDebugString(_T("\n"));
         return false;
+    }
+
+    // create a second execution group containing all of the available CPU devices.
+    // while it is possible for CPU and GPU devices to share resources in some cases 
+    // (such as Intel Integrated Graphics) this sharing doesn't seem to work if 
+    // the GPU device is used for display output. for consistency with discrete GPU 
+    // operation CPUs are maintained in a totally separate execution and share group.
+    // since we didn't partition the device during enumeration, there will only be 
+    // a single CPU device, if any, and thus a single set of queues. had we partitioned
+    // the CPU into multiple devices (one per NUMA node, or one per-core) there would
+    // be multiple devices, each with their own set of queues.
+    cgGetCPUDevices(ctx, num_devices_cpu, 1, &primary_cpu);
+    if (num_devices_cpu > 0)
+    {   // there's at least one OpenCL-capable CPU present. include all capable CPUs.
+        cpu_group_def.RootDevice      = primary_cpu;
+        cpu_group_def.DeviceCount     = 0;
+        cpu_group_def.DeviceList      = NULL;
+        cpu_group_def.ExtensionCount  = 0;
+        cpu_group_def.ExtensionNames  = NULL;
+        cpu_group_def.CreateFlags     = CG_EXECUTION_GROUP_CPUS;
+        cpu_group_def.ValidationLevel = 0;
+        if ((cpu_group = cgCreateExecutionGroup(ctx, &cpu_group_def, res)) == CG_INVALID_HANDLE)
+        {   cgDestroyContext(ctx);
+            OutputDebugString(_T("ERROR: Unable to create the CPU execution group:\n  "));
+            OutputDebugStringA(cgResultString(res));
+            OutputDebugString(_T("\n"));
+            return false;
+        }
     }
 
     // use the Win32 extension API to create and configure an OpenGL display window.
@@ -411,37 +453,48 @@ internal_function bool cgfx_setup(cgfx_state_t *cgfx)
             return CG_SUCCESS;
         }
     }
-    if ((wnd = cgMakeWindowOnDisplayEXT(ctx, pd, clsname, wndname, style, styleex, 0, 0, 800, 600, NULL, NULL, exeinst, NULL, NULL)) == NULL)
+    if ((wnd = cgMakeWindowOnDisplayEXT(ctx, primary_display, clsname, wndname, style, styleex, 0, 0, 800, 600, NULL, NULL, exeinst, NULL, NULL)) == NULL)
     {   cgDestroyContext(ctx);
         OutputDebugString(_T("ERROR: Unable to create window on primary display.\n"));
         return false;
     }
 
     // done with basic initialization:
-    cgfx->Context        = ctx;
-    cgfx->Display        =  pd;
-    cgfx->DisplayDevice  =  dd;
-    cgfx->ExecutionGroup =  dg;
-    cgfx->ComputeQueue   = cgGetQueueForDevice(ctx, dd, CG_QUEUE_TYPE_COMPUTE , res);
-    cgfx->GraphicsQueue  = cgGetQueueForDevice(ctx, dd, CG_QUEUE_TYPE_GRAPHICS, res);
-    cgfx->TransferQueue  = cgGetQueueForDevice(ctx, dd, CG_QUEUE_TYPE_TRANSFER, res);
-    cgfx->Window         = wnd;
-    cgfx->Drawable       = GetDC(wnd);
+    cgfx->Context          = ctx;
+    cgfx->Display          = primary_display;
+    cgfx->DisplayDevice    = display_device;
+    cgfx->GPUGroup         = gpu_group;
+    cgfx->GPUComputeQueue  = cgGetQueueForDevice(ctx, display_device, CG_QUEUE_TYPE_COMPUTE , res);
+    cgfx->GPUGraphicsQueue = cgGetQueueForDevice(ctx, display_device, CG_QUEUE_TYPE_GRAPHICS, res);
+    cgfx->GPUTransferQueue = cgGetQueueForDevice(ctx, display_device, CG_QUEUE_TYPE_TRANSFER, res);
+    cgfx->Window           = wnd;
+    cgfx->Drawable         = GetDC(wnd);
+    if (cpu_group != CG_INVALID_HANDLE)
+    {   // store the CPU execution group information.
+        cgfx->CPUGroup         = cpu_group;
+        cgfx->CPUComputeQueue  = cgGetQueueForDevice(ctx, primary_cpu, CG_QUEUE_TYPE_COMPUTE , res);
+        cgfx->CPUTransferQueue = cgGetQueueForDevice(ctx, primary_cpu, CG_QUEUE_TYPE_TRANSFER, res);
+    }
     return true;
 }
 
-// three of each (frame n-2, n-1, n)
-// always writing to frame n
-// interop buffer, write-only by compute and read-only by graphics
-// fence (graphics frame end)
-// fence (compute update end)
-// VAO (need to add support for this)
-// 
-// one of each total:
-// compute pipeline
-// graphics pipeline
-//
-// need support for graphics queue draw command
+/// @summary Clean up CGFX and display resources on application shutdown.
+/// @param cgfx The CGFX device state to delete.
+internal_function void cgfx_teardown(cgfx_state_t *cgfx)
+{   // destroy the window if it hasn't already happened via the WndProc.
+    if (cgfx->Window != NULL)
+    {   // deactivate the rendering context on the current thread first.
+        cgSetActiveDrawableEXT(cgfx->Context, NULL);
+        ReleaseDC(cgfx->Window, cgfx->Drawable);
+        DestroyWindow(cgfx->Window);
+        cgfx->Drawable = NULL;
+        cgfx->Window   = NULL;
+    }
+    // destroy the context itself, which frees all active resources.
+    cgDestroyContext(cgfx->Context);
+    // zero out all of the pointers and handles.
+    memset(cgfx, 0, sizeof(cgfx_state_t));
+}
 
 /*////////////////////////
 //   Public Functions   //
@@ -495,43 +548,46 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     // cgSetActiveDrawableEXT is necessary to make the context current; otherwise, GL calls will fail.
     // CG_MEMORY_OBJECT_KERNEL_COMPUTE must be specified or the buffers will not be mappable.
     cgSetActiveDrawableEXT(Global_CGFX.Context , Global_CGFX.Drawable);
-    vb = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_OBJECT_KERNEL_GRAPHICS | CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
-    ib = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.ExecutionGroup, sizeof(uint16_t)             * 6, CG_MEMORY_OBJECT_KERNEL_GRAPHICS | CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
-    vs = cgCreateVertexDataSource(Global_CGFX.Context, Global_CGFX.ExecutionGroup, 1, &vb, ib, attrib_counts ,(cg_vertex_attribute_t const **) attrib_data, cgres);
-    gp = cgCreateGraphicsPipelineTest01(Global_CGFX.Context, Global_CGFX.ExecutionGroup, cgres);
+    vb = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.GPUGroup, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_OBJECT_KERNEL_GRAPHICS | CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
+    ib = cgCreateDataBuffer(Global_CGFX.Context, Global_CGFX.GPUGroup, sizeof(uint16_t)             * 6, CG_MEMORY_OBJECT_KERNEL_GRAPHICS | CG_MEMORY_OBJECT_KERNEL_COMPUTE, CG_MEMORY_ACCESS_READ, CG_MEMORY_ACCESS_WRITE, CG_MEMORY_PLACEMENT_DEVICE, CG_MEMORY_UPDATE_ONCE, cgres);
+    vs = cgCreateVertexDataSource(Global_CGFX.Context, Global_CGFX.GPUGroup, 1, &vb, ib, attrib_counts ,(cg_vertex_attribute_t const **) attrib_data, cgres);
+    gp = cgCreateGraphicsPipelineTest01(Global_CGFX.Context, Global_CGFX.GPUGroup, cgres);
     cb = cgCreateCommandBuffer(Global_CGFX.Context, CG_QUEUE_TYPE_GRAPHICS, cgres);
 
-    CG_GFX_TEST01_VERTEX *vtx = (CG_GFX_TEST01_VERTEX*) cgMapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, vb, CG_INVALID_HANDLE, 0, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_ACCESS_WRITE, cgres);
+    // the data transfers are performed using OpenCL. the buffers are mapped to host-accessible memory
+    // and the host fills them. when they are unmapped, the DMA engine copies the data to device memory.
+    CG_GFX_TEST01_VERTEX *vtx = (CG_GFX_TEST01_VERTEX*) cgMapDataBuffer(Global_CGFX.Context, Global_CGFX.GPUTransferQueue, vb, CG_INVALID_HANDLE, 0, sizeof(CG_GFX_TEST01_VERTEX) * 4, CG_MEMORY_ACCESS_WRITE, cgres);
     if (vtx != NULL)
-    {
-        vtx[0].Position[0] = 0.0f;
-        vtx[0].Position[1] = 0.0f;
+    {   // the quad is positioned using screen coordinates, with origin at the center.
+        // draw a 100x100 quad positioned at the center of the screen.
+        vtx[0].Position[0] = 350.0f;
+        vtx[0].Position[1] = 250.0f;
         vtx[0].Position[2] = 0.0f;
         vtx[0].RGBA = 0xFF0000FF;
 
-        vtx[1].Position[0] = 800.0f;
-        vtx[1].Position[1] = 0.0f;
+        vtx[1].Position[0] = 450.0f;
+        vtx[1].Position[1] = 250.0f;
         vtx[1].Position[2] = 0.0f;
         vtx[1].RGBA = 0xFFFF00FF;
 
-        vtx[2].Position[0] = 800.0f;
-        vtx[2].Position[1] = 600.0f;
+        vtx[2].Position[0] = 450.0f;
+        vtx[2].Position[1] = 350.0f;
         vtx[2].Position[2] = 0.0f;
         vtx[2].RGBA = 0xFF00FFFF;
 
-        vtx[3].Position[0] = 0.0f;
-        vtx[3].Position[1] = 600.0f;
+        vtx[3].Position[0] = 350.0f;
+        vtx[3].Position[1] = 350.0f;
         vtx[3].Position[2] = 0.0f;
         vtx[3].RGBA = 0xFFFFFFFF;
-        cgUnmapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, vb, vtx, NULL);
+        cgUnmapDataBuffer(Global_CGFX.Context, Global_CGFX.GPUTransferQueue, vb, vtx, NULL);
     }
 
-    uint16_t *idx = (uint16_t*) cgMapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, ib, CG_INVALID_HANDLE, 0, sizeof(uint16_t) * 6, CG_MEMORY_ACCESS_WRITE, cgres);
+    uint16_t *idx = (uint16_t*) cgMapDataBuffer(Global_CGFX.Context, Global_CGFX.GPUTransferQueue, ib, CG_INVALID_HANDLE, 0, sizeof(uint16_t) * 6, CG_MEMORY_ACCESS_WRITE, cgres);
     if (idx != NULL)
-    {
+    {   // the quad is comprised of 2 triangles with counter-clockwise winding.
         idx[0] = 0; idx[1] = 3; idx[2] = 2;
         idx[3] = 0; idx[4] = 2; idx[5] = 1;
-        cgUnmapDataBuffer(Global_CGFX.Context, Global_CGFX.TransferQueue, ib, idx, NULL);
+        cgUnmapDataBuffer(Global_CGFX.Context, Global_CGFX.GPUTransferQueue, ib, idx, NULL);
     }
 
     float  dst16[16];
@@ -610,7 +666,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
         // this may take some non-negligible amount of time, as it involves processing
         // queued command buffers to construct the current frame.
         cgSetActiveDrawableEXT(Global_CGFX.Context, Global_CGFX.Drawable);
-        cgExecuteCommandBuffer(Global_CGFX.Context, Global_CGFX.GraphicsQueue, cb);
+        cgExecuteCommandBuffer(Global_CGFX.Context, Global_CGFX.GPUGraphicsQueue, cb);
         cgPresentDrawableEXT(Global_CGFX.Drawable);
 
         // update timestamps to calculate the total presentation time.
@@ -621,5 +677,6 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int 
     }
 
     // clean up application resources, and exit.
+    cgfx_teardown(&Global_CGFX);
     return result;
 }
